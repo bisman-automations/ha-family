@@ -78,6 +78,14 @@ On the **Parents** dashboard:
 
 To show it on a shared display, point the display's browser or kiosk app at `/family` on your Home Assistant. The display can be logged in as a user who isn't an admin: everyone can mark chores done and pick rewards, but only admins can check chores or change anything. The display can only use the home controls a parent put on the dashboard, nothing else.
 
+### As a shared screen's default dashboard
+
+Home Assistant only lets a login pick a dashboard as its default, and the Family page in the sidebar isn't one. So on the **Parents** dashboard, under **Family**, tap **Make a Family dashboard**. It makes a dashboard called **Family dashboard** that shows the Family page full screen. It's left out of the sidebar, since **Family** is already there.
+
+Then log in on the shared screen as its user, open your profile, and pick **Family dashboard** under **Dashboard**.
+
+You can also put the **Family** card (`custom:family-card`) on any dashboard yourself, for example in a panel view.
+
 ## The Parents dashboard
 
 - **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.

@@ -1,5 +1,6 @@
 <!doctype html>
-<!-- Fakes Home Assistant with a sample family, to look at the dashboards.
+<!-- Fakes Home Assistant with a sample family, to look at the dashboards
+     (and the Family card: mode=card).
      Serve the repo root over HTTP and open
      scripts/panel-preview/index.html?mode=family (or mode=parents). -->
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -82,6 +83,9 @@ window.hass = {
   connection: { subscribeMessage: async () => () => {} },
   callWS: async (msg) => {
     window.calls.push(msg);
+    if (msg.type === "lovelace/dashboards/list") return window.dashboards || [];
+    if (msg.type === "lovelace/dashboards/create") { (window.dashboards ||= []).push({ url_path: msg.url_path, title: msg.title }); return {}; }
+    if (msg.type === "lovelace/config/save") { window.savedDashboard = msg; return null; }
     const t = msg.type.replace("family/", "");
     if (t === "state") return state();
     if (t === "choices") return { people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]) };
@@ -109,8 +113,11 @@ window.hass = {
 </script>
 <script type="module">
   await import("../../custom_components/family/frontend/family-panel.js?v=" + Date.now());
-  const el = document.createElement("family-panel");
-  el.panel = { config: { mode: params.get("mode") || "family" } };
+  // ?mode=card: the Family card, as on a dashboard.
+  const card = params.get("mode") === "card";
+  const el = document.createElement(card ? "family-card" : "family-panel");
+  if (card) el.setConfig({});
+  else el.panel = { config: { mode: params.get("mode") || "family" } };
   el.narrow = window.innerWidth < 870;
   el.hass = window.hass;
   window.panel = el;

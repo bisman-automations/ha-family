@@ -397,6 +397,8 @@ async def test_dashboards_registered(hass: HomeAssistant):
             "homeassistant.components.panel_custom.async_register_panel", AsyncMock()
         ) as register,
         patch("homeassistant.components.frontend.async_remove_panel") as remove,
+        patch("homeassistant.components.frontend.add_extra_js_url") as add_card,
+        patch("homeassistant.components.frontend.remove_extra_js_url") as remove_card,
     ):
         entry = await _setup(hass)
         panels = {
@@ -405,7 +407,11 @@ async def test_dashboards_registered(hass: HomeAssistant):
         assert panels["family"]["require_admin"] is False
         assert panels["family"]["config"] == {"mode": "family"}
         assert panels["family-parents"]["require_admin"] is True
+        # The Family card, for a dashboard a login can have as its default.
+        card_url = add_card.call_args.args[1]
+        assert card_url.startswith("/family_static/family-panel.js?v=")
         assert await hass.config_entries.async_unload(entry.entry_id)
+        assert remove_card.call_args.args[1] == card_url
         assert {c.args[1] for c in remove.call_args_list} == {
             "family",
             "family-parents",
@@ -605,3 +611,41 @@ async def test_a_person_links_to_one_member(hass: HomeAssistant, client):
     assert res["error"]["message"] == "That person is already linked to Parent"
     # Saving the same member again keeps its own link.
     await client.ok("save", collection="members", item={**first, "emoji": "🦖"})
+
+
+async def test_family_dashboard_messages(hass: HomeAssistant, hass_ws_client):
+    """What the Parents dashboard sends to make the shared screen's dashboard."""
+    assert await async_setup_component(hass, "lovelace", {})
+    client = await hass_ws_client(hass)
+
+    async def ok(type_: str, **msg: Any) -> Any:
+        await client.send_json_auto_id({"type": type_, **msg})
+        res = await client.receive_json()
+        assert res["success"], res
+        return res["result"]
+
+    assert await ok("lovelace/dashboards/list") == []
+    await ok(
+        "lovelace/dashboards/create",
+        url_path="family-dashboard",
+        title="Family dashboard",
+        icon="mdi:home-heart",
+        mode="storage",
+        require_admin=False,
+        show_in_sidebar=False,
+    )
+    config = {
+        "title": "Family dashboard",
+        "views": [
+            {
+                "title": "Family",
+                "path": "family",
+                "type": "panel",
+                "cards": [{"type": "custom:family-card"}],
+            }
+        ],
+    }
+    await ok("lovelace/config/save", url_path="family-dashboard", config=config)
+    (dashboard,) = await ok("lovelace/dashboards/list")
+    assert dashboard["url_path"] == "family-dashboard"
+    assert await ok("lovelace/config", url_path="family-dashboard") == config

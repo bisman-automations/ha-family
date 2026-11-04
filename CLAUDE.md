@@ -19,6 +19,7 @@ changing anything.
   - `websocket.py`: the dashboards' API (`family/*`). Everyone: `state`, `subscribe`, `complete`, `redeem`, `undo`, `control`. Admins (`require_admin`): `review`, `given`, `adjust`, `save`, `delete`, `move`, `settings`, `choices`.
   - `panel.py` + `frontend/family-panel.js`: two sidebar panels from one plain web component (no build step): **Family** (`/family`, everyone, `config.mode = "family"`) and **Parents** (`/family-parents`, admins, `"parents"`). Registered only when the frontend is loaded.
   - `sensor.py`: a points sensor per member, added and removed as members change.
+  - The same script also defines `family-card` (the Family dashboard as a Lovelace card, no toolbar), loaded on every dashboard with `frontend.add_extra_js_url`: a login's default dashboard has to be a Lovelace dashboard, not a panel. The Parents dashboard's **Make a Family dashboard** sends `lovelace/dashboards/create` (`family-dashboard`, hidden from the sidebar) and `lovelace/config/save` (one panel view with the card); `test_family_dashboard_messages` checks those messages against Home Assistant.
 - `scripts/panel-preview/index.html`: fakes Home Assistant with a sample family to look at both dashboards (`?mode=family|parents`, `&theme=dark`). Its fake backend must answer like the real one.
 - `tests/`: pytest.
 

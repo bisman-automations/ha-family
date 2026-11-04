@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-04
+
+### Added
+
+- **Family as a shared screen's default dashboard.** Home Assistant only offers dashboards as a login's default, not sidebar pages like Family. On the **Parents** dashboard, under **Family**, **Make a Family dashboard** makes a dashboard that shows the Family page full screen. Then pick **Family dashboard** as the default dashboard in the shared screen login's profile.
+- **Family card.** The Family page as a card (`custom:family-card`), for any dashboard.
+
 ## [1.1.1] - 2026-11-04
 
 ### Fixed
@@ -32,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.2.0]: https://github.com/bisman-automations/ha-family/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/bisman-automations/ha-family/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/bisman-automations/ha-family/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bisman-automations/ha-family/releases/tag/v1.0.0

@@ -11,6 +11,9 @@
  */
 
 const DOMAIN = "family";
+// The dashboard the Parents dashboard makes for a shared screen's default.
+const DASHBOARD_PATH = "family-dashboard";
+const DASHBOARD_TITLE = "Family dashboard";
 
 const REPEATS = [
   { id: "daily", label: "Every day" },
@@ -284,8 +287,9 @@ class FamilyPanel extends HTMLElement {
   _build() {
     if (this._built) return;
     this._built = true;
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style>
-      <div class="toolbar"><div class="menu"></div><div class="title"></div></div>
+    // As a card, the dashboard around it has its own header.
+    const toolbar = this._card ? "" : `<div class="toolbar"><div class="menu"></div><div class="title"></div></div>`;
+    this.shadowRoot.innerHTML = `<style>${STYLES}</style>${toolbar}
       <main></main><div class="overlay"></div>`;
     this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
     this.shadowRoot.addEventListener("submit", (ev) => this._onSubmit(ev));
@@ -296,6 +300,7 @@ class FamilyPanel extends HTMLElement {
   _menu() {
     if (!this._built) return;
     const menu = this.shadowRoot.querySelector(".menu");
+    if (!menu) return;
     let button = menu.querySelector("ha-menu-button");
     if (!button) {
       button = document.createElement("ha-menu-button");
@@ -356,7 +361,8 @@ class FamilyPanel extends HTMLElement {
 
   _render() {
     if (!this._built) return;
-    this.shadowRoot.querySelector(".title").textContent = this._mode === "parents" ? "Parents" : "Family";
+    const title = this.shadowRoot.querySelector(".title");
+    if (title) title.textContent = this._mode === "parents" ? "Parents" : "Family";
     const main = this.shadowRoot.querySelector("main");
     if (!this._data) {
       main.innerHTML = this._error ? `<p class="error" role="alert">${esc(this._error)}</p>` : `<p class="empty">Loading…</p>`;
@@ -807,7 +813,42 @@ class FamilyPanel extends HTMLElement {
     const form = edit?.collection === "members" ? this._memberForm(edit.item) : `<button class="btn primary" data-new="members">Add a family member</button>`;
     return `<div class="card"><h2>Family</h2>
       <p class="muted">Link someone to their Home Assistant person to use its picture. If they log in to Home Assistant, the Family dashboard opens on their own page.</p>
-      ${rows}${form}</div>`;
+      ${rows}${form}</div>
+      <div class="card"><h2>Shared screen</h2>
+        <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>. You can also add the <b>Family</b> card to any dashboard yourself.</p>
+        <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>Make a Family dashboard</button></div>`;
+  }
+
+  async _makeDashboard() {
+    if (this._busy) return;
+    this._busy = true;
+    try {
+      const dashboards = await this._ws({ type: "lovelace/dashboards/list" });
+      if (dashboards.some((d) => d.url_path === DASHBOARD_PATH)) {
+        this._toast(`${DASHBOARD_TITLE} is already there.`);
+      } else {
+        await this._ws({
+          type: "lovelace/dashboards/create",
+          url_path: DASHBOARD_PATH,
+          title: DASHBOARD_TITLE,
+          icon: "mdi:home-heart",
+          mode: "storage",
+          require_admin: false,
+          // The Family page is in the sidebar already.
+          show_in_sidebar: false,
+        });
+        await this._ws({
+          type: "lovelace/config/save",
+          url_path: DASHBOARD_PATH,
+          config: { title: DASHBOARD_TITLE, views: [{ title: "Family", path: "family", type: "panel", cards: [{ type: "custom:family-card" }] }] },
+        });
+        this._toast(`Made ${DASHBOARD_TITLE}. Pick it as the shared screen's default dashboard.`);
+      }
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+    } finally {
+      this._busy = false;
+    }
   }
 
   _memberForm(item) {
@@ -846,6 +887,8 @@ class FamilyPanel extends HTMLElement {
     if (ds.member) {
       this._member = this._member === ds.member ? null : ds.member;
       this._render();
+    } else if ("makeDashboard" in ds) {
+      this._makeDashboard();
     } else if (ds.undo) {
       this._undo(ds.undo);
     } else if (ds.control) {
@@ -1021,3 +1064,43 @@ class FamilyPanel extends HTMLElement {
 }
 
 if (!customElements.get("family-panel")) customElements.define("family-panel", FamilyPanel);
+
+// The Family dashboard as a card, for a normal dashboard: those can be a
+// login's default dashboard (a shared screen's), and sidebar pages can't.
+class FamilyCard extends FamilyPanel {
+  constructor() {
+    super();
+    this._card = true;
+    this._panel = { config: { mode: "family" } };
+  }
+
+  get _mode() {
+    return "family";
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+  }
+
+  getCardSize() {
+    return 12;
+  }
+
+  getGridOptions() {
+    return { columns: "full", min_rows: 6 };
+  }
+
+  static getStubConfig() {
+    return {};
+  }
+}
+
+if (!customElements.get("family-card")) {
+  customElements.define("family-card", FamilyCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "family-card",
+    name: "Family",
+    description: "Chores, rewards and home controls for a shared screen.",
+  });
+}

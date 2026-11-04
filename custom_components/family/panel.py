@@ -21,6 +21,7 @@ FAMILY_PATH = "family"
 PARENTS_PATH = "family-parents"
 DATA_PANELS = f"{DOMAIN}_panels"
 DATA_STATIC = f"{DOMAIN}_static"
+DATA_CARD = f"{DOMAIN}_card"
 
 
 async def async_register_panels(hass: HomeAssistant) -> None:
@@ -59,6 +60,12 @@ async def async_register_panels(hass: HomeAssistant) -> None:
         require_admin=True,
         config={"mode": "parents"},
     )
+    # The Family card on any dashboard: a dashboard can be a login's default
+    # (a shared screen's), and a sidebar page can't.
+    from homeassistant.components import frontend  # noqa: PLC0415
+
+    frontend.add_extra_js_url(hass, module_url)
+    hass.data[DATA_CARD] = module_url
     hass.data[DATA_PANELS] = True
 
 
@@ -70,4 +77,6 @@ def async_remove_panels(hass: HomeAssistant) -> None:
 
     for path in (FAMILY_PATH, PARENTS_PATH):
         frontend.async_remove_panel(hass, path, warn_if_unknown=False)
+    if url := hass.data.pop(DATA_CARD, None):
+        frontend.remove_extra_js_url(hass, url)
     hass.data[DATA_PANELS] = False

@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Family",
+        "description": "Adds the Family dashboard for chores and rewards, and the Parents dashboard to manage them. You set up family members, chores and rewards on the Parents dashboard."
+      }
+    },
+    "abort": {
+      "already_configured": "Family is already set up.",
+      "single_instance_allowed": "Family is already set up."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "points": {
+        "name": "{member} points"
+      }
+    }
+  },
+  "services": {
+    "add_points": {
+      "name": "Add points",
+      "description": "Give a family member points, or take some away, for example from an automation.",
+      "fields": {
+        "member": {
+          "name": "Family member",
+          "description": "The family member's name as it's set up in Family."
+        },
+        "points": {
+          "name": "Points",
+          "description": "Points to add. Use a minus number to take points away."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "Shown in the family's history."
+        }
+      }
+    }
+  }
+}

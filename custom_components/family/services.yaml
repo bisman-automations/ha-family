@@ -1,0 +1,19 @@
+add_points:
+  fields:
+    member:
+      required: true
+      example: Alex
+      selector:
+        text:
+    points:
+      required: true
+      selector:
+        number:
+          min: -10000
+          max: 10000
+          mode: box
+    reason:
+      required: false
+      example: Helped with the groceries
+      selector:
+        text:

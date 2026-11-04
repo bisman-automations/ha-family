@@ -1,0 +1,163 @@
+# Family: notes for Claude and other coding agents
+
+Home Assistant custom integration (`family`), installed through the
+Marketplace or HACS. Family tools for the household; the first is chores and
+rewards. Kids mark chores done on a shared screen and get points straight
+away, parents check them later, and points buy rewards (TV time through
+[TV Mgmt](https://github.com/bisman-automations/ha-tv-mgmt), or anything a
+parent hands out). More family tools will be added to this integration, so
+keep new ones in their own modules and their own tabs. Read this before
+changing anything.
+
+## Layout
+
+- `custom_components/family/`: the integration.
+  - `__init__.py`: setup and unload; the `family.add_points` action is registered once in `async_setup`.
+  - `config_flow.py`: set up once (`single_config_entry`); nothing to fill in. Everything else is edited on the Parents dashboard.
+  - `model.py`: **pure (no Home Assistant imports)**: periods (daily, weekly, once), who has done a chore, balances, points in to-do item text. Tested in `tests/test_model.py`.
+  - `manager.py`: `FamilyManager` (`entry.runtime_data`): members, chores, rewards, chore to-do lists and the ledger in one Store (`family.data`); completing, checking, redeeming, adjusting; reading and ticking off to-do items; events.
+  - `websocket.py`: the dashboards' API (`family/*`). Everyone: `state`, `subscribe`, `complete`, `redeem`, `control`. Admins (`require_admin`): `review`, `given`, `adjust`, `save`, `delete`, `move`, `choices`.
+  - `panel.py` + `frontend/family-panel.js`: two sidebar panels from one plain web component (no build step): **Family** (`/family`, everyone, `config.mode = "family"`) and **Parents** (`/family-parents`, admins, `"parents"`). Registered only when the frontend is loaded.
+  - `sensor.py`: a points sensor per member, added and removed as members change.
+- `scripts/panel-preview/index.html`: fakes Home Assistant with a sample family to look at both dashboards (`?mode=family|parents`, `&theme=dark`). Its fake backend must answer like the real one.
+- `tests/`: pytest.
+
+## Checks
+
+The shared checks below. There are no Node tests and no mypy. For dashboard
+changes, run `node --check` on the script and look at the preview page in a
+browser (Playwright is available) at a landscape display size (1280x800), at
+phone width (390px), and in the dark theme.
+
+## Conventions
+
+- **Points are given straight away.** Completing a chore adds a ledger entry with `review: pending`. A parent approves it or marks it rejected (didn't happen); rejected entries don't count toward a balance and free the chore again. A to-do chore is ticked off its list when done and put back when rejected.
+- **Balances come from the ledger** (`model.balance`) plus `carried`: entries older than `KEEP_HISTORY_DAYS` are folded into `carried` when loading.
+- **Chore availability:** dashboard chores repeat daily, weekly (from Monday) or once. With no members picked, anyone can do it and it's done once per period; with members picked, each of them can do it once per period. To-do chores are available while the item is open; the list decides (`FamilyManager._done`).
+- **To-do item points:** `model.todo_points` reads `[5]`, `(5 points)` or `- 5 pts` at the end of an item; otherwise the list's points.
+- **TV time** calls `tv_mgmt.grant_extension` with `profile_id`, `minutes` and `whole_home` (TV Mgmt 1.20.0+) before the points are taken, so a failure costs nothing.
+- **The shared screen isn't an admin.** Anything that changes the setup, checks chores or changes points by hand must be `require_admin`. Completing chores, redeeming rewards and using home controls are open to everyone on purpose.
+- **Home controls** (`controls` in the Store): entities a parent puts on the Family dashboard. `model.control_kind` decides what a tap does (toggle, run, open, lock, media, or view only) and `model.control_service` maps an action to a service; anything else is refused. `family/control` only runs controls in the list, with the caller's context. The dashboard reads live state from `hass.states` and redraws just the Home tiles when one changes.
+- **Websocket fields:** never name a field `id`; it's the message's own id (`delete` uses `item_id`).
+- **Dashboard:** escape everything with `esc()`; use Home Assistant's theme variables; big touch targets on the Family dashboard.
+- **No personal details in the repo**: sample families use made-up names.
+
+## Open decisions
+
+- None.
+
+<!-- BEGIN bisman-automations shared rules -->
+<!-- This block is the same in every bisman-automations repo. Edit it in
+     bisman-automations/.github (templates/CLAUDE.shared.md) and copy it to
+     every repo; the Validate workflow's "standards" job checks it matches. -->
+
+## Shared rules (every bisman-automations repo)
+
+### Releases
+
+- The version lives in `custom_components/<domain>/manifest.json`. Anything
+  else that repeats it is called out in the repo-specific notes below and is
+  bumped in the same commit.
+- Versions follow [Semantic Versioning](https://semver.org): patch for fixes,
+  translations, docs and CI; minor for new features, options or entities;
+  major when something users rely on is removed or renamed (entities,
+  services, events, options) or setup has to be redone.
+- Check what is released before choosing a version:
+  `git ls-remote --tags origin | awk -F/ '{print $3}' | sort -V | tail -1`
+  (`sort -V`: plain sorting puts `v1.10.0` before `v1.9.0`). Never add
+  changes to a released version. If the manifest version has no tag yet,
+  add to its CHANGELOG section instead of bumping again.
+- Every push to `main` ships as a release. In that same commit, named
+  `Release X.Y.Z`, bump the manifest version and write the notes directly
+  under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md` (Keep a
+  Changelog: Added, Changed, Deprecated, Removed, Fixed, Security), with
+  that version's compare link at the bottom. There is no `## [Unreleased]`
+  section and no `[Unreleased]:` compare link. New work is not collected
+  under a holding heading and moved later; the release commit is where the
+  heading and the entries are written. The standards check fails if a
+  `## [Unreleased]` heading is present.
+- Ask Donavan before every push. Push fast-forward only: never force-push,
+  rebase or amend anything already pushed, or rewrite history in any other
+  way. Rewriting history orphans the release tags (it broke drafting in
+  ha-button-actions).
+- Pushing to `main` runs **Draft release**, which creates or refreshes a
+  draft `vX.Y.Z` with that version's CHANGELOG section as the notes, the
+  commits since the last release and `<domain>.zip`. **Donavan publishes
+  the draft himself**, and publishing creates the tag. Never create or push
+  tags, publish releases, or edit published releases.
+- Publishing runs **Release check**: the tag must match the manifest version
+  and the CHANGELOG, and be on `main`. If it fails, fix it with a new patch
+  release, not by moving the tag.
+
+### Commits
+
+- Author commits as `Donavan Becker <donavan.becker@icloud.com>` (set
+  `git config user.name` / `user.email` in the clone). HACS's
+  default-repository check needs the submitter to have a fair share of the
+  commits. Credit an AI assistant with a `Co-Authored-By:` trailer if you
+  like, never as the author.
+- Subject lines are plain, imperative and say what changed for the user
+  ("Show Pico remotes as unavailable when Lutron isn't running"). No
+  `fix:`/`feat:` prefixes. Release commits are "Release X.Y.Z".
+- Commit and push only when asked.
+
+### CI (shared workflows)
+
+- `.github/workflows/` holds four thin callers of the reusable workflows in
+  [bisman-automations/.github](https://github.com/bisman-automations/.github):
+  `test.yml` (lint, frontend, pytest on the oldest supported and the newest
+  Home Assistant, plus the upcoming one as information only), `validate.yml`
+  (hassfest, HACS, standards), `draft-release.yml` and `release-check.yml`.
+  Don't add jobs to the callers. Use the shared workflow's inputs, or change
+  the shared workflow so every repo gets the improvement.
+- `requirements_test.txt` leaves `pytest-homeassistant-custom-component`
+  unpinned (newest Home Assistant) and pins ruff (and mypy where used).
+  `requirements_test_min.txt` pins the harness release for the minimum in
+  `hacs.json`: the newest harness release of that month. CI fails if they
+  drift apart.
+- Raising the minimum Home Assistant means changing, together: `hacs.json`,
+  `requirements_test_min.txt`, `python-min` in `test.yml` (3.13 up to
+  2026.2, 3.14 from 2026.3), the README's Home Assistant badge, and a
+  CHANGELOG entry.
+- Home Assistant 2026.3 and newer need Python 3.14 (3.14.2+).
+- The published hassfest rejects `categories` in `manifest.json` and Pillow
+  in `requirements`. Leave both out.
+- Dependabot (`.github/dependabot.yml`) proposes action and pinned-tool
+  updates weekly. It ignores the test harness on purpose.
+- Test and Validate also run every Thursday, the day after Home Assistant's
+  betas come out. The **next** test job (newest pre-release harness) is
+  information only: when it fails, fix the cause before that release ships.
+
+### Before saying work is done
+
+Run from the repo root, in a Python 3.14 venv with `requirements_test.txt`
+installed:
+
+```
+ruff check .
+ruff format --check .
+pytest
+```
+
+Also run `node --test tests/*.mjs` when the repo has Node tests, mypy when
+the repo-specific notes list it, and the tests in a second venv with
+`requirements_test_min.txt` when a change could behave differently on the
+oldest supported Home Assistant. The standards check (also in CI) is
+`python <path to bisman-automations/.github>/scripts/check_repo.py .`.
+
+### Code and docs
+
+- Support every Home Assistant from the `hacs.json` minimum to the newest
+  release. Check for deprecations in the newest release and the beta.
+- Keep entity IDs, unique IDs, service names and event names stable. When
+  one has to change, migrate it and say so under Changed in the CHANGELOG.
+- `strings.json` and `translations/en.json` hold the same keys. Home
+  Assistant reads only `translations/`, so change both in the same commit.
+- Never put personal details in the repo (README, CHANGELOG, code, tests,
+  screenshots): no names, addresses, account or device identifiers, or real
+  entity IDs. Use placeholders such as `light.living_room`.
+- `README.md` is user documentation with the standard header (badges, HACS
+  and "add integration" My buttons) and sections Installation, Setup, ...,
+  Troubleshooting, Development, License. Use plain language and show names,
+  not entity IDs, wherever the UI does.
+<!-- END bisman-automations shared rules -->

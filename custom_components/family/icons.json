@@ -1,0 +1,14 @@
+{
+  "entity": {
+    "sensor": {
+      "points": {
+        "default": "mdi:star-circle"
+      }
+    }
+  },
+  "services": {
+    "add_points": {
+      "service": "mdi:star-plus"
+    }
+  }
+}

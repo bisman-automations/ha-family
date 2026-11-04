@@ -1,0 +1,15 @@
+{
+  "domain": "family",
+  "name": "Family",
+  "after_dependencies": ["frontend", "http", "panel_custom", "todo", "tv_mgmt"],
+  "codeowners": ["@donavanbecker"],
+  "config_flow": true,
+  "dependencies": ["websocket_api"],
+  "documentation": "https://github.com/bisman-automations/ha-family",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/bisman-automations/ha-family/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}

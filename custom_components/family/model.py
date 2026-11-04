@@ -8,7 +8,7 @@ what a member's balance is.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import re
 from typing import Any
 
@@ -21,6 +21,13 @@ REPEATS = (REPEAT_DAILY, REPEAT_WEEKLY, REPEAT_ONCE)
 KIND_CHORE = "chore"
 KIND_REWARD = "reward"
 KIND_ADJUST = "adjust"
+KIND_PENALTY = "penalty"  # extra points taken when a chore didn't happen
+KIND_BONUS = (
+    "bonus"  # all chores done today, or a streak; kept with the chore that earned it
+)
+
+BONUS_ALL_DONE = "all_done"
+BONUS_STREAK = "streak"
 
 # Chore review: points are given straight away; a parent then checks.
 REVIEW_PENDING = "pending"
@@ -295,3 +302,83 @@ def control_service(entity_id: str, action: str) -> tuple[str, str]:
     if action not in services:
         raise ValueError(f"{entity_id} can't do {action}")
     return domain, services[action]
+
+
+# ---- done today, streaks and bonuses -----------------------------------------------
+
+
+def entry_day(entry: dict[str, Any]) -> date:
+    return datetime.fromisoformat(entry["at"]).date()
+
+
+def chores_done_on(
+    entries: Iterable[dict[str, Any]], day: date, member_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Chores done that day (by one member, or anyone), except ones that
+    didn't happen."""
+    return [
+        e
+        for e in entries
+        if e.get("kind") == KIND_CHORE
+        and e.get("review") != REVIEW_REJECTED
+        and (member_id is None or e.get("member") == member_id)
+        and entry_day(e) == day
+    ]
+
+
+def streak(entries: Iterable[dict[str, Any]], member_id: str, today: date) -> int:
+    """Days in a row with at least one chore done, up to today.
+
+    A streak isn't broken yet if today has nothing so far: it counts back
+    from yesterday then.
+    """
+    days = {
+        entry_day(e)
+        for e in entries
+        if e.get("kind") == KIND_CHORE
+        and e.get("member") == member_id
+        and e.get("review") != REVIEW_REJECTED
+    }
+    day = today if today in days else today - timedelta(days=1)
+    count = 0
+    while day in days:
+        count += 1
+        day -= timedelta(days=1)
+    return count
+
+
+def bonus_given(
+    entries: Iterable[dict[str, Any]], member_id: str, kind: str, day: date
+) -> bool:
+    return any(
+        e.get("kind") == KIND_BONUS
+        and e.get("bonus") == kind
+        and e.get("member") == member_id
+        and e.get("review") != REVIEW_REJECTED
+        and entry_day(e) == day
+        for e in entries
+    )
+
+
+def penalty_points(
+    override: int | None, chore_penalty: int | None, default: int | None
+) -> int:
+    """Extra points taken when a chore didn't happen, on top of its own
+    points: what the parent typed when checking, else the chore's (or its
+    to-do list's), else the family's."""
+    for value in (override, chore_penalty, default):
+        if value is not None and value != "":
+            return max(0, min(int(value), MAX_POINTS))
+    return 0
+
+
+def optional_points(value: Any, label: str) -> int | None:
+    """Points, or None for "use the default" (an empty box)."""
+    if value is None or value == "":
+        return None
+    return clean_points(value, label)
+
+
+def streak_bonus_due(days_in_a_row: int, every: int) -> bool:
+    """A streak bonus every ``every`` days in a row (3, 6, 9… for 3)."""
+    return every > 0 and days_in_a_row > 0 and days_in_a_row % every == 0

@@ -614,7 +614,7 @@ async def test_chores_checked_automatically(
     await hass.async_block_till_done()
     state = await client.ok("state")
     assert state["to_check"] == []
-    assert state["settings"] == {"auto_check": "day"}
+    assert state["settings"] == {"auto_check": "day", "penalty": 0}
     assert state["history"][0]["auto"] is True
     assert events[0].data["automatic"] is True
 
@@ -687,3 +687,132 @@ async def test_family_dashboard_messages(hass: HomeAssistant, hass_ws_client):
     (dashboard,) = await ok("lovelace/dashboards/list")
     assert dashboard["url_path"] == "family-dashboard"
     assert await ok("lovelace/config", url_path="family-dashboard") == config
+
+
+async def test_bonus_for_all_chores_done(hass: HomeAssistant, client):
+    alex, _sam = await _family(client)
+    await client.ok("settings", bonus_all_done=5, auto_check="day")
+    # Only the bonus setting changed when sent alone.
+    await client.ok("settings", streak_days=0)
+    assert (await client.ok("state"))["settings"]["auto_check"] == "day"
+
+    own = []
+    for name in ("Make your bed", "Feed the cat"):
+        own.append(
+            (
+                await client.ok(
+                    "save",
+                    collection="chores",
+                    item={"name": name, "points": 2, "members": [alex]},
+                )
+            )["item"]
+        )
+    shared = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Sweep", "points": 1}
+        )
+    )["item"]
+    bonuses = []
+    hass.bus.async_listen("family_bonus_given", bonuses.append)
+
+    # A chore anyone can do doesn't count; their own chores do.
+    await client.ok("complete", member_id=alex, chore_id=shared["id"])
+    first = await client.ok("complete", member_id=alex, chore_id=own[0]["id"])
+    assert "bonuses" not in first["entry"]
+    last = await client.ok("complete", member_id=alex, chore_id=own[1]["id"])
+    assert [b["title"] for b in last["entry"]["bonuses"]] == ["All done today!"]
+    assert last["points"] == 1 + 2 + 2 + 5
+    await hass.async_block_till_done()
+    assert bonuses[0].data["points"] == 5
+
+    state = await client.ok("state")
+    assert state["bonus"] == {"all_done": 5, "streak_days": 0, "streak": 0}
+    assert state["members"][0]["done_today"] == 3
+    assert state["members"][0]["streak"] == 1
+    assert [e["title"] for e in state["done_today"]][0] == "Feed the cat"
+
+    # Undo takes the bonus back with the chore; doing it again earns it again.
+    await client.ok("undo", entry_id=last["entry"]["id"])
+    assert (await client.ok("state"))["members"][0]["points"] == 3
+    again = await client.ok("complete", member_id=alex, chore_id=own[1]["id"])
+    assert again["points"] == 10
+
+    # It didn't happen: the bonus goes too, and it's only once a day.
+    await client.ok("review", entry_id=again["entry"]["id"], approved=False)
+    assert (await client.ok("state"))["members"][0]["points"] == 3
+
+
+async def test_streak_bonus(hass: HomeAssistant, client):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    manager = entry.runtime_data
+    alex, _sam = await _family(client)
+    await client.ok("settings", streak_days=3, streak_bonus=10)
+    chore = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Make your bed", "points": 1}
+        )
+    )["item"]
+    # Done the two days before today.
+    for days in (2, 1):
+        manager.entries.append(
+            {
+                "id": f"old{days}",
+                "at": (dt_util.now() - timedelta(days=days)).isoformat(),
+                "kind": "chore",
+                "member": alex,
+                "title": "Make your bed",
+                "points": 1,
+                "chore_id": chore["id"],
+                "review": "approved",
+            }
+        )
+    assert (await client.ok("state"))["members"][0]["streak"] == 2
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    assert [b["title"] for b in done["entry"]["bonuses"]] == ["3 days in a row!"]
+    assert done["points"] == 3 + 10
+    assert (await client.ok("state"))["members"][0]["streak"] == 3
+
+
+async def test_penalty_when_a_chore_didnt_happen(hass: HomeAssistant, client):
+    alex, _sam = await _family(client)
+    await client.ok("settings", penalty=2)
+    plain = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Make your bed", "points": 5}
+        )
+    )["item"]
+    strict = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={"name": "Brush teeth", "points": 3, "penalty": 10},
+        )
+    )["item"]
+    assert plain["penalty"] is None
+    assert strict["penalty"] == 10
+    events = []
+    hass.bus.async_listen("family_chore_reviewed", events.append)
+
+    async def points() -> int:
+        return (await client.ok("state"))["members"][0]["points"]
+
+    # The family's penalty: the 5 points back, and 2 more.
+    done = await client.ok("complete", member_id=alex, chore_id=plain["id"])
+    await client.ok("review", entry_id=done["entry"]["id"], approved=False)
+    assert await points() == -2
+    # Done right after all: the penalty goes too.
+    await client.ok("review", entry_id=done["entry"]["id"], approved=True)
+    assert await points() == 5
+
+    # The chore's own penalty.
+    done = await client.ok("complete", member_id=alex, chore_id=strict["id"])
+    await client.ok("review", entry_id=done["entry"]["id"], approved=False)
+    assert await points() == 5 - 10
+    await hass.async_block_till_done()
+    assert events[-1].data["penalty"] == 10
+
+    # What the parent typed when checking wins, and replaces the earlier one.
+    await client.ok("review", entry_id=done["entry"]["id"], approved=False, penalty=0)
+    assert await points() == 5
+    state = await client.ok("state")
+    assert [e["kind"] for e in state["history"]].count("penalty") == 0

@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 from . import model
 from .const import (
     DOMAIN,
+    EVENT_BONUS,
     EVENT_CHORE_DONE,
     EVENT_CHORE_REVIEWED,
     EVENT_REWARD_REDEEMED,
@@ -198,6 +199,7 @@ class FamilyManager:
                         "list": list_name,
                         "todo_entity": entity_id,
                         "todo_uid": item["uid"],
+                        "penalty": todo.get("penalty"),
                     }
                 )
         return chores
@@ -249,10 +251,13 @@ class FamilyManager:
             "points": int(chore.get("points", 0)),
             "chore_id": chore_id,
             "review": model.REVIEW_PENDING,
+            # The chore's own penalty if it has one; None: the family's.
+            "penalty": chore.get("penalty"),
         }
         self.entries.append(entry)
         if chore.get("source") == "todo":
             await self._async_set_todo(chore["todo_entity"], chore["todo_uid"], True)
+        bonuses = self._earn_bonuses(member, entry)
         self._changed()
         self.hass.bus.async_fire(
             EVENT_CHORE_DONE,
@@ -264,16 +269,120 @@ class FamilyManager:
                 "balance": self.points(member_id),
             },
         )
+        for bonus in bonuses:
+            self.hass.bus.async_fire(
+                EVENT_BONUS,
+                {
+                    "member": member["name"],
+                    "member_id": member_id,
+                    "bonus": bonus["bonus"],
+                    "title": bonus["title"],
+                    "points": bonus["points"],
+                    "balance": self.points(member_id),
+                },
+            )
+        if bonuses:
+            entry = {**entry, "bonuses": bonuses}
         return entry
 
-    async def async_review(self, entry_id: str, approved: bool) -> dict[str, Any]:
-        """A parent checked a chore. Not done: its points are taken back."""
+    def _earn_bonuses(
+        self, member: dict[str, Any], entry: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Bonus points this chore earned: all of today's chores done, or a
+        streak. Kept with the chore, so undoing or rejecting it takes them back."""
+        member_id = member["id"]
+        today = dt_util.now().date()
+        found: list[tuple[str, str, int]] = []
+        all_done = int(self.settings.get("bonus_all_done") or 0)
+        if all_done and not model.bonus_given(
+            self.entries, member_id, model.BONUS_ALL_DONE, today
+        ):
+            # Only their own chores count (not ones anyone can do), and they
+            # need to have some.
+            own = [
+                c
+                for c in self.all_chores()
+                if c.get("enabled", True) and member_id in (c.get("members") or [])
+            ]
+            left = [
+                c
+                for c in self.chores_for(member_id)
+                if member_id in (c.get("members") or [])
+                and c["id"] != entry["chore_id"]
+            ]
+            if own and not left:
+                found.append((model.BONUS_ALL_DONE, "All done today!", all_done))
+        every = int(self.settings.get("streak_days") or 0)
+        streak_points = int(self.settings.get("streak_bonus") or 0)
+        if (
+            every
+            and streak_points
+            and not model.bonus_given(
+                self.entries, member_id, model.BONUS_STREAK, today
+            )
+        ):
+            days = model.streak(self.entries, member_id, today)
+            if model.streak_bonus_due(days, every):
+                found.append(
+                    (model.BONUS_STREAK, f"{days} days in a row!", streak_points)
+                )
+        bonuses = [
+            {
+                "id": _id(),
+                "at": _now_iso(),
+                "kind": model.KIND_BONUS,
+                "member": member_id,
+                "title": title,
+                "points": points,
+                "bonus": kind,
+                "for_entry": entry["id"],
+            }
+            for kind, title, points in found
+        ]
+        self.entries.extend(bonuses)
+        return bonuses
+
+    async def async_review(
+        self, entry_id: str, approved: bool, penalty: int | None = None
+    ) -> dict[str, Any]:
+        """A parent checked a chore. Not done: its points are taken back, and
+        a penalty on top (``penalty``, else the chore's, else the family's)."""
         entry = self._entry(entry_id)
         if entry.get("kind") != model.KIND_CHORE:
             raise FamilyError("Only chores are checked")
         entry.pop("auto", None)  # a parent checked it now
         entry["review"] = model.REVIEW_APPROVED if approved else model.REVIEW_REJECTED
         entry["reviewed_at"] = _now_iso()
+        # A bonus this chore earned goes (or comes back) with it.
+        for bonus in self.entries:
+            if bonus.get("for_entry") == entry_id and bonus["kind"] == model.KIND_BONUS:
+                if approved:
+                    bonus.pop("review", None)
+                else:
+                    bonus["review"] = model.REVIEW_REJECTED
+        # A penalty from an earlier check is replaced.
+        self.entries[:] = [
+            e
+            for e in self.entries
+            if not (e.get("for_entry") == entry_id and e["kind"] == model.KIND_PENALTY)
+        ]
+        taken = 0
+        if not approved:
+            taken = model.penalty_points(
+                penalty, entry.get("penalty"), self.settings.get("penalty")
+            )
+            if taken:
+                self.entries.append(
+                    {
+                        "id": _id(),
+                        "at": _now_iso(),
+                        "kind": model.KIND_PENALTY,
+                        "member": entry["member"],
+                        "title": entry["title"],
+                        "points": -taken,
+                        "for_entry": entry_id,
+                    }
+                )
         chore_id = entry.get("chore_id", "")
         if chore_id.startswith(TODO_PREFIX):
             # Didn't happen: put the to-do item back on the list.
@@ -289,6 +398,7 @@ class FamilyManager:
                 "chore": entry["title"],
                 "approved": approved,
                 "points": entry["points"],
+                "penalty": taken,
                 "balance": self.points(entry["member"]),
             },
         )
@@ -328,10 +438,25 @@ class FamilyManager:
 
     @callback
     def save_settings(self, raw: dict[str, Any]) -> dict[str, Any]:
-        auto = raw.get("auto_check") or None
-        if auto is not None and auto not in model.AUTO_CHECK:
-            raise FamilyError("Pick when chores are checked automatically")
-        self.settings["auto_check"] = auto
+        """Change the settings that were sent; the rest stay."""
+        if "auto_check" in raw:
+            auto = raw.get("auto_check") or None
+            if auto is not None and auto not in model.AUTO_CHECK:
+                raise FamilyError("Pick when chores are checked automatically")
+            self.settings["auto_check"] = auto
+        for key, label in (
+            ("bonus_all_done", "The all-done bonus"),
+            ("streak_bonus", "The streak bonus"),
+        ):
+            if key in raw:
+                self.settings[key] = model.clean_points(raw.get(key) or 0, label)
+        if "penalty" in raw:
+            self.settings["penalty"] = model.clean_points(
+                raw.get("penalty") or 0, "The penalty"
+            )
+        if "streak_days" in raw:
+            days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
+            self.settings["streak_days"] = min(days, 365)
         self._changed()
         self.async_auto_check()
         return dict(self.settings)
@@ -353,7 +478,9 @@ class FamilyManager:
         if chore_id.startswith(TODO_PREFIX):
             entity_id, _, uid = chore_id.removeprefix(TODO_PREFIX).rpartition(":")
             await self._async_set_todo(entity_id, uid, False)
-        self.entries.remove(entry)
+        self.entries[:] = [
+            e for e in self.entries if e is not entry and e.get("for_entry") != entry_id
+        ]
         self._changed()
 
     # ---- rewards --------------------------------------------------------------
@@ -525,6 +652,8 @@ class FamilyManager:
             "repeat": repeat,
             "enabled": bool(raw.get("enabled", True)),
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            # Extra points taken if it didn't happen; None: the family's.
+            "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }
         self._upsert(self.chores, chore)
         self._changed()
@@ -580,6 +709,7 @@ class FamilyManager:
             "points": model.clean_points(raw.get("points", 0)),
             "members": self._known_members(raw.get("members")),
             "item_points": rated,
+            "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }
         self._upsert(self.todo_lists, todo)
         self._watch_todo_lists()
@@ -756,10 +886,13 @@ class FamilyManager:
     # ---- what the dashboards show ------------------------------------------------------
 
     def snapshot(self, user_id: str | None, is_admin: bool) -> dict[str, Any]:
+        today = dt_util.now().date()
         members = [
             {
                 **m,
                 "points": self.points(m["id"]),
+                "streak": model.streak(self.entries, m["id"], today),
+                "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
                 "to_check": sum(
                     1
@@ -793,13 +926,26 @@ class FamilyManager:
             "chores": self.chores_for(None),
             "rewards": rewards,
             "controls": controls,
+            "done_today": sorted(
+                model.chores_done_on(self.entries, today),
+                key=lambda e: e["at"],
+                reverse=True,
+            ),
+            "bonus": {
+                "all_done": int(self.settings.get("bonus_all_done") or 0),
+                "streak_days": int(self.settings.get("streak_days") or 0),
+                "streak": int(self.settings.get("streak_bonus") or 0),
+            },
             "recent": recent,
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
             "undo_seconds": model.UNDO_SECONDS,
         }
         if is_admin:
-            result["settings"] = {"auto_check": self.settings.get("auto_check")}
+            result["settings"] = {
+                "auto_check": self.settings.get("auto_check"),
+                "penalty": int(self.settings.get("penalty") or 0),
+            }
             result["all_chores"] = self.chores
             result["todo_lists"] = [
                 {

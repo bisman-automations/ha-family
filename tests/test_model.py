@@ -153,3 +153,48 @@ def test_points_set_for_an_item():
         False,
     )
     assert model.todo_item_points("Sweep", 1, None) == ("Sweep", 1, False)
+
+
+def test_streaks_and_bonuses():
+    def chore(day, member="a", review="approved"):
+        return {
+            "kind": "chore",
+            "member": member,
+            "review": review,
+            "at": at(day).isoformat(),
+        }
+
+    entries = [
+        chore(1),
+        chore(2),
+        chore(3),
+        chore(3),
+        chore(2, "b"),
+        chore(4, review="rejected"),
+    ]
+    today = at(4).date()
+    # Nothing today yet: still a 3-day streak, counted to yesterday.
+    assert model.streak(entries, "a", today) == 3
+    assert model.streak([*entries, chore(4)], "a", today) == 4
+    assert model.streak(entries, "b", today) == 0
+    assert len(model.chores_done_on(entries, at(3).date())) == 2
+    assert model.chores_done_on(entries, today) == []
+
+    bonus = {"kind": "bonus", "bonus": "streak", "member": "a", "at": at(4).isoformat()}
+    assert model.bonus_given([bonus], "a", "streak", today)
+    assert not model.bonus_given(
+        [{**bonus, "review": "rejected"}], "a", "streak", today
+    )
+    assert not model.bonus_given([bonus], "a", "all_done", today)
+    assert model.streak_bonus_due(6, 3)
+    assert not model.streak_bonus_due(4, 3)
+    assert not model.streak_bonus_due(3, 0)
+
+
+def test_penalties():
+    assert model.penalty_points(None, None, None) == 0
+    assert model.penalty_points(None, None, 2) == 2
+    assert model.penalty_points(None, 10, 2) == 10
+    assert model.penalty_points(0, 10, 2) == 0
+    assert model.optional_points("", "Penalty") is None
+    assert model.optional_points("4", "Penalty") == 4

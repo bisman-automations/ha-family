@@ -44,6 +44,9 @@ phone width (390px), and in the dark theme.
 - **Home controls** (`controls` in the Store): entities a parent puts on the Family dashboard. `model.control_kind` decides what a tap does (toggle, run, open, lock, media, or view only) and `model.control_service` maps an action to a service; anything else is refused. `family/control` only runs controls in the list, with the caller's context. The dashboard reads live state from `hass.states` and redraws just the Home tiles when one changes.
 - **Websocket fields:** never name a field `id`; it's the message's own id (`delete` uses `item_id`).
 - **Dashboard:** escape everything with `esc()`; use Home Assistant's theme variables; big touch targets on the Family dashboard.
+- **Bonuses and penalties** are ledger entries (`kind` `bonus` / `penalty`) with `for_entry`, the chore entry they belong to. Undo removes them with the chore; **Didn't happen** marks bonuses rejected and adds a penalty (`model.penalty_points`: the parent's number, else the chore's or list's `penalty` stored on the chore entry, else `settings.penalty`); **Done right** after that restores bonuses and removes the penalty. All-done counts only chores with the member picked; streaks are days with a chore not rejected (`model.streak`). `family/settings` changes only the keys sent.
+- **Shared screen:** the Family dashboard goes back to `me` (or everyone) after `IDLE_MS` without a tap; tiles on someone's own page hide their own name/picture.
+- **Family dashboard sections** (`_section`, `_fit`): each `[data-fit]` box shows its first row (the grid's column count, read from `gridTemplateColumns`; 3 for Lately), all, or is closed; the choice is per screen in `localStorage` (`family-sections`). `_fit` runs after every render, after Home tiles redraw, and on resize.
 - **No personal details in the repo**: sample families use made-up names.
 
 ## Open decisions

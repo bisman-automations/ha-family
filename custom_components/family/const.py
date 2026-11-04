@@ -14,6 +14,7 @@ SIGNAL_CHANGED = f"{DOMAIN}_changed"
 EVENT_CHORE_DONE = "family_chore_done"
 EVENT_CHORE_REVIEWED = "family_chore_reviewed"
 EVENT_REWARD_REDEEMED = "family_reward_redeemed"
+EVENT_BONUS = "family_bonus_given"
 
 # Actions
 SERVICE_ADD_POINTS = "add_points"

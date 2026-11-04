@@ -76,6 +76,14 @@ On the **Parents** dashboard:
 - **Home.** The scenes, lights and other things a parent added. Tap one to use it: a scene or script starts, a light or switch turns on or off, blinds open or close, a lock locks or unlocks, and a speaker plays or pauses. Anything that asks first shows "Are you sure?". Sensors, thermostats and the weather are only shown. Each tile shows what it's doing now.
 - **Lately.** What was done and spent recently.
 
+- **Done today.** What's finished today, ticked off.
+- **Streaks.** 🔥 and the number of days in a row someone has done at least one chore.
+- A reward someone can't afford yet shows how far they are ("15 of 25").
+
+After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page.
+
+Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open.
+
 To show it on a shared display, point the display's browser or kiosk app at `/family` on your Home Assistant. The display can be logged in as a user who isn't an admin: everyone can mark chores done and pick rewards, but only admins can check chores or change anything. The display can only use the home controls a parent put on the dashboard, nothing else.
 
 ### As a shared screen's default dashboard
@@ -93,6 +101,8 @@ You can also put the **Family** card (`custom:family-card`) on any dashboard you
 - **Chores from to-do lists.** Every open item on these lists is a chore, worth the list's points. Put the points at the end of an item to change them: `Feed the dog [5]`, `Feed the dog (5 points)` or `Feed the dog - 5 pts`. When it's marked done, the item is ticked off its list, so a repeating reminder comes back when its list brings it back. To give single items their own points without changing their text, tap **Points for items** next to the list: each open item has its own box, and an empty box uses the list's points (or the points written in the item). Points are kept by the item's name, so a repeating item keeps its points when it comes back.
 - **Rewards.** Add what points can buy: **TV time** (pick the TV and the minutes, and optionally give the whole home the same time) or **Something else** for a parent to hand out. **How often** limits each person to once a day or once a week, so all the points don't go on TV in one afternoon.
 - **Home.** Pick what shows under **Home** on the Family dashboard, and in what order. Search for a scene, script, button, light, switch, fan, blind, valve, lock, speaker or TV, or for a sensor, thermostat or weather to show. Give it a different name or an emoji if you like, choose who sees it (nobody ticked means everyone), and tick **Ask "Are you sure?" first** for locks and doors. Anyone at the Family dashboard can use what's here, so only add what the kids may use.
+- **Bonus points** (under **Rewards**). Extra points when someone finishes all of their own chores for the day (chores anyone can do don't count), and every so many days in a row, for example 10 points every 7 days. A bonus goes away if its chore is undone or marked **Didn't happen**.
+- **Penalties.** **Didn't happen** always takes a chore's points back. To take more, set **When a chore didn't happen, also take away** under **To check** for the whole family, or a **Penalty if it didn't happen** on a chore or to-do list. The box next to **Didn't happen** shows the penalty that will be taken; type a number to change it just this time. Marking it **Done right** later gives everything back.
 - **Family.** Add, edit or remove family members, and add or take away points by hand, with a reason.
 - **History.** Everything done and spent. A chore found not done later can still be marked **Didn't happen** here.
 
@@ -123,7 +133,8 @@ For automations, for example to send a message or play a sound:
 | Event | When | Data |
 | --- | --- | --- |
 | `family_chore_done` | A chore is marked done. | `member`, `member_id`, `chore`, `points`, `balance` |
-| `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `balance` |
+| `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `penalty` (extra points taken), `balance` |
+| `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
 | `family_reward_redeemed` | Points were spent on a reward. | `member`, `member_id`, `reward`, `points`, `balance` |
 
 ## Troubleshooting

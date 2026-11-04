@@ -169,13 +169,21 @@ async def ws_undo(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("type"): f"{DOMAIN}/review",
         vol.Required("entry_id"): str,
         vol.Required("approved"): bool,
+        # Points taken on top when it didn't happen; leave out for the default.
+        vol.Optional("penalty"): vol.Any(
+            None, vol.All(int, vol.Range(min=0, max=10000))
+        ),
     }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
 @_handler
 async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
-    return {"entry": await manager.async_review(msg["entry_id"], msg["approved"])}
+    return {
+        "entry": await manager.async_review(
+            msg["entry_id"], msg["approved"], msg.get("penalty")
+        )
+    }
 
 
 @websocket_api.websocket_command(
@@ -266,6 +274,10 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
     {
         vol.Required("type"): f"{DOMAIN}/settings",
         vol.Optional("auto_check"): vol.Any(None, str),
+        vol.Optional("bonus_all_done"): vol.Any(None, int),
+        vol.Optional("streak_days"): vol.Any(None, int),
+        vol.Optional("streak_bonus"): vol.Any(None, int),
+        vol.Optional("penalty"): vol.Any(None, int),
     }
 )
 @websocket_api.require_admin

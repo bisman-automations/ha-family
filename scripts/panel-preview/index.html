@@ -22,7 +22,7 @@ customElements.define("ha-icon", class extends HTMLElement {
 const now = Date.now();
 const ago = (m) => new Date(now - m * 60000).toISOString();
 let members = [
-  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", points: 42, picture: null, to_check: 1 },
+  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", streak: 4, points: 42, picture: null, to_check: 1 },
   { id: "b", name: "Sam", emoji: "🦄", color: "#E91E63", person: null, points: 15, picture: null, to_check: 0 },
   { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0 },
 ];
@@ -30,6 +30,10 @@ let allChores = [
   { id: "bed", name: "Make your bed", emoji: "🛏️", points: 5, repeat: "daily", members: [], enabled: true },
   { id: "dishes", name: "Empty the dishwasher", emoji: "🍽️", points: 10, repeat: "daily", members: ["a", "b"], enabled: true },
   { id: "room", name: "Tidy your room", emoji: "🧸", points: 15, repeat: "weekly", members: ["c"], enabled: true },
+  { id: "plants", name: "Water the plants", emoji: "🪴", points: 3, repeat: "daily", members: [], enabled: true },
+  { id: "table", name: "Set the table", emoji: "🍴", points: 2, repeat: "daily", members: [], enabled: true },
+  { id: "toys", name: "Pick up toys", emoji: "🧩", points: 2, repeat: "daily", members: [], enabled: true },
+  { id: "laundry", name: "Fold laundry", emoji: "👕", points: 5, repeat: "weekly", members: [], enabled: true },
 ];
 const todoChores = [{ id: "todo:todo.chores:1", name: "Feed the dog", points: 3, members: [], repeat: "once", enabled: true, source: "todo", list: "Chores" }];
 let rewards = [
@@ -71,9 +75,11 @@ const setState = (entity_id, state) => {
 };
 const chores = () => [...allChores, ...todoChores].filter((c) => c.enabled).map((c) => ({ ...c, can: c.members.length ? c.members : members.map((m) => m.id) }));
 window.calls = [];
-let settings = { auto_check: null };
+let settings = { auto_check: null, penalty: 2 };
+let bonus = { all_done: 5, streak_days: 7, streak: 10 };
+const isToday = (iso) => new Date(iso).toDateString() === new Date().toDateString();
 const state = () => ({
-  members, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
+  members, done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -102,11 +108,29 @@ window.hass = {
     }
     if (t === "move") { const i = controls.findIndex((x) => x.id === msg.item_id); const j = Math.max(0, Math.min(controls.length - 1, i + msg.offset)); controls.splice(j, 0, controls.splice(i, 1)[0]); return {}; }
     const m = members.find((x) => x.id === msg.member_id);
-    if (t === "complete") { const c = chores().find((x) => x.id === msg.chore_id); m.points += c.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "chore", member: m.id, chore_id: c.id, title: c.name, points: c.points, review: "pending" }; entries.push(e); return { entry: e, points: m.points }; }
+    if (t === "complete") { const c = chores().find((x) => x.id === msg.chore_id); m.points += c.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "chore", member: m.id, chore_id: c.id, title: c.name, points: c.points, review: "pending" }; entries.push(e);
+      // Riley's only chore: the all-done bonus.
+      if (c.id === "room") { const b = { id: "b" + entries.length, at: e.at, kind: "bonus", member: m.id, title: "All done today!", points: bonus.all_done, bonus: "all_done", for_entry: e.id }; entries.push(b); m.points += b.points; return { entry: { ...e, bonuses: [b] }, points: m.points }; }
+      return { entry: e, points: m.points }; }
     if (t === "redeem") { const r = rewards.find((x) => x.id === msg.reward_id); if (m.points < r.points) throw { message: `${m.name} needs ${r.points} points for ${r.name}` }; if (r.limit && entries.some((e) => e.reward_id === r.id && e.member === m.id)) throw { message: `${m.name} already had ${r.name} today` }; m.points -= r.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "reward", member: m.id, reward_id: r.id, title: r.name, points: -r.points, given: r.kind === "tv_time" ? "given" : "to_give" }; entries.push(e); return { entry: e, points: m.points }; }
     if (t === "undo") { const e = entries.find((x) => x.id === msg.entry_id); if (!e) throw { message: "That can't be found any more" }; const mm = members.find((x) => x.id === e.member); mm.points -= e.points; entries = entries.filter((x) => x !== e); return {}; }
-    if (t === "settings") { settings = { auto_check: msg.auto_check || null }; return { settings }; }
-    if (t === "review") { const e = entries.find((x) => x.id === msg.entry_id); e.review = msg.approved ? "approved" : "rejected"; return {}; }
+    if (t === "settings") {
+      if ("auto_check" in msg) settings.auto_check = msg.auto_check || null;
+      if ("penalty" in msg) settings.penalty = msg.penalty;
+      if ("bonus_all_done" in msg) bonus = { all_done: msg.bonus_all_done, streak_days: msg.streak_days, streak: msg.streak_bonus };
+      return { settings };
+    }
+    if (t === "review") {
+      const e = entries.find((x) => x.id === msg.entry_id);
+      e.review = msg.approved ? "approved" : "rejected";
+      const mm = members.find((x) => x.id === e.member);
+      if (!msg.approved) {
+        mm.points -= e.points;
+        const taken = msg.penalty ?? e.penalty ?? settings.penalty;
+        if (taken) { mm.points -= taken; entries.push({ id: "p" + entries.length, at: new Date().toISOString(), kind: "penalty", member: e.member, title: e.title, points: -taken, for_entry: e.id }); }
+      }
+      return {};
+    }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
     if (t === "save") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); } return { item: msg.item }; }
     if (t === "delete") return {};

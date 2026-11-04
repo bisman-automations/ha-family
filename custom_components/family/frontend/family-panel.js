@@ -812,13 +812,15 @@ class FamilyPanel extends HTMLElement {
 
   _memberForm(item) {
     const m = item || { name: "", person: "", emoji: "", color: "" };
-    const people = this._choices?.people || [];
+    // Someone already linked to another family member isn't offered again.
+    const taken = new Set(this._data.members.filter((x) => x.person && x.id !== m.id).map((x) => x.person));
+    const people = (this._choices?.people || []).filter((p) => !taken.has(p.entity_id));
     return `<form class="edit" data-form="members" data-id="${esc(m.id || "")}">
       <div class="inline">
         <label class="field"><span>Name</span><input type="text" name="name" value="${esc(m.name)}" required></label>
         <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(m.emoji || "")}" size="3" placeholder="🦖"></label>
         <label class="field"><span>Color</span><input type="color" name="color" value="${esc(m.color || "#3F51B5")}"></label>
-        <label class="field"><span>Home Assistant person</span><select name="person"><option value="">None</option>${people.map((p) => `<option value="${esc(p.entity_id)}" ${p.entity_id === m.person ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+        <label class="field"><span>Home Assistant person</span><select name="person" data-person><option value="">None</option>${people.map((p) => `<option value="${esc(p.entity_id)}" ${p.entity_id === m.person ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
@@ -889,6 +891,13 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.person !== undefined) {
+      // An empty name takes the person's first name.
+      const name = ev.target.closest("form").querySelector('input[name="name"]');
+      const person = this._choices?.people.find((p) => p.entity_id === ev.target.value);
+      if (name && !name.value.trim() && person) name.value = person.name.split(" ")[0];
+      return;
+    }
     if (ev.target.dataset.autoCheck !== undefined) {
       this._call({ type: `${DOMAIN}/settings`, auto_check: ev.target.value || null }, "Saved.");
       return;

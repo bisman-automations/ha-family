@@ -588,3 +588,20 @@ async def test_chores_checked_automatically(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=2))
     await hass.async_block_till_done()
     assert (await client.ok("state"))["to_check"] == []
+
+
+async def test_a_person_links_to_one_member(hass: HomeAssistant, client):
+    hass.states.async_set("person.parent", "home", {"friendly_name": "Parent"})
+    first = (
+        await client.ok(
+            "save",
+            collection="members",
+            item={"name": "Parent", "person": "person.parent"},
+        )
+    )["item"]
+    res = await client(
+        "save", collection="members", item={"name": "Other", "person": "person.parent"}
+    )
+    assert res["error"]["message"] == "That person is already linked to Parent"
+    # Saving the same member again keeps its own link.
+    await client.ok("save", collection="members", item={**first, "emoji": "🦖"})

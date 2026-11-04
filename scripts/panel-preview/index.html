@@ -21,7 +21,7 @@ customElements.define("ha-icon", class extends HTMLElement {
 const now = Date.now();
 const ago = (m) => new Date(now - m * 60000).toISOString();
 let members = [
-  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: null, points: 42, picture: null, to_check: 1 },
+  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", points: 42, picture: null, to_check: 1 },
   { id: "b", name: "Sam", emoji: "🦄", color: "#E91E63", person: null, points: 15, picture: null, to_check: 0 },
   { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0 },
 ];
@@ -84,7 +84,7 @@ window.hass = {
     window.calls.push(msg);
     const t = msg.type.replace("family/", "");
     if (t === "state") return state();
-    if (t === "choices") return { people: [{ entity_id: "person.alex", name: "Alex" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]) };
+    if (t === "choices") return { people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]) };
     if (t === "control") {
       const c = controlList().find((x) => x.id === msg.control_id);
       if (!c) throw { message: "That isn't on the dashboard any more" };

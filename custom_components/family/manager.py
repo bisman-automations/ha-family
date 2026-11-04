@@ -485,10 +485,23 @@ class FamilyManager:
 
     @callback
     def save_member(self, raw: dict[str, Any]) -> dict[str, Any]:
+        member_id = raw.get("id") or _id()
+        person = raw.get("person") or None
+        if person and (
+            other := next(
+                (
+                    m
+                    for m in self.members
+                    if m.get("person") == person and m["id"] != member_id
+                ),
+                None,
+            )
+        ):
+            raise FamilyError(f"That person is already linked to {other['name']}")
         member = {
-            "id": raw.get("id") or _id(),
+            "id": member_id,
             "name": model.clean_name(raw.get("name")),
-            "person": raw.get("person") or None,
+            "person": person,
             "color": raw.get("color")
             or MEMBER_COLORS[len(self.members) % len(MEMBER_COLORS)],
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,

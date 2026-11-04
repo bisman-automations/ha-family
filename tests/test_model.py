@@ -138,3 +138,18 @@ def test_undo_and_auto_check():
     assert model.due_for_auto_check([chore, old], now, "day") == [old]
     assert model.due_for_auto_check([chore, old], now, "week") == []
     assert model.due_for_auto_check([chore, old], now, None) == []
+
+
+def test_points_set_for_an_item():
+    rated = {"feed the dog": 7}
+    assert model.todo_item_points("Feed  the Dog [3]", 1, rated) == (
+        "Feed  the Dog",
+        7,
+        True,
+    )
+    assert model.todo_item_points("Walk the dog [3]", 1, rated) == (
+        "Walk the dog",
+        3,
+        False,
+    )
+    assert model.todo_item_points("Sweep", 1, None) == ("Sweep", 1, False)

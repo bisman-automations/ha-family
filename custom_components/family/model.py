@@ -59,6 +59,27 @@ def todo_points(summary: str, default: int) -> tuple[str, int]:
     return name, min(points, MAX_POINTS)
 
 
+def item_key(name: str) -> str:
+    """How a to-do item's points are remembered: by its name, so an item a
+    list brings back (a repeating chore) keeps them."""
+    return " ".join((name or "").casefold().split())
+
+
+def todo_item_points(
+    summary: str, default: int, rated: dict[str, int] | None
+) -> tuple[str, int, bool]:
+    """A to-do item's name, points, and whether a parent set them for it.
+
+    Points set for the item on the Parents dashboard win, then points
+    written in the item, then the list's points.
+    """
+    name, points = todo_points(summary, default)
+    key = item_key(name)
+    if rated and key in rated:
+        return name, int(rated[key]), True
+    return name, points, False
+
+
 def period_start(now: datetime, repeat: str) -> datetime | None:
     """When the current period began: today, this week (from Monday), or None
     for a one-off chore (done once, ever)."""

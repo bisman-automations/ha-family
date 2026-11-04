@@ -203,6 +203,10 @@ const STYLES = `
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 560px; }
+  .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); }
+  .items li:first-child { border-top: 0; }
+  .items input { width: 100px; }
   .badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--fam-bad); color: #fff; font-size: 12px; line-height: 20px; text-align: center; margin-left: 6px; }
 `;
 
@@ -651,9 +655,13 @@ class FamilyPanel extends HTMLElement {
     const choreForm = edit?.collection === "chores" ? this._choreForm(edit.item) : `<button class="btn primary" data-new="chores">Add a chore</button>`;
     const lists = d.todo_lists.length
       ? `<ul class="rows">${d.todo_lists
-          .map((t) => `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise · ${esc(this._whoText(t.members))}</small></span>
+          .map((t) => {
+            const own = (t.items || []).filter((i) => i.rated).length;
+            return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(this._whoText(t.members))}</small></span>
+              <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Points for items</button>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Edit</button>
-              <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>`)
+              <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>`;
+          })
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
     const listForm = edit?.collection === "todo_lists" ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
@@ -688,9 +696,22 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Points for each item</span><input type="number" name="points" min="0" max="10000" value="${esc(t.points)}"></label>
       </div>
       <div class="field"><span>Who can do them</span>${this._whoChecks(t.members)}</div>
+      ${item ? this._itemPoints(t) : ""}
       <div class="form-actions"><button class="btn primary" type="submit">Save list</button><button class="btn" type="button" data-cancel>Cancel</button></div>
       ${item ? `<input type="hidden" name="entity_id_keep" value="${esc(t.entity_id)}">` : ""}
     </form>`;
+  }
+
+  _itemPoints(list) {
+    const items = list.items || [];
+    const rows = items.length
+      ? `<ul class="items">${items
+          .map((i) => `<li><span>${esc(i.name)}</span>
+            <input type="number" min="0" max="10000" aria-label="Points for ${esc(i.name)}" data-item-name="${esc(i.name)}" data-rated="${i.rated ? 1 : ""}" data-unrated="${esc(i.unrated)}" value="${i.rated ? esc(i.points) : ""}" placeholder="${esc(i.unrated)}"></li>`)
+          .join("")}</ul>`
+      : `<p class="muted">Nothing open on this list right now.</p>`;
+    return `<div class="field"><span>Points for single items</span>
+      <small>Give an item its own points. Empty: the list's points, or the points written in the item. Repeating items keep their points when they come back.</small>${rows}</div>`;
   }
 
   _renderRewards() {
@@ -994,6 +1015,16 @@ class FamilyPanel extends HTMLElement {
       item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null };
     } else {
       item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), members: v.members || [] };
+      const itemPoints = {};
+      for (const input of form.querySelectorAll("[data-item-name]")) {
+        const value = input.value.trim();
+        if (value === "") {
+          if (input.dataset.rated) itemPoints[input.dataset.itemName] = null; // back to the list's points
+        } else {
+          itemPoints[input.dataset.itemName] = Number(value);
+        }
+      }
+      item.item_points = itemPoints;
     }
     if (form.dataset.id) item.id = form.dataset.id;
     const ok = await this._call({ type: `${DOMAIN}/save`, collection, item }, "Saved.");

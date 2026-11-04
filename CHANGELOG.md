@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-04
+
+### Added
+
+- **Points for single to-do items.** On the Parents dashboard, **Points for items** next to a chore to-do list gives each open item its own points, without changing its text. An empty box uses the list's points or the points written in the item. Repeating items keep their points when they come back.
+
 ## [1.2.0] - 2026-11-04
 
 ### Added
@@ -39,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.3.0]: https://github.com/bisman-automations/ha-family/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bisman-automations/ha-family/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/bisman-automations/ha-family/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/bisman-automations/ha-family/compare/v1.0.0...v1.1.0

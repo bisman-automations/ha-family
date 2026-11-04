@@ -233,6 +233,44 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
         "Take out the trash",
     ]
 
+    # Points for single items, set on the Parents dashboard.
+    rows = {i["name"]: i for i in state["todo_lists"][0]["items"]}
+    assert rows["Feed the dog"] == {
+        "name": "Feed the dog",
+        "points": 3,
+        "rated": False,
+        "unrated": 3,
+    }
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={
+            "entity_id": TODO,
+            "points": 2,
+            "item_points": {"Take out the trash": 8, "Feed the dog": 5},
+        },
+    )
+    state = await client.ok("state")
+    chores = {c["name"]: c["points"] for c in state["chores"]}
+    assert chores == {"Feed the dog": 5, "Take out the trash": 8}
+
+    # Emptied: back to the points written in the item. Other items keep theirs,
+    # and so does an item that comes back on the list later.
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={"entity_id": TODO, "points": 2, "item_points": {"Feed the dog": None}},
+    )
+    items.append(
+        {"uid": "3", "summary": "take out  the TRASH", "status": "needs_action"}
+    )
+    items[1]["status"] = "completed"
+    hass.states.async_set(TODO, "2", {"friendly_name": "Chores"}, force_update=True)
+    await hass.async_block_till_done()
+    state = await client.ok("state")
+    chores = {c["name"]: c["points"] for c in state["chores"]}
+    assert chores == {"Feed the dog": 3, "take out  the TRASH": 8}
+
 
 async def test_parents_only_actions(
     hass: HomeAssistant, hass_ws_client, hass_read_only_access_token

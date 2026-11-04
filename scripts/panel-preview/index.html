@@ -74,7 +74,11 @@ window.calls = [];
 let settings = { auto_check: null };
 const state = () => ({
   members, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
-  all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [] }],
+  all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
+    { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
+    { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
+    { name: "Water the plants", points: 5, rated: false, unrated: 5 },
+  ] }],
   to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e) => e.given === "to_give"), history: [...entries].reverse(),
 });
 window.hass = {

@@ -180,8 +180,10 @@ class FamilyManager:
             state = self.hass.states.get(entity_id)
             list_name = state.name if state else entity_id
             for item in self.todo_items.get(entity_id, []):
-                name, points = model.todo_points(
-                    item.get("summary", ""), int(todo.get("points", 0))
+                name, points, _rated = model.todo_item_points(
+                    item.get("summary", ""),
+                    int(todo.get("points", 0)),
+                    todo.get("item_points"),
                 )
                 chores.append(
                     {
@@ -561,11 +563,23 @@ class FamilyManager:
         entity_id = raw.get("entity_id") or ""
         if not entity_id.startswith("todo."):
             raise FamilyError("Pick a to-do list")
+        existing = next((t for t in self.todo_lists if t["id"] == entity_id), {})
+        # Points for single items, by name. Kept for items not on the list
+        # right now, so a repeating chore keeps its points when it's back.
+        rated = dict(existing.get("item_points") or {})
+        for name, value in (raw.get("item_points") or {}).items():
+            if not (key := model.item_key(name)):
+                continue
+            if value is None or value == "":
+                rated.pop(key, None)
+            else:
+                rated[key] = model.clean_points(value)
         todo = {
             "id": entity_id,
             "entity_id": entity_id,
             "points": model.clean_points(raw.get("points", 0)),
             "members": self._known_members(raw.get("members")),
+            "item_points": rated,
         }
         self._upsert(self.todo_lists, todo)
         self._watch_todo_lists()
@@ -788,7 +802,12 @@ class FamilyManager:
             result["settings"] = {"auto_check": self.settings.get("auto_check")}
             result["all_chores"] = self.chores
             result["todo_lists"] = [
-                {**t, "name": self._state_name(t["entity_id"])} for t in self.todo_lists
+                {
+                    **t,
+                    "name": self._state_name(t["entity_id"]),
+                    "items": self._todo_item_rows(t),
+                }
+                for t in self.todo_lists
             ]
             result["to_check"] = [
                 e
@@ -804,6 +823,20 @@ class FamilyManager:
                 self.entries, key=lambda e: e["at"], reverse=True
             )[:200]
         return result
+
+    def _todo_item_rows(self, todo: dict[str, Any]) -> list[dict[str, Any]]:
+        """The list's open items and their points, for the Parents dashboard."""
+        rows = []
+        for item in self.todo_items.get(todo["entity_id"], []):
+            summary = item.get("summary", "")
+            name, points, rated = model.todo_item_points(
+                summary, int(todo.get("points", 0)), todo.get("item_points")
+            )
+            _name, unrated = model.todo_points(summary, int(todo.get("points", 0)))
+            rows.append(
+                {"name": name, "points": points, "rated": rated, "unrated": unrated}
+            )
+        return rows
 
     def _state_name(self, entity_id: str) -> str:
         state = self.hass.states.get(entity_id)

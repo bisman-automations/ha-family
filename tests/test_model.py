@@ -1,6 +1,6 @@
 """The chore and points rules on their own."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -106,3 +106,35 @@ def test_control_kinds_and_actions():
     ):
         with pytest.raises(ValueError):
             model.control_service(entity_id, action)
+
+
+def test_reward_limits():
+    reward = {"id": "ice", "limit": "weekly"}
+    entries = [
+        {"kind": "reward", "reward_id": "ice", "member": "a", "at": at(2).isoformat()},
+        {"kind": "reward", "reward_id": "ice", "member": "b", "at": at(1).isoformat()},
+        {"kind": "reward", "reward_id": "tv", "member": "c", "at": at(4).isoformat()},
+    ]
+    # 2026-11-02 is a Monday: the week starts then.
+    assert model.reward_used_by(reward, entries, at(4)) == {"a"}
+    assert model.reward_used_by({"id": "ice", "limit": "daily"}, entries, at(2)) == {
+        "a"
+    }
+    assert model.reward_used_by({"id": "ice"}, entries, at(4)) == set()
+
+
+def test_undo_and_auto_check():
+    now = at(4, 12)
+    chore = {"kind": "chore", "review": "pending", "at": at(4, 12).isoformat()}
+    assert model.can_undo(chore, now)
+    assert not model.can_undo({**chore, "review": "approved"}, now)
+    assert not model.can_undo(chore, now + timedelta(seconds=61))
+    given = {"kind": "reward", "given": "given", "at": now.isoformat()}
+    assert not model.can_undo(given, now)
+    assert model.can_undo({**given, "tv": "x"}, now)
+    assert model.can_undo({**given, "given": "to_give"}, now)
+
+    old = {**chore, "at": at(2).isoformat()}
+    assert model.due_for_auto_check([chore, old], now, "day") == [old]
+    assert model.due_for_auto_check([chore, old], now, "week") == []
+    assert model.due_for_auto_check([chore, old], now, None) == []

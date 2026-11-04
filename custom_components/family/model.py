@@ -107,6 +107,63 @@ def can_do(member_id: str, chore: dict[str, Any], done: set[str]) -> bool:
     return member_id not in done
 
 
+# How often each person can get a reward: any time, once a day or once a week.
+REWARD_LIMITS = (REPEAT_DAILY, REPEAT_WEEKLY)
+
+
+def reward_used_by(
+    reward: dict[str, Any], entries: Iterable[dict[str, Any]], now: datetime
+) -> set[str]:
+    """Members who already got this reward today or this week (its limit)."""
+    limit = reward.get("limit")
+    if limit not in REWARD_LIMITS:
+        return set()
+    start = period_start(now, limit)
+    return {
+        entry["member"]
+        for entry in entries
+        if entry.get("kind") == KIND_REWARD
+        and entry.get("reward_id") == reward["id"]
+        and start is not None
+        and datetime.fromisoformat(entry["at"]) >= start
+    }
+
+
+# A tap on the shared screen can be undone for this long.
+UNDO_SECONDS = 60
+
+
+def can_undo(entry: dict[str, Any], now: datetime) -> bool:
+    """A chore not checked yet, or a reward not handed out yet, just now."""
+    if (now - datetime.fromisoformat(entry["at"])).total_seconds() > UNDO_SECONDS:
+        return False
+    if entry.get("kind") == KIND_CHORE:
+        return entry.get("review") == REVIEW_PENDING
+    if entry.get("kind") == KIND_REWARD:
+        return entry.get("given") != GIVEN_DONE or "tv" in entry
+    return False
+
+
+# Chores still to check are counted as done right after this long.
+AUTO_CHECK = {"day": timedelta(days=1), "week": timedelta(days=7)}
+
+
+def due_for_auto_check(
+    entries: Iterable[dict[str, Any]], now: datetime, after: str | None
+) -> list[dict[str, Any]]:
+    """Chores still to check that were done longer ago than ``after``."""
+    wait = AUTO_CHECK.get(after or "")
+    if wait is None:
+        return []
+    return [
+        entry
+        for entry in entries
+        if entry.get("kind") == KIND_CHORE
+        and entry.get("review") == REVIEW_PENDING
+        and now - datetime.fromisoformat(entry["at"]) >= wait
+    ]
+
+
 def balance(entries: Iterable[dict[str, Any]], member_id: str) -> int:
     """A member's points: every entry for them, except chores that didn't
     happen."""

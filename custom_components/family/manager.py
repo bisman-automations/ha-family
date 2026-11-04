@@ -16,6 +16,8 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -69,6 +71,8 @@ class FamilyManager:
         self.todo_lists: list[dict[str, Any]] = []
         # Entities shown on the Family dashboard to control or watch.
         self.controls: list[dict[str, Any]] = []
+        # Family-wide settings from the Parents dashboard.
+        self.settings: dict[str, Any] = {}
         self.entries: list[dict[str, Any]] = []
         # Points from entries older than KEEP_HISTORY_DAYS, per member.
         self.carried: dict[str, int] = {}
@@ -86,9 +90,11 @@ class FamilyManager:
         self.rewards = list(data.get("rewards") or [])
         self.todo_lists = list(data.get("todo_lists") or [])
         self.controls = list(data.get("controls") or [])
+        self.settings = dict(data.get("settings") or {})
         self.entries = list(data.get("entries") or [])
         self.carried = {k: int(v) for k, v in (data.get("carried") or {}).items()}
         self._prune()
+        self.async_auto_check()
         self._watch_todo_lists()
         await self.async_refresh_todo()
 
@@ -99,6 +105,7 @@ class FamilyManager:
             "rewards": self.rewards,
             "todo_lists": self.todo_lists,
             "controls": self.controls,
+            "settings": self.settings,
             "entries": self.entries,
             "carried": self.carried,
         }
@@ -262,6 +269,7 @@ class FamilyManager:
         entry = self._entry(entry_id)
         if entry.get("kind") != model.KIND_CHORE:
             raise FamilyError("Only chores are checked")
+        entry.pop("auto", None)  # a parent checked it now
         entry["review"] = model.REVIEW_APPROVED if approved else model.REVIEW_REJECTED
         entry["reviewed_at"] = _now_iso()
         chore_id = entry.get("chore_id", "")
@@ -284,6 +292,68 @@ class FamilyManager:
         )
         return entry
 
+    @callback
+    def async_auto_check(self, _now: Any = None) -> None:
+        """Count chores nobody checked as done right, after a day or a week."""
+        due = model.due_for_auto_check(
+            self.entries, dt_util.now(), self.settings.get("auto_check")
+        )
+        if not due:
+            return
+        for entry in due:
+            entry["review"] = model.REVIEW_APPROVED
+            entry["reviewed_at"] = _now_iso()
+            entry["auto"] = True
+        self._changed()
+        for entry in due:
+            self.hass.bus.async_fire(
+                EVENT_CHORE_REVIEWED,
+                {
+                    "member": self._member_name(entry["member"]),
+                    "member_id": entry["member"],
+                    "chore": entry["title"],
+                    "approved": True,
+                    "automatic": True,
+                    "points": entry["points"],
+                    "balance": self.points(entry["member"]),
+                },
+            )
+
+    def _member_name(self, member_id: str) -> str:
+        return next(
+            (m["name"] for m in self.members if m["id"] == member_id), "Someone"
+        )
+
+    @callback
+    def save_settings(self, raw: dict[str, Any]) -> dict[str, Any]:
+        auto = raw.get("auto_check") or None
+        if auto is not None and auto not in model.AUTO_CHECK:
+            raise FamilyError("Pick when chores are checked automatically")
+        self.settings["auto_check"] = auto
+        self._changed()
+        self.async_auto_check()
+        return dict(self.settings)
+
+    async def async_undo(self, entry_id: str) -> None:
+        """Undo a tap on the shared screen: a chore or a reward, just now."""
+        entry = self._entry(entry_id)
+        if not model.can_undo(entry, dt_util.now()):
+            raise FamilyError("That can't be undone any more. Ask a parent.")
+        if entry["kind"] == model.KIND_REWARD and entry.get("tv"):
+            # Take the TV time back first: if that fails, nothing changes.
+            await self._async_grant_tv_time(
+                entry["tv"],
+                -int(entry.get("minutes", 0)),
+                bool(entry.get("whole_home")),
+                f"Undone: {entry['title']}",
+            )
+        chore_id = entry.get("chore_id", "")
+        if chore_id.startswith(TODO_PREFIX):
+            entity_id, _, uid = chore_id.removeprefix(TODO_PREFIX).rpartition(":")
+            await self._async_set_todo(entity_id, uid, False)
+        self.entries.remove(entry)
+        self._changed()
+
     # ---- rewards --------------------------------------------------------------
 
     def reward(self, reward_id: str) -> dict[str, Any]:
@@ -301,8 +371,17 @@ class FamilyManager:
             raise FamilyError(
                 f"{member['name']} needs {cost} points for {reward['name']}"
             )
+        if member_id in model.reward_used_by(reward, self.entries, dt_util.now()):
+            when = "today" if reward.get("limit") == model.REPEAT_DAILY else "this week"
+            raise FamilyError(f"{member['name']} already had {reward['name']} {when}")
+        tv: dict[str, Any] = {}
         if reward.get("kind") == model.REWARD_TV_TIME:
-            await self._async_give_tv_time(reward)
+            await self._async_give_tv_time(reward, member)
+            tv = {
+                "tv": reward["tv"],
+                "minutes": int(reward.get("minutes", 0)),
+                "whole_home": bool(reward.get("whole_home", False)),
+            }
         entry = {
             "id": _id(),
             "at": _now_iso(),
@@ -314,6 +393,7 @@ class FamilyManager:
             "given": model.GIVEN_DONE
             if reward.get("kind") == model.REWARD_TV_TIME
             else model.GIVEN_PENDING,
+            **tv,
         }
         self.entries.append(entry)
         self._changed()
@@ -329,24 +409,42 @@ class FamilyManager:
         )
         return entry
 
-    async def _async_give_tv_time(self, reward: dict[str, Any]) -> None:
+    async def _async_give_tv_time(
+        self, reward: dict[str, Any], member: dict[str, Any]
+    ) -> None:
         if not self.hass.services.has_service(TV_MGMT_DOMAIN, TV_MGMT_GRANT):
             raise FamilyError("TV time needs TV Mgmt, which isn't set up")
         tv = reward.get("tv")
         if not tv or self.hass.config_entries.async_get_entry(tv) is None:
             raise FamilyError(f"The TV for {reward['name']} isn't set up any more")
+        await self._async_grant_tv_time(
+            tv,
+            int(reward.get("minutes", 0)),
+            bool(reward.get("whole_home", False)),
+            f"{member['name']}'s reward: {reward['name']}",
+        )
+
+    async def _async_grant_tv_time(
+        self, tv: str, minutes: int, whole_home: bool, reason: str
+    ) -> None:
+        """Give (or take back) TV time in TV Mgmt, with why in its Activity."""
+        if not self.hass.services.has_service(TV_MGMT_DOMAIN, TV_MGMT_GRANT):
+            raise FamilyError("TV time needs TV Mgmt, which isn't set up")
+        data = {"profile_id": tv, "minutes": minutes, "whole_home": whole_home}
         try:
-            await self.hass.services.async_call(
-                TV_MGMT_DOMAIN,
-                TV_MGMT_GRANT,
-                {
-                    "profile_id": tv,
-                    "minutes": int(reward.get("minutes", 0)),
-                    "whole_home": bool(reward.get("whole_home", False)),
-                },
-                blocking=True,
-            )
-        except HomeAssistantError as err:
+            try:
+                await self.hass.services.async_call(
+                    TV_MGMT_DOMAIN,
+                    TV_MGMT_GRANT,
+                    {**data, "reason": reason[:100]},
+                    blocking=True,
+                )
+            except vol.Invalid:
+                # TV Mgmt before 1.21.0 doesn't take a reason.
+                await self.hass.services.async_call(
+                    TV_MGMT_DOMAIN, TV_MGMT_GRANT, data, blocking=True
+                )
+        except (HomeAssistantError, vol.Invalid) as err:
             raise FamilyError(f"Couldn't give the TV time: {err}") from err
 
     @callback
@@ -428,6 +526,10 @@ class FamilyManager:
             "points": model.clean_points(raw.get("points", 0), "Its cost"),
             "kind": kind,
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            # Each person at most once a day or a week; None: any time.
+            "limit": raw.get("limit")
+            if raw.get("limit") in model.REWARD_LIMITS
+            else None,
         }
         if kind == model.REWARD_TV_TIME:
             if not raw.get("tv"):
@@ -641,7 +743,15 @@ class FamilyManager:
             }
             for m in self.members
         ]
-        rewards = [{**r, "tv_name": self._tv_name(r.get("tv"))} for r in self.rewards]
+        now = dt_util.now()
+        rewards = [
+            {
+                **r,
+                "tv_name": self._tv_name(r.get("tv")),
+                "used_by": sorted(model.reward_used_by(r, self.entries, now)),
+            }
+            for r in self.rewards
+        ]
         recent = sorted(self.entries, key=lambda e: e["at"], reverse=True)[:30]
         controls = [
             {
@@ -659,8 +769,10 @@ class FamilyManager:
             "recent": recent,
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
+            "undo_seconds": model.UNDO_SECONDS,
         }
         if is_admin:
+            result["settings"] = {"auto_check": self.settings.get("auto_check")}
             result["all_chores"] = self.chores
             result["todo_lists"] = [
                 {**t, "name": self._state_name(t["entity_id"])} for t in self.todo_lists

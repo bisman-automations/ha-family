@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from .const import ATTR_MEMBER, ATTR_POINTS, ATTR_REASON, DOMAIN, SERVICE_ADD_POINTS
@@ -50,6 +53,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     manager = FamilyManager(hass, entry)
     await manager.async_load()
     entry.runtime_data = manager
+    # Chores nobody checked count as done after a day or a week (a setting).
+    entry.async_on_unload(
+        async_track_time_interval(hass, manager.async_auto_check, timedelta(hours=1))
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     from .panel import async_register_panels  # noqa: PLC0415
 

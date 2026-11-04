@@ -16,7 +16,7 @@ changing anything.
   - `config_flow.py`: set up once (`single_config_entry`); nothing to fill in. Everything else is edited on the Parents dashboard.
   - `model.py`: **pure (no Home Assistant imports)**: periods (daily, weekly, once), who has done a chore, balances, points in to-do item text. Tested in `tests/test_model.py`.
   - `manager.py`: `FamilyManager` (`entry.runtime_data`): members, chores, rewards, chore to-do lists and the ledger in one Store (`family.data`); completing, checking, redeeming, adjusting; reading and ticking off to-do items; events.
-  - `websocket.py`: the dashboards' API (`family/*`). Everyone: `state`, `subscribe`, `complete`, `redeem`, `control`. Admins (`require_admin`): `review`, `given`, `adjust`, `save`, `delete`, `move`, `choices`.
+  - `websocket.py`: the dashboards' API (`family/*`). Everyone: `state`, `subscribe`, `complete`, `redeem`, `undo`, `control`. Admins (`require_admin`): `review`, `given`, `adjust`, `save`, `delete`, `move`, `settings`, `choices`.
   - `panel.py` + `frontend/family-panel.js`: two sidebar panels from one plain web component (no build step): **Family** (`/family`, everyone, `config.mode = "family"`) and **Parents** (`/family-parents`, admins, `"parents"`). Registered only when the frontend is loaded.
   - `sensor.py`: a points sensor per member, added and removed as members change.
 - `scripts/panel-preview/index.html`: fakes Home Assistant with a sample family to look at both dashboards (`?mode=family|parents`, `&theme=dark`). Its fake backend must answer like the real one.
@@ -35,7 +35,10 @@ phone width (390px), and in the dark theme.
 - **Balances come from the ledger** (`model.balance`) plus `carried`: entries older than `KEEP_HISTORY_DAYS` are folded into `carried` when loading.
 - **Chore availability:** dashboard chores repeat daily, weekly (from Monday) or once. With no members picked, anyone can do it and it's done once per period; with members picked, each of them can do it once per period. To-do chores are available while the item is open; the list decides (`FamilyManager._done`).
 - **To-do item points:** `model.todo_points` reads `[5]`, `(5 points)` or `- 5 pts` at the end of an item; otherwise the list's points.
-- **TV time** calls `tv_mgmt.grant_extension` with `profile_id`, `minutes` and `whole_home` (TV Mgmt 1.20.0+) before the points are taken, so a failure costs nothing.
+- **TV time** calls `tv_mgmt.grant_extension` with `profile_id`, `minutes`, `whole_home` and `reason` ("Alex's reward: …") before the points are taken, so a failure costs nothing. TV Mgmt before 1.21.0 has no `reason`: on `vol.Invalid` it's called again without it. The reward entry keeps `tv`, `minutes`, `whole_home` so an undo can take the time back.
+- **Undo** (`family/undo`, open to everyone): `model.can_undo`, within `UNDO_SECONDS` of the tap, for a chore still to check or a reward not handed out (TV time is taken back with negative minutes). The entry is removed, not marked.
+- **Reward limits:** a reward's `limit` (`daily`/`weekly`, per person, `model.reward_used_by`); the snapshot sends `used_by`.
+- **Auto-check:** `settings.auto_check` (`day`/`week`, admin `family/settings`). `async_auto_check` runs on load, on saving the setting and hourly; entries get `auto: true` and `family_chore_reviewed` has `automatic: true`.
 - **The shared screen isn't an admin.** Anything that changes the setup, checks chores or changes points by hand must be `require_admin`. Completing chores, redeeming rewards and using home controls are open to everyone on purpose.
 - **Home controls** (`controls` in the Store): entities a parent puts on the Family dashboard. `model.control_kind` decides what a tap does (toggle, run, open, lock, media, or view only) and `model.control_service` maps an action to a service; anything else is refused. `family/control` only runs controls in the list, with the caller's context. The dashboard reads live state from `hass.states` and redraws just the Home tiles when one changes.
 - **Websocket fields:** never name a field `id`; it's the message's own id (`delete` uses `item_id`).

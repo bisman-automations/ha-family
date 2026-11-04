@@ -34,12 +34,14 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_complete,
         ws_redeem,
         ws_control,
+        ws_undo,
         ws_review,
         ws_given,
         ws_adjust,
         ws_save,
         ws_delete,
         ws_move,
+        ws_settings,
         ws_choices,
     ):
         websocket_api.async_register_command(hass, command)
@@ -148,6 +150,17 @@ async def ws_control(hass, connection, msg, manager) -> dict[str, Any]:
     return {}
 
 
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/undo", vol.Required("entry_id"): str}
+)
+@websocket_api.async_response
+@_handler
+async def ws_undo(hass, connection, msg, manager) -> dict[str, Any]:
+    """Undo a chore or reward tapped by mistake, within a minute."""
+    await manager.async_undo(msg["entry_id"])
+    return {}
+
+
 # ---- parents (admins) ----------------------------------------------------------------------
 
 
@@ -247,6 +260,19 @@ async def ws_delete(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
     manager.move(msg["collection"], msg["item_id"], msg["offset"])
     return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/settings",
+        vol.Optional("auto_check"): vol.Any(None, str),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_handler
+async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"settings": manager.save_settings(msg)}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/choices"})

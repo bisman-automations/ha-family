@@ -35,6 +35,18 @@ const DOMAIN_ICONS = {
   sensor: "mdi:eye", binary_sensor: "mdi:checkbox-marked-circle-outline", weather: "mdi:weather-partly-cloudy", person: "mdi:account",
   input_number: "mdi:ray-vertex", number: "mdi:ray-vertex", input_select: "mdi:format-list-bulleted", select: "mdi:format-list-bulleted",
 };
+const LIMITS = [
+  { id: "", label: "Any time" },
+  { id: "daily", label: "Once a day each" },
+  { id: "weekly", label: "Once a week each" },
+];
+const LIMIT_TEXT = { daily: "Once a day", weekly: "Once a week" };
+const AGAIN = { daily: "Again tomorrow", weekly: "Again next week" };
+const AUTO_CHECKS = [
+  { id: "", label: "Never: a parent checks every chore" },
+  { id: "day", label: "After a day" },
+  { id: "week", label: "After a week" },
+];
 const KIND_TEXT = {
   toggle: "Tap to turn on or off", run: "Tap to start", open: "Tap to open or close",
   lock: "Tap to lock or unlock", media: "Tap to play or pause", view: "Shown only",
@@ -148,6 +160,11 @@ const STYLES = `
     width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center;
   }
   .toast.bad { background: var(--fam-bad); }
+  .toast { display: flex; align-items: center; gap: 16px; }
+  .toast .undo {
+    font: inherit; font-size: 17px; font-weight: 600; color: #fff; background: rgba(255,255,255,.2);
+    border: 2px solid #fff; border-radius: 22px; min-height: 44px; padding: 0 20px; cursor: pointer;
+  }
 
   .feed { list-style: none; margin: 0; padding: 0; }
   .feed li { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--fam-divider); font-size: 15px; }
@@ -309,7 +326,7 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
   }
 
-  _feed(entries) {
+  _feed(entries, review = false) {
     if (!entries.length) return `<p class="empty">Nothing yet. Finished chores and spent points show up here.</p>`;
     return `<ul class="feed">${entries
       .map((e) => {
@@ -317,21 +334,22 @@ class FamilyPanel extends HTMLElement {
         const gone = e.review === "rejected";
         const cls = gone ? "gone" : e.points >= 0 ? "plus" : "minus";
         const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : `<b>${esc(e.title)}</b>`;
-        const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.given === "to_give" ? " · to hand out" : "";
+        const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.auto ? " · checked automatically" : e.given === "to_give" ? " · to hand out" : "";
         return `<li>${m ? this._avatar(m, true) : ""}<span class="what">${esc(m?.name || "Someone")} ${what}<br><small class="muted">${esc(whenText(e.at))}${note}</small></span>
-          <span class="amount ${cls}">${signed(e.points)}</span></li>`;
+          <span class="amount ${cls}">${signed(e.points)}</span>${review && e.kind === "chore" && !gone ? `<button class="btn bad" data-review="${esc(e.id)}" data-approved="0">Didn't happen</button>` : ""}</li>`;
       })
       .join("")}</ul>`;
   }
 
-  _toast(text, bad = false) {
-    this._toastMsg = { text, bad };
+  _toast(text, bad = false, undo = null) {
+    this._toastMsg = { text, bad, undo };
     this._renderOverlay();
     clearTimeout(this._toastTimer);
+    // With Undo, long enough to notice the mistake and tap it.
     this._toastTimer = setTimeout(() => {
       this._toastMsg = null;
       this._renderOverlay();
-    }, 3500);
+    }, undo ? 10000 : 3500);
   }
 
   // ------------------------------------------------------------------ render
@@ -352,7 +370,9 @@ class FamilyPanel extends HTMLElement {
   _renderOverlay() {
     const overlay = this.shadowRoot.querySelector(".overlay");
     if (!overlay) return;
-    const toast = this._toastMsg ? `<div class="toast${this._toastMsg.bad ? " bad" : ""}" role="status">${esc(this._toastMsg.text)}</div>` : "";
+    const t = this._toastMsg;
+    const undo = t?.undo ? `<button class="undo" data-undo="${esc(t.undo)}">Undo</button>` : "";
+    const toast = t ? `<div class="toast${t.bad ? " bad" : ""}" role="status"><span>${esc(t.text)}</span>${undo}</div>` : "";
     overlay.innerHTML = (this._sheet ? this._renderSheet() : "") + toast;
   }
 
@@ -381,12 +401,14 @@ class FamilyPanel extends HTMLElement {
       ? `<div class="tiles">${d.rewards
           .map((r) => {
             const short = member && member.points < r.points;
+            const used = member && (r.used_by || []).includes(member.id);
             const sub = r.kind === "tv_time" ? `${r.minutes} min of TV${r.tv_name ? ` · ${r.tv_name}` : ""}` : "";
-            return `<button class="tile" data-reward="${esc(r.id)}" ${short ? "disabled" : ""}>
+            const note = used ? AGAIN[r.limit] : short ? `${r.points - member.points} more to go` : LIMIT_TEXT[r.limit] || "";
+            return `<button class="tile" data-reward="${esc(r.id)}" ${short || used ? "disabled" : ""}>
               ${r.emoji ? `<span class="emoji">${esc(r.emoji)}</span>` : ""}
               <span class="label">${esc(r.name)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
               <span class="worth">${pts(r.points)}</span>
-              ${short ? `<span class="sub">${r.points - member.points} more to go</span>` : ""}</button>`;
+              ${note ? `<span class="sub">${esc(note)}</span>` : ""}</button>`;
           })
           .join("")}</div>`
       : `<p class="empty">No rewards yet. A parent adds them on the <b>Parents</b> dashboard.</p>`;
@@ -526,7 +548,7 @@ class FamilyPanel extends HTMLElement {
     if (!reward) return "";
     const member = this._memberById(s.member);
     if (!member) {
-      const can = d.members.filter((m) => m.points >= reward.points);
+      const can = d.members.filter((m) => m.points >= reward.points && !(reward.used_by || []).includes(m.id));
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who's it for?">
         <h3>Who's ${esc(reward.name)} for?</h3><p>${pts(reward.points)}</p>
         ${can.length ? this._people(can, "data-sheet-member", null) : `<p>Nobody has enough points yet.</p>`}
@@ -561,7 +583,7 @@ class FamilyPanel extends HTMLElement {
       rewards: () => this._renderRewards(),
       home: () => this._renderHome(),
       family: () => this._renderMembers(),
-      history: () => `<div class="card">${this._feed(d.history || [])}</div>`,
+      history: () => `<div class="card">${this._feed(d.history || [], true)}</div>`,
     }[this._tab]();
     return bar + body;
   }
@@ -587,8 +609,12 @@ class FamilyPanel extends HTMLElement {
           })
           .join("")}</ul>`
       : `<p class="empty">No rewards to hand out.</p>`;
+    const auto = d.settings?.auto_check || "";
     return `<div class="card"><h2>Chores to check</h2>
-        <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}.</p>${check}</div>
+        <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}.</p>${check}
+        <label class="field"><span>Count chores nobody checked as done right</span>
+          <select data-auto-check>${AUTO_CHECKS.map((a) => `<option value="${a.id}" ${auto === a.id ? "selected" : ""}>${a.label}</option>`).join("")}</select>
+          <small>You can still mark one <b>Didn't happen</b> from History.</small></label></div>
       <div class="card"><h2>Rewards to hand out</h2>${give}</div>`;
   }
 
@@ -667,7 +693,7 @@ class FamilyPanel extends HTMLElement {
     const rows = d.rewards.length
       ? `<ul class="rows">${d.rewards
           .map((r) => `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
-              <small>${pts(r.points)}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : " · handed out by a parent"}</small></span>
+              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : " · handed out by a parent"}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
               <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -695,6 +721,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Reward</span><input type="text" name="name" value="${esc(r.name)}" required placeholder="30 minutes of TV"></label>
         <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(r.emoji || "")}" size="3" placeholder="📺"></label>
         <label class="field"><span>Costs</span><input type="number" name="points" min="0" max="10000" value="${esc(r.points)}"></label>
+        <label class="field"><span>How often</span><select name="limit">${LIMITS.map((l) => `<option value="${l.id}" ${(r.limit || "") === l.id ? "selected" : ""}>${l.label}</option>`).join("")}</select></label>
         <label class="field"><span>What it is</span><select name="kind" data-reward-kind>
           <option value="tv_time" ${kind === "tv_time" ? "selected" : ""}>TV time</option>
           <option value="custom" ${kind === "custom" ? "selected" : ""}>Something else</option></select></label>
@@ -817,6 +844,8 @@ class FamilyPanel extends HTMLElement {
     if (ds.member) {
       this._member = this._member === ds.member ? null : ds.member;
       this._render();
+    } else if (ds.undo) {
+      this._undo(ds.undo);
     } else if (ds.control) {
       this._useControl(ds.control);
     } else if (ds.move) {
@@ -860,6 +889,10 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.autoCheck !== undefined) {
+      this._call({ type: `${DOMAIN}/settings`, auto_check: ev.target.value || null }, "Saved.");
+      return;
+    }
     if (ev.target.dataset.rewardKind !== undefined) {
       // Show the TV fields for TV time, keeping what's typed so far.
       const form = ev.target.closest("form");
@@ -902,7 +935,7 @@ class FamilyPanel extends HTMLElement {
     if (collection === "chores") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), repeat: v.repeat, members: v.members || [], enabled: !!v.enabled };
     } else if (collection === "rewards") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, tv: v.tv, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {
@@ -930,6 +963,19 @@ class FamilyPanel extends HTMLElement {
     }
   }
 
+  async _undo(entryId) {
+    clearTimeout(this._toastTimer);
+    this._toastMsg = null;
+    this._renderOverlay();
+    try {
+      await this._ws({ type: `${DOMAIN}/undo`, entry_id: entryId });
+      this._toast("Undone.");
+      await this._load();
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+    }
+  }
+
   async _confirm() {
     const s = this._sheet;
     if (s?.type === "control") {
@@ -947,11 +993,11 @@ class FamilyPanel extends HTMLElement {
       if (s.type === "chore") {
         const chore = this._data.chores.find((c) => c.id === s.id);
         const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id });
-        this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)} (${res.points} now)`);
+        this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)} (${res.points} now)`, false, res.entry?.id);
       } else {
         const reward = this._data.rewards.find((r) => r.id === s.id);
         const res = await this._ws({ type: `${DOMAIN}/redeem`, member_id: s.member, reward_id: s.id });
-        this._toast(`Enjoy ${reward?.name || "it"}, ${member.name}! ${pts(res.points)} left`);
+        this._toast(`Enjoy ${reward?.name || "it"}, ${member.name}! ${pts(res.points)} left`, false, res.entry?.id);
       }
       this._sheet = null;
       await this._load();

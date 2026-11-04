@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     async_mock_service,
 )
+import voluptuous as vol
 
 from custom_components.family.const import DOMAIN
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 TODO = "todo.chores"
 
@@ -139,6 +143,7 @@ async def test_redeem_tv_time_and_other_rewards(hass: HomeAssistant, client):
         "profile_id": tv.entry_id,
         "minutes": 30,
         "whole_home": True,
+        "reason": "Alex's reward: 30 minutes of TV",
     }
 
     res = await client.ok("redeem", member_id=alex, reward_id=treat["id"])
@@ -405,3 +410,181 @@ async def test_dashboards_registered(hass: HomeAssistant):
             "family",
             "family-parents",
         }
+
+
+def _ago(entry: dict[str, Any], **delta: float) -> None:
+    entry["at"] = (dt_util.now() - timedelta(**delta)).isoformat()
+
+
+async def _tv_mgmt(hass: HomeAssistant, schema=None) -> tuple[str, list[ServiceCall]]:
+    tv = MockConfigEntry(domain="tv_mgmt", title="Family Room TV")
+    tv.add_to_hass(hass)
+    calls: list[ServiceCall] = []
+
+    async def grant(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("tv_mgmt", "grant_extension", grant, schema)
+    return tv.entry_id, calls
+
+
+async def test_undo_a_mistaken_tap(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    alex, _sam = await _family(client)
+    tv, calls = await _tv_mgmt(hass)
+    await client.ok("adjust", member_id=alex, points=40)
+    chore = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Make your bed", "points": 5}
+        )
+    )["item"]
+    tv_time = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={
+                "name": "30 minutes of TV",
+                "points": 20,
+                "kind": "tv_time",
+                "tv": tv,
+                "minutes": 30,
+            },
+        )
+    )["item"]
+
+    # The shared screen can undo what it just did.
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    done = await kiosk.ok("complete", member_id=alex, chore_id=chore["id"])
+    assert done["points"] == 45
+    await kiosk.ok("undo", entry_id=done["entry"]["id"])
+    state = await kiosk.ok("state")
+    assert state["members"][0]["points"] == 40
+    assert state["chores"][0]["can"]  # it can be done again
+
+    got = await kiosk.ok("redeem", member_id=alex, reward_id=tv_time["id"])
+    await kiosk.ok("undo", entry_id=got["entry"]["id"])
+    assert calls[-1].data == {
+        "profile_id": tv,
+        "minutes": -30,
+        "whole_home": False,
+        "reason": "Undone: 30 minutes of TV",
+    }
+    assert (await kiosk.ok("state"))["members"][0]["points"] == 40
+
+    # Only for a minute.
+    done = await kiosk.ok("complete", member_id=alex, chore_id=chore["id"])
+    _ago(entry.runtime_data._entry(done["entry"]["id"]), seconds=61)
+    res = await kiosk("undo", entry_id=done["entry"]["id"])
+    assert "Ask a parent" in res["error"]["message"]
+
+
+async def test_reward_once_a_day(hass: HomeAssistant, client):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    alex, sam = await _family(client)
+    await client.ok("adjust", member_id=alex, points=50)
+    await client.ok("adjust", member_id=sam, points=50)
+    treat = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={"name": "Ice cream", "points": 10, "limit": "daily"},
+        )
+    )["item"]
+    assert treat["limit"] == "daily"
+    got = await client.ok("redeem", member_id=alex, reward_id=treat["id"])
+    res = await client("redeem", member_id=alex, reward_id=treat["id"])
+    assert res["error"]["message"] == "Alex already had Ice cream today"
+    # Each person once a day: Sam can still have one.
+    await client.ok("redeem", member_id=sam, reward_id=treat["id"])
+    state = await client.ok("state")
+    assert state["rewards"][0]["used_by"] == sorted([alex, sam])
+
+    # Tomorrow it's back.
+    _ago(entry.runtime_data._entry(got["entry"]["id"]), days=1)
+    await client.ok("redeem", member_id=alex, reward_id=treat["id"])
+
+
+async def test_tv_mgmt_before_reasons(hass: HomeAssistant, client):
+    """TV Mgmt 1.20.0 doesn't take a reason: the time is given without one."""
+    alex, _sam = await _family(client)
+    tv, calls = await _tv_mgmt(
+        hass,
+        vol.Schema(
+            {
+                vol.Required("profile_id"): str,
+                vol.Required("minutes"): int,
+                vol.Optional("whole_home"): bool,
+            }
+        ),
+    )
+    await client.ok("adjust", member_id=alex, points=50)
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={
+                "name": "TV",
+                "points": 10,
+                "kind": "tv_time",
+                "tv": tv,
+                "minutes": 15,
+            },
+        )
+    )["item"]
+    await client.ok("redeem", member_id=alex, reward_id=reward["id"])
+    assert calls[0].data == {"profile_id": tv, "minutes": 15, "whole_home": False}
+
+
+async def test_chores_checked_automatically(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    alex, _sam = await _family(client)
+    chore = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Make your bed", "points": 5}
+        )
+    )["item"]
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    _ago(entry.runtime_data._entry(done["entry"]["id"]), days=2)
+
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    res = await kiosk("settings", auto_check="day")
+    assert res["error"]["code"] == "unauthorized"
+    res = await client("settings", auto_check="month")
+    assert not res["success"]
+
+    events = []
+    hass.bus.async_listen("family_chore_reviewed", events.append)
+    # Off by default: still to check.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=1))
+    await hass.async_block_till_done()
+    assert len((await client.ok("state"))["to_check"]) == 1
+
+    # Turned on: done right after a day.
+    assert (await client.ok("settings", auto_check="day"))["settings"] == {
+        "auto_check": "day"
+    }
+    await hass.async_block_till_done()
+    state = await client.ok("state")
+    assert state["to_check"] == []
+    assert state["settings"] == {"auto_check": "day"}
+    assert state["history"][0]["auto"] is True
+    assert events[0].data["automatic"] is True
+
+    # A chore done just now waits; the hourly check picks it up later.
+    second = (
+        await client.ok(
+            "save", collection="chores", item={"name": "Feed the cat", "points": 3}
+        )
+    )["item"]
+    done = await client.ok("complete", member_id=alex, chore_id=second["id"])
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=1))
+    await hass.async_block_till_done()
+    assert len((await client.ok("state"))["to_check"]) == 1
+    _ago(entry.runtime_data._entry(done["entry"]["id"]), days=1, minutes=1)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=2))
+    await hass.async_block_till_done()
+    assert (await client.ok("state"))["to_check"] == []

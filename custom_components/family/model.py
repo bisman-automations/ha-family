@@ -15,7 +15,18 @@ from typing import Any
 REPEAT_ONCE = "once"
 REPEAT_DAILY = "daily"
 REPEAT_WEEKLY = "weekly"
-REPEATS = (REPEAT_DAILY, REPEAT_WEEKLY, REPEAT_ONCE)
+# Chores that come back once they're done, not on the calendar:
+REPEAT_AFTER_DAYS = "after_days"  # some days after it was last done (repeat_days)
+REPEAT_ALWAYS = "always"  # right away: always there
+REPEAT_AFTER_CHECK = "after_check"  # once a parent has checked it
+REPEATS = (
+    REPEAT_DAILY,
+    REPEAT_WEEKLY,
+    REPEAT_ONCE,
+    REPEAT_AFTER_DAYS,
+    REPEAT_ALWAYS,
+    REPEAT_AFTER_CHECK,
+)
 
 # Ledger entry kinds
 KIND_CHORE = "chore"
@@ -105,8 +116,22 @@ def done_by(
 
     A chore for anyone is done by whoever did it first; "*" stands for that.
     Completions a parent marked as didn't happen don't count.
+
+    Chores that come back once they're done: ``always`` is never done,
+    ``after_check`` is done until a parent checks it, and ``after_days`` is
+    done until ``repeat_days`` days after the day it was done.
     """
-    start = period_start(now, chore.get("repeat", REPEAT_DAILY))
+    repeat = chore.get("repeat", REPEAT_DAILY)
+    if repeat == REPEAT_ALWAYS:
+        return set()
+    start = None
+    if repeat == REPEAT_AFTER_DAYS:
+        days = max(1, int(chore.get("repeat_days") or 1))
+        # Done on Monday with 3 days: back on Thursday.
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = midnight - timedelta(days=days - 1)
+    elif repeat != REPEAT_AFTER_CHECK:
+        start = period_start(now, repeat)
     done: set[str] = set()
     for entry in entries:
         if (
@@ -114,6 +139,8 @@ def done_by(
             or entry.get("chore_id") != chore["id"]
             or entry.get("review") == REVIEW_REJECTED
         ):
+            continue
+        if repeat == REPEAT_AFTER_CHECK and entry.get("review") != REVIEW_PENDING:
             continue
         if start is not None and datetime.fromisoformat(entry["at"]) < start:
             continue

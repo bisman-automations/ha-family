@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-06
+
+### Added
+
+- **Chores that come back once they're done.** Besides every day, every week and just once, a chore can come back some days after it was done (for example 3 days after the plants were watered), right away every time it's done, or once a parent checks it.
+- **Dashboard chores on a to-do list too.** A chore made on the Parents dashboard can also be kept on a Home Assistant to-do list: it's added while it can be done, ticked off when it's done and opened again when it comes back. Renaming or removing the chore updates the list, and the item isn't counted twice if that list is also a chore list.
+
 ## [1.4.0] - 2026-11-04
 
 ### Added
@@ -63,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.5.0]: https://github.com/bisman-automations/ha-family/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/bisman-automations/ha-family/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/bisman-automations/ha-family/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bisman-automations/ha-family/compare/v1.1.1...v1.2.0

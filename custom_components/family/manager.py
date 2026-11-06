@@ -41,6 +41,7 @@ from .const import (
     TV_MGMT_DOMAIN,
     TV_MGMT_GRANT,
 )
+from .todo_sync import TodoSync
 
 _LOGGER = logging.getLogger(__name__)
 SAVE_DELAY = 2
@@ -80,6 +81,9 @@ class FamilyManager:
         # Open items of each chore to-do list: entity id -> items.
         self.todo_items: dict[str, list[dict[str, Any]]] = {}
         self._unsub_todo: Callable[[], None] | None = None
+        # Dashboard chores Family keeps on a to-do list: chore id -> link.
+        self.todo_links: dict[str, dict[str, Any]] = {}
+        self.todo_sync = TodoSync(self)
         self._member_listeners: list[Callable[[], None]] = []
 
     # ---- storage --------------------------------------------------------------
@@ -92,6 +96,7 @@ class FamilyManager:
         self.todo_lists = list(data.get("todo_lists") or [])
         self.controls = list(data.get("controls") or [])
         self.settings = dict(data.get("settings") or {})
+        self.todo_links = dict(data.get("todo_links") or {})
         self.entries = list(data.get("entries") or [])
         self.carried = {k: int(v) for k, v in (data.get("carried") or {}).items()}
         self._prune()
@@ -107,6 +112,7 @@ class FamilyManager:
             "todo_lists": self.todo_lists,
             "controls": self.controls,
             "settings": self.settings,
+            "todo_links": self.todo_links,
             "entries": self.entries,
             "carried": self.carried,
         }
@@ -115,9 +121,33 @@ class FamilyManager:
     def _changed(self, members: bool = False) -> None:
         self._store.async_delay_save(self._data, SAVE_DELAY)
         async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+        # A chore done, back, renamed or removed: its to-do item follows.
+        self.todo_sync.schedule()
         if members:
             for listener in list(self._member_listeners):
                 listener()
+
+    @callback
+    def save(self) -> None:
+        """Save without telling the dashboards (nothing they show changed)."""
+        self._store.async_delay_save(self._data, SAVE_DELAY)
+
+    def chore_open(self, chore: dict[str, Any]) -> bool:
+        """Whether anyone can still do this dashboard chore now."""
+        done = self._done(chore, dt_util.now())
+        known = {m["id"] for m in self.members}
+        members = [m for m in chore.get("members") or [] if m in known]
+        if not members:
+            return "*" not in done
+        return any(m not in done for m in members)
+
+    def linked_uids(self, entity_id: str) -> set[str]:
+        """Items Family put on this list for its own chores."""
+        return {
+            link["uid"]
+            for link in self.todo_links.values()
+            if link["list"] == entity_id
+        }
 
     @callback
     def add_member_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
@@ -180,7 +210,10 @@ class FamilyManager:
             entity_id = todo["entity_id"]
             state = self.hass.states.get(entity_id)
             list_name = state.name if state else entity_id
+            mine = self.linked_uids(entity_id)
             for item in self.todo_items.get(entity_id, []):
+                if item.get("uid") in mine:
+                    continue  # a dashboard chore Family keeps on this list
                 name, points, _rated = model.todo_item_points(
                     item.get("summary", ""),
                     int(todo.get("points", 0)),
@@ -644,14 +677,23 @@ class FamilyManager:
         repeat = raw.get("repeat") or model.REPEAT_DAILY
         if repeat not in model.REPEATS:
             raise FamilyError("Pick how often the chore can be done")
+        todo_list = raw.get("todo_list") or None
+        if todo_list is not None and not str(todo_list).startswith("todo."):
+            raise FamilyError("Pick a to-do list")
         chore = {
             "id": raw.get("id") or _id(),
             "name": model.clean_name(raw.get("name"), "The chore's name"),
             "points": model.clean_points(raw.get("points", 0)),
             "members": self._known_members(raw.get("members")),
             "repeat": repeat,
+            # For "after_days": back this many days after it was done.
+            "repeat_days": max(1, min(int(raw.get("repeat_days") or 1), 365))
+            if repeat == model.REPEAT_AFTER_DAYS
+            else None,
             "enabled": bool(raw.get("enabled", True)),
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            # Also kept on this to-do list; None: not on any list.
+            "todo_list": todo_list,
             # Extra points taken if it didn't happen; None: the family's.
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }

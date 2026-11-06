@@ -198,3 +198,28 @@ def test_penalties():
     assert model.penalty_points(0, 10, 2) == 0
     assert model.optional_points("", "Penalty") is None
     assert model.optional_points("4", "Penalty") == 4
+
+
+def test_chores_that_come_back_once_done():
+    def done(day, hour=12, review="pending"):
+        return {
+            "kind": "chore",
+            "chore_id": "c",
+            "member": "a",
+            "review": review,
+            "at": at(day, hour).isoformat(),
+        }
+
+    # Back 3 days after the day it was done: done on the 2nd, back on the 5th.
+    plants = {"id": "c", "repeat": "after_days", "repeat_days": 3}
+    entries = [done(2, 20)]
+    assert model.done_by(plants, entries, at(2)) == {"a", "*"}
+    assert model.done_by(plants, entries, at(4, 23)) == {"a", "*"}
+    assert model.done_by(plants, entries, at(5, 0)) == set()
+    # Right away: never done.
+    assert model.done_by({"id": "c", "repeat": "always"}, entries, at(2)) == set()
+    # Once a parent checks it: done only while it's still to check.
+    check = {"id": "c", "repeat": "after_check"}
+    assert model.done_by(check, [done(1)], at(9)) == {"a", "*"}
+    assert model.done_by(check, [done(1, review="approved")], at(1)) == set()
+    assert model.done_by(check, [done(1, review="rejected")], at(1)) == set()

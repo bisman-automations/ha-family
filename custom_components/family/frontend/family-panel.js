@@ -22,7 +22,12 @@ const REPEATS = [
   { id: "daily", label: "Every day" },
   { id: "weekly", label: "Every week" },
   { id: "once", label: "Just once" },
+  { id: "after_days", label: "Some days after it's done" },
+  { id: "always", label: "Right away, every time it's done" },
+  { id: "after_check", label: "Once a parent checks it" },
 ];
+const repeatText = (c) =>
+  c.repeat === "after_days" ? `Back ${c.repeat_days || 1} ${c.repeat_days === 1 ? "day" : "days"} after it's done` : REPEATS.find((r) => r.id === c.repeat)?.label || "";
 
 // Home controls: how each kind of entity is grouped and drawn.
 const DOMAIN_LABELS = {
@@ -136,7 +141,7 @@ const STYLES = `
   .tile .worth { font-size: 16px; font-weight: 600; color: var(--primary-color); margin-top: auto; }
   .tile .sub { font-size: 13px; color: var(--fam-muted); }
   .who { display: flex; gap: 4px; }
-  .tiles > [hidden], .feed > li[hidden], .more[hidden] { display: none !important; }
+  .tiles > [hidden], .feed > li[hidden], .more[hidden], .field[hidden] { display: none !important; }
   .tile.done { cursor: default; opacity: .75; min-height: 96px; background: transparent; box-shadow: none; }
   .tile.done .tick { font-size: 26px; line-height: 1; color: var(--fam-good); font-weight: 700; }
   .tile.done .worth { color: var(--fam-good); }
@@ -795,7 +800,7 @@ class FamilyPanel extends HTMLElement {
     const chores = d.all_chores.length
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${esc(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
-              <small>+${pts(c.points)} · ${esc(REPEATS.find((r) => r.id === c.repeat)?.label || "")} · ${esc(this._whoText(c.members))}</small></span>
+              <small>+${pts(c.points)} · ${esc(repeatText(c))} · ${esc(this._whoText(c.members))}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -827,12 +832,20 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(c.emoji || "")}" size="3" placeholder="🛏️"></label>
         <label class="field"><span>Points</span><input type="number" name="points" min="0" max="10000" value="${esc(c.points)}"></label>
         <label class="field"><span>Penalty if it didn't happen</span><input type="number" name="penalty" min="0" max="10000" value="${esc(c.penalty ?? "")}" placeholder="Family's (${esc(this._data.settings?.penalty ?? 0)})"></label>
-        <label class="field"><span>How often</span><select name="repeat">${REPEATS.map((r) => `<option value="${r.id}" ${r.id === c.repeat ? "selected" : ""}>${r.label}</option>`).join("")}</select></label>
+        <label class="field"><span>Comes back</span><select name="repeat" data-repeat>${REPEATS.map((r) => `<option value="${r.id}" ${r.id === c.repeat ? "selected" : ""}>${r.label}</option>`).join("")}</select></label>
+        <label class="field" data-days-field ${c.repeat === "after_days" ? "" : "hidden"}><span>Days after it's done</span><input type="number" name="repeat_days" min="1" max="365" value="${esc(c.repeat_days || 3)}"></label>
       </div>
+      <label class="field"><span>Also keep it on a to-do list</span><select name="todo_list">
+        <option value="">No list</option>${(this._choices?.todo_lists || []).map((l) => `<option value="${esc(l.entity_id)}" ${l.entity_id === c.todo_list ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
+        <small>It's added to the list while it can be done, ticked off when it's done, and opened again when it comes back.</small></label>
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
       <label class="check"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Show it on the Family dashboard</label>
       <div class="form-actions"><button class="btn primary" type="submit">Save chore</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
+  }
+
+  _listName(entityId) {
+    return (this._choices?.todo_lists || []).find((l) => l.entity_id === entityId)?.name || entityId;
   }
 
   _listForm(item) {
@@ -1126,6 +1139,11 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.repeat !== undefined) {
+      const days = ev.target.closest("form").querySelector("[data-days-field]");
+      if (days) days.hidden = ev.target.value !== "after_days";
+      return;
+    }
     if (ev.target.dataset.person !== undefined) {
       // An empty name takes the person's first name.
       const name = ev.target.closest("form").querySelector('input[name="name"]');
@@ -1186,7 +1204,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, members: v.members || [], enabled: !!v.enabled };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], enabled: !!v.enabled };
     } else if (collection === "rewards") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
     } else if (collection === "controls") {

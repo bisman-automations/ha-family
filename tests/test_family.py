@@ -816,3 +816,196 @@ async def test_penalty_when_a_chore_didnt_happen(hass: HomeAssistant, client):
     assert await points() == 5
     state = await client.ok("state")
     assert [e["kind"] for e in state["history"]].count("penalty") == 0
+
+
+class FakeTodoList:
+    """A to-do list entity's actions, with uids, like Local To-do."""
+
+    def __init__(self, hass: HomeAssistant, entity_id: str) -> None:
+        self.hass = hass
+        self.entity_id = entity_id
+        self.items: list[dict[str, Any]] = []
+        self._next = 0
+        for name, handler in (
+            ("add_item", self.add_item),
+            ("update_item", self.update_item),
+            ("remove_item", self.remove_item),
+        ):
+            hass.services.async_register("todo", name, handler)
+        hass.services.async_register(
+            "todo", "get_items", self.get_items, supports_response=SupportsResponse.ONLY
+        )
+        self._state()
+
+    def _state(self) -> None:
+        open_items = sum(i["status"] == "needs_action" for i in self.items)
+        self.hass.states.async_set(
+            self.entity_id, str(open_items), {"friendly_name": "Kids"}
+        )
+
+    def item(self, name: str) -> dict[str, Any] | None:
+        return next((i for i in self.items if i["summary"] == name), None)
+
+    async def get_items(self, call: ServiceCall):
+        wanted = call.data.get("status") or ["needs_action", "completed"]
+        return {
+            self.entity_id: {
+                "items": [dict(i) for i in self.items if i["status"] in wanted]
+            }
+        }
+
+    async def add_item(self, call: ServiceCall) -> None:
+        self._next += 1
+        self.items.append(
+            {
+                "uid": f"u{self._next}",
+                "summary": call.data["item"],
+                "status": "needs_action",
+            }
+        )
+        self._state()
+
+    async def update_item(self, call: ServiceCall) -> None:
+        item = next(i for i in self.items if i["uid"] == call.data["item"])
+        if "status" in call.data:
+            item["status"] = call.data["status"]
+        if "rename" in call.data:
+            item["summary"] = call.data["rename"]
+        self._state()
+
+    async def remove_item(self, call: ServiceCall) -> None:
+        self.items = [i for i in self.items if i["uid"] not in call.data["item"]]
+        self._state()
+
+
+async def _sync(hass: HomeAssistant) -> None:
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_dashboard_chore_on_a_todo_list(hass: HomeAssistant, client):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    alex, _sam = await _family(client)
+    todo = FakeTodoList(hass, "todo.kids")
+    # The same list is also a chore list: Family's own items aren't counted twice.
+    await client.ok(
+        "save", collection="todo_lists", item={"entity_id": "todo.kids", "points": 1}
+    )
+    chore = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={
+                "name": "Feed the cat",
+                "points": 2,
+                "repeat": "after_check",
+                "todo_list": "todo.kids",
+            },
+        )
+    )["item"]
+    await _sync(hass)
+    assert todo.item("Feed the cat")["status"] == "needs_action"
+    state = await client.ok("state")
+    assert [c["name"] for c in state["chores"]] == ["Feed the cat"]
+
+    # Done: ticked off on the list. Still to check, so it isn't back yet.
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await _sync(hass)
+    assert todo.item("Feed the cat")["status"] == "completed"
+    assert (await client.ok("state"))["chores"] == []  # not back yet
+
+    # Checked: it comes back, and so does the item.
+    await client.ok("review", entry_id=done["entry"]["id"], approved=True)
+    await _sync(hass)
+    assert todo.item("Feed the cat")["status"] == "needs_action"
+    assert len(todo.items) == 1
+
+    # Renamed with the chore; deleted on the list: added again when it's open.
+    await client.ok(
+        "save",
+        collection="chores",
+        item={**chore, "name": "Feed the cats", "repeat": "after_check"},
+    )
+    await _sync(hass)
+    assert todo.item("Feed the cats") is not None
+    todo.items.clear()
+    entry.runtime_data.todo_sync.schedule()
+    await _sync(hass)
+    # Nothing changed for the chore, so nothing is done until it does.
+    assert todo.items == []
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await client.ok("review", entry_id=done["entry"]["id"], approved=True)
+    await _sync(hass)
+    assert todo.item("Feed the cats")["status"] == "needs_action"
+
+    # Off the list, or removed: its item goes.
+    await client.ok(
+        "save",
+        collection="chores",
+        item={
+            **chore,
+            "name": "Feed the cats",
+            "repeat": "after_check",
+            "todo_list": None,
+        },
+    )
+    await _sync(hass)
+    assert todo.items == []
+    await client.ok(
+        "save",
+        collection="chores",
+        item={**chore, "repeat": "after_check", "todo_list": "todo.kids"},
+    )
+    await _sync(hass)
+    assert len(todo.items) == 1
+    await client.ok("delete", collection="chores", item_id=chore["id"])
+    await _sync(hass)
+    assert todo.items == []
+
+
+async def test_chore_back_days_after_done(hass: HomeAssistant, client):
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    alex, _sam = await _family(client)
+    todo = FakeTodoList(hass, "todo.kids")
+    chore = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={
+                "name": "Water the plants",
+                "points": 2,
+                "repeat": "after_days",
+                "repeat_days": 3,
+                "todo_list": "todo.kids",
+            },
+        )
+    )["item"]
+    assert chore["repeat_days"] == 3
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await _sync(hass)
+    assert todo.item("Water the plants")["status"] == "completed"
+    assert (await client.ok("state"))["chores"] == []  # not back yet
+
+    # Three days later (the midnight sync): back, and open on the list.
+    entry.runtime_data._entry(done["entry"]["id"])["at"] = (
+        dt_util.now() - timedelta(days=3)
+    ).isoformat()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=1))
+    await _sync(hass)
+    assert todo.item("Water the plants")["status"] == "needs_action"
+    assert alex in (await client.ok("state"))["chores"][0]["can"]
+
+
+async def test_chore_back_right_away(hass: HomeAssistant, client):
+    alex, _sam = await _family(client)
+    chore = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={"name": "Put a toy away", "points": 1, "repeat": "always"},
+        )
+    )["item"]
+    for _ in range(3):
+        await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    state = await client.ok("state")
+    assert state["members"][0]["points"] == 3
+    assert alex in state["chores"][0]["can"]

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_time_change,
+    async_track_time_interval,
+)
 from homeassistant.helpers.typing import ConfigType
 
 from .const import ATTR_MEMBER, ATTR_POINTS, ATTR_REASON, DOMAIN, SERVICE_ADD_POINTS
@@ -57,6 +61,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     entry.async_on_unload(
         async_track_time_interval(hass, manager.async_auto_check, timedelta(hours=1))
     )
+
+    # Chores kept on a to-do list: their items open again when the chores come
+    # back (just after midnight, and hourly in case a list was offline).
+    @callback
+    def _sync_todo(_now: Any = None) -> None:
+        manager.todo_sync.schedule()
+
+    entry.async_on_unload(
+        async_track_time_change(hass, _sync_todo, hour=0, minute=0, second=5)
+    )
+    entry.async_on_unload(
+        async_track_time_interval(hass, _sync_todo, timedelta(hours=1))
+    )
+    _sync_todo()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     from .panel import async_register_panels  # noqa: PLC0415
 

@@ -27,6 +27,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from . import model
+from .calendar_today import CalendarToday, clean_calendars
 from .const import (
     DOMAIN,
     EVENT_BONUS,
@@ -34,6 +35,8 @@ from .const import (
     EVENT_CHORE_REVIEWED,
     EVENT_REWARD_REDEEMED,
     KEEP_HISTORY_DAYS,
+    MEDIA_MGMT_DOMAIN,
+    MEDIA_MGMT_GRANT,
     MEMBER_COLORS,
     SIGNAL_CHANGED,
     STORAGE_KEY,
@@ -41,6 +44,7 @@ from .const import (
     TV_MGMT_DOMAIN,
     TV_MGMT_GRANT,
 )
+from .parents_notify import ParentNotices
 from .todo_sync import TodoSync
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,6 +88,12 @@ class FamilyManager:
         # Dashboard chores Family keeps on a to-do list: chore id -> link.
         self.todo_links: dict[str, dict[str, Any]] = {}
         self.todo_sync = TodoSync(self)
+        self.notices = ParentNotices(self)
+        # Meals for each day (ISO date -> meal -> text), and notes on the board.
+        self.meals: dict[str, dict[str, str]] = {}
+        self.notes: list[dict[str, Any]] = []
+        self.calendar = CalendarToday(self)
+        self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
     # ---- storage --------------------------------------------------------------
@@ -99,10 +109,20 @@ class FamilyManager:
         self.todo_links = dict(data.get("todo_links") or {})
         self.entries = list(data.get("entries") or [])
         self.carried = {k: int(v) for k, v in (data.get("carried") or {}).items()}
+        self.meals = {
+            k: dict(v)
+            for k, v in (data.get("meals") or {}).items()
+            if isinstance(v, dict)
+        }
+        self.notes = [n for n in data.get("notes") or [] if isinstance(n, dict)]
         self._prune()
+        self._prune_board()
         self.async_auto_check()
         self._watch_todo_lists()
         await self.async_refresh_todo()
+        self.calendar.watch()
+        await self.calendar.async_refresh()
+        self.async_allowance()
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -115,6 +135,8 @@ class FamilyManager:
             "todo_links": self.todo_links,
             "entries": self.entries,
             "carried": self.carried,
+            "meals": self.meals,
+            "notes": self.notes,
         }
 
     @callback
@@ -133,13 +155,36 @@ class FamilyManager:
         self._store.async_delay_save(self._data, SAVE_DELAY)
 
     def chore_open(self, chore: dict[str, Any]) -> bool:
-        """Whether anyone can still do this dashboard chore now."""
-        done = self._done(chore, dt_util.now())
+        """Whether anyone can still do this dashboard chore today.
+
+        A chore picked for other days isn't open; its hours don't matter here,
+        so its to-do item stays put all day.
+        """
+        now = dt_util.now()
+        if not model.on_day(chore, now.date()):
+            return False
+        chore = self._effective(chore, now)
+        done = self._done(chore, now)
         known = {m["id"] for m in self.members}
         members = [m for m in chore.get("members") or [] if m in known]
         if not members:
             return "*" not in done
         return any(m not in done for m in members)
+
+    @callback
+    def async_tick(self, _now: Any = None) -> None:
+        """Every minute: tell the dashboards when a chore's hours start or end,
+        or a new day or week brings someone else's turn."""
+        if not any(
+            c.get("days") or c.get("from_time") or c.get("until_time") or c.get("turns")
+            for c in self.chores
+        ):
+            return
+        seen = tuple((c["id"], c.get("turn")) for c in self.chores_for(None))
+        if seen != self._seen_chores:
+            self._seen_chores = seen
+            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+            self.todo_sync.schedule()
 
     def linked_uids(self, entity_id: str) -> set[str]:
         """Items Family put on this list for its own chores."""
@@ -155,6 +200,7 @@ class FamilyManager:
         return lambda: self._member_listeners.remove(listener)
 
     async def async_unload(self) -> None:
+        self.calendar.stop()
         if self._unsub_todo:
             self._unsub_todo()
             self._unsub_todo = None
@@ -173,6 +219,111 @@ class FamilyManager:
                     entry.get("points", 0)
                 )
         self.entries = keep
+
+    def _prune_board(self) -> bool:
+        """Drop notes past their last day, and meals older than a week."""
+        today = dt_util.now().date()
+        oldest = (today - timedelta(days=model.KEEP_MEAL_DAYS)).isoformat()
+        notes = [n for n in self.notes if model.note_current(n, today)]
+        meals = {d: m for d, m in self.meals.items() if d >= oldest and m}
+        changed = len(notes) != len(self.notes) or len(meals) != len(self.meals)
+        self.notes, self.meals = notes, meals
+        return changed
+
+    # ---- allowance ------------------------------------------------------------
+
+    @callback
+    def async_allowance(self, _now: Any = None) -> None:
+        """Give each member their weekly allowance, once a week (hourly check)."""
+        if self._prune_board():
+            self._changed()
+        if not any(int(m.get("allowance") or 0) for m in self.members):
+            return
+        now = dt_util.now()
+        key = model.allowance_due(
+            now,
+            int(self.settings.get("allowance_day", model.DEFAULT_ALLOWANCE_DAY)),
+            int(self.settings.get("allowance_hour", model.DEFAULT_ALLOWANCE_HOUR)),
+            self.settings.get("allowance_week"),
+        )
+        if key is None:
+            return
+        for member in self.members:
+            points = int(member.get("allowance") or 0)
+            if points <= 0:
+                continue
+            self.entries.append(
+                {
+                    "id": _id(),
+                    "at": now.isoformat(),
+                    "kind": model.KIND_ALLOWANCE,
+                    "member": member["id"],
+                    "title": "Weekly allowance",
+                    "points": points,
+                }
+            )
+        self.settings["allowance_week"] = key
+        self._changed()
+
+    # ---- meals and notes ------------------------------------------------------
+
+    @callback
+    def save_meals(self, day: str, raw: dict[str, Any]) -> dict[str, str]:
+        """A day's meals from the Parents dashboard (empty ones are cleared)."""
+        day = model.clean_day(day) or ""
+        if not day:
+            raise FamilyError("Pick the day")
+        meals = model.clean_meals(raw)
+        if meals:
+            self.meals[day] = meals
+        else:
+            self.meals.pop(day, None)
+        self._changed()
+        return meals
+
+    @callback
+    def add_note(
+        self,
+        text: str,
+        member_id: str | None,
+        until: str | None,
+        *,
+        by_admin: bool,
+        by: str | None = None,
+    ) -> dict[str, Any]:
+        """Put a note on the board. Anyone can, from the shared screen too."""
+        if member_id:
+            self.member(member_id)
+        today = dt_util.now().date().isoformat()
+        until = model.clean_day(until, "Show it until")
+        if until and until < today:
+            raise FamilyError("Show it until today or a later day")
+        current = [n for n in self.notes if model.note_current(n, dt_util.now().date())]
+        if len(current) >= model.MAX_NOTES:
+            raise FamilyError("The board is full. Take a note down first.")
+        note = {
+            "id": _id(),
+            "text": model.clean_note(text),
+            "member": member_id or None,
+            "until": until,
+            "at": _now_iso(),
+            # A parent's note can only be taken down by a parent.
+            "parent": by_admin,
+            "by": by,
+        }
+        self.notes.append(note)
+        self._changed()
+        return note
+
+    @callback
+    def remove_note(self, note_id: str, *, by_admin: bool) -> None:
+        note = next((n for n in self.notes if n["id"] == note_id), None)
+        if note is None:
+            raise FamilyError("That note is already gone")
+        if note.get("parent") and not by_admin:
+            raise FamilyError("Only a parent can take down a parent's note")
+        self.notes.remove(note)
+        self._changed()
 
     # ---- lookups --------------------------------------------------------------
 
@@ -205,7 +356,8 @@ class FamilyManager:
 
     def all_chores(self) -> list[dict[str, Any]]:
         """Dashboard chores and the open items of every chore to-do list."""
-        chores = [dict(c, source="family") for c in self.chores]
+        now = dt_util.now()
+        chores = [self._effective(c, now) for c in self.chores]
         for todo in self.todo_lists:
             entity_id = todo["entity_id"]
             state = self.hass.states.get(entity_id)
@@ -237,6 +389,20 @@ class FamilyManager:
                 )
         return chores
 
+    def _effective(self, chore: dict[str, Any], now) -> dict[str, Any]:
+        """A dashboard chore as it is now: one taken in turns is only for
+        whoever's turn it is (``turn``), and keeps its people as ``rotation``."""
+        turn = model.turn_member(chore, self.entries, now)
+        if turn is None:
+            return dict(chore, source="family")
+        return dict(
+            chore,
+            source="family",
+            rotation=list(chore.get("members") or []),
+            members=[turn],
+            turn=turn,
+        )
+
     def chore(self, chore_id: str) -> dict[str, Any]:
         for chore in self.all_chores():
             if chore["id"] == chore_id:
@@ -248,7 +414,7 @@ class FamilyManager:
         now = dt_util.now()
         result = []
         for chore in self.all_chores():
-            if not chore.get("enabled", True):
+            if not chore.get("enabled", True) or not model.available(chore, now):
                 continue
             done = self._done(chore, now)
             can = [m["id"] for m in self.members if model.can_do(m["id"], chore, done)]
@@ -270,7 +436,10 @@ class FamilyManager:
         """A member did a chore: points straight away, a parent checks later."""
         member = self.member(member_id)
         chore = self.chore(chore_id)
-        done = self._done(chore, dt_util.now())
+        now = dt_util.now()
+        if not model.available(chore, now):
+            raise FamilyError(f"{chore['name']} isn't for right now")
+        done = self._done(chore, now)
         if not model.can_do(member_id, chore, done):
             raise FamilyError(
                 f"{chore['name']} is already done or isn't {member['name']}'s"
@@ -292,6 +461,7 @@ class FamilyManager:
             await self._async_set_todo(chore["todo_entity"], chore["todo_uid"], True)
         bonuses = self._earn_bonuses(member, entry)
         self._changed()
+        self.notices.chore_done(entry, member)
         self.hass.bus.async_fire(
             EVENT_CHORE_DONE,
             {
@@ -332,16 +502,21 @@ class FamilyManager:
         ):
             # Only their own chores count (not ones anyone can do), and they
             # need to have some.
+            # Today's, whatever their hours: a bedtime chore still to do
+            # means not all done yet.
+            now = dt_util.now()
             own = [
                 c
                 for c in self.all_chores()
-                if c.get("enabled", True) and member_id in (c.get("members") or [])
+                if c.get("enabled", True)
+                and member_id in (c.get("members") or [])
+                and model.on_day(c, today)
             ]
             left = [
                 c
-                for c in self.chores_for(member_id)
-                if member_id in (c.get("members") or [])
-                and c["id"] != entry["chore_id"]
+                for c in own
+                if c["id"] != entry["chore_id"]
+                and model.can_do(member_id, c, self._done(c, now))
             ]
             if own and not left:
                 found.append((model.BONUS_ALL_DONE, "All done today!", all_done))
@@ -423,6 +598,7 @@ class FamilyManager:
             if not approved:
                 await self._async_set_todo(entity_id, uid, False)
         self._changed()
+        self.notices.clear(entry_id)
         self.hass.bus.async_fire(
             EVENT_CHORE_REVIEWED,
             {
@@ -450,6 +626,8 @@ class FamilyManager:
             entry["reviewed_at"] = _now_iso()
             entry["auto"] = True
         self._changed()
+        for entry in due:
+            self.notices.clear(entry["id"])
         for entry in due:
             self.hass.bus.async_fire(
                 EVENT_CHORE_REVIEWED,
@@ -490,8 +668,43 @@ class FamilyManager:
         if "streak_days" in raw:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
+        if "notify_targets" in raw:
+            targets = [str(t) for t in raw.get("notify_targets") or [] if t]
+            unknown = [
+                t for t in targets if not self.hass.services.has_service("notify", t)
+            ]
+            if unknown:
+                raise FamilyError(f"There's no notify action called {unknown[0]}")
+            self.settings["notify_targets"] = list(dict.fromkeys(targets))
+        for key in ("notify_done", "notify_rewards", "weekly_summary"):
+            if key in raw:
+                self.settings[key] = bool(raw.get(key))
+        if "allowance_day" in raw:
+            day = int(raw.get("allowance_day") or 0)
+            if not 0 <= day <= 6:
+                raise FamilyError("Pick the day the allowance is given")
+            self.settings["allowance_day"] = day
+        if "allowance_hour" in raw:
+            hour = int(raw.get("allowance_hour") or 0)
+            if not 0 <= hour <= 23:
+                raise FamilyError("Pick the hour the allowance is given")
+            self.settings["allowance_hour"] = hour
+        if "point_value" in raw:
+            self.settings["point_value"] = model.clean_point_value(
+                raw.get("point_value")
+            )
+        if "currency" in raw:
+            self.settings["currency"] = str(raw.get("currency") or "").strip()[:4]
+        if "calendars" in raw:
+            self.settings["calendars"] = clean_calendars(
+                raw.get("calendars"), {m["id"] for m in self.members}
+            )
+            self.calendar.watch()
+            self.calendar.schedule()
         self._changed()
         self.async_auto_check()
+        if "allowance_day" in raw or "allowance_hour" in raw:
+            self.async_allowance()
         return dict(self.settings)
 
     async def async_undo(self, entry_id: str) -> None:
@@ -507,6 +720,12 @@ class FamilyManager:
                 bool(entry.get("whole_home")),
                 f"Undone: {entry['title']}",
             )
+        if entry["kind"] == model.KIND_REWARD and entry.get("speaker"):
+            await self._async_grant_music_time(
+                entry["speaker"],
+                -int(entry.get("minutes", 0)),
+                f"Undone: {entry['title']}",
+            )
         chore_id = entry.get("chore_id", "")
         if chore_id.startswith(TODO_PREFIX):
             entity_id, _, uid = chore_id.removeprefix(TODO_PREFIX).rpartition(":")
@@ -515,6 +734,7 @@ class FamilyManager:
             e for e in self.entries if e is not entry and e.get("for_entry") != entry_id
         ]
         self._changed()
+        self.notices.clear(entry_id)
 
     # ---- rewards --------------------------------------------------------------
 
@@ -537,13 +757,21 @@ class FamilyManager:
             when = "today" if reward.get("limit") == model.REPEAT_DAILY else "this week"
             raise FamilyError(f"{member['name']} already had {reward['name']} {when}")
         tv: dict[str, Any] = {}
-        if reward.get("kind") == model.REWARD_TV_TIME:
+        kind = reward.get("kind")
+        if kind == model.REWARD_TV_TIME:
             await self._async_give_tv_time(reward, member)
             tv = {
                 "tv": reward["tv"],
                 "minutes": int(reward.get("minutes", 0)),
                 "whole_home": bool(reward.get("whole_home", False)),
             }
+        elif kind == model.REWARD_MUSIC_TIME:
+            await self._async_give_music_time(reward, member)
+            tv = {
+                "speaker": reward["speaker"],
+                "minutes": int(reward.get("minutes", 0)),
+            }
+        given_now = kind in (model.REWARD_TV_TIME, model.REWARD_MUSIC_TIME)
         entry = {
             "id": _id(),
             "at": _now_iso(),
@@ -552,13 +780,15 @@ class FamilyManager:
             "title": reward["name"],
             "points": -cost,
             "reward_id": reward_id,
-            "given": model.GIVEN_DONE
-            if reward.get("kind") == model.REWARD_TV_TIME
-            else model.GIVEN_PENDING,
+            "given": model.GIVEN_DONE if given_now else model.GIVEN_PENDING,
             **tv,
         }
         self.entries.append(entry)
+        if member.get("goal") == reward_id:
+            member["goal"] = None  # saved up and spent: the goal's done
         self._changed()
+        if not given_now:
+            self.notices.reward_to_give(entry, member)
         self.hass.bus.async_fire(
             EVENT_REWARD_REDEEMED,
             {
@@ -609,13 +839,59 @@ class FamilyManager:
         except (HomeAssistantError, vol.Invalid) as err:
             raise FamilyError(f"Couldn't give the TV time: {err}") from err
 
+    async def _async_give_music_time(
+        self, reward: dict[str, Any], member: dict[str, Any]
+    ) -> None:
+        speaker = reward.get("speaker")
+        if not speaker or self.hass.config_entries.async_get_entry(speaker) is None:
+            raise FamilyError(f"The speaker for {reward['name']} isn't set up any more")
+        await self._async_grant_music_time(
+            speaker,
+            int(reward.get("minutes", 0)),
+            f"{member['name']}'s reward: {reward['name']}",
+        )
+
+    async def _async_grant_music_time(
+        self, speaker: str, minutes: int, reason: str
+    ) -> None:
+        """Give (or take back) listening time in Media Mgmt."""
+        if not self.hass.services.has_service(MEDIA_MGMT_DOMAIN, MEDIA_MGMT_GRANT):
+            raise FamilyError("Music time needs Media Mgmt, which isn't set up")
+        data = {"profile_id": speaker, "minutes": minutes}
+        try:
+            try:
+                await self.hass.services.async_call(
+                    MEDIA_MGMT_DOMAIN,
+                    MEDIA_MGMT_GRANT,
+                    {**data, "reason": reason[:100]},
+                    blocking=True,
+                )
+            except vol.Invalid:
+                # Media Mgmt before 1.5.0 doesn't take a reason.
+                await self.hass.services.async_call(
+                    MEDIA_MGMT_DOMAIN, MEDIA_MGMT_GRANT, data, blocking=True
+                )
+        except (HomeAssistantError, vol.Invalid) as err:
+            raise FamilyError(f"Couldn't give the music time: {err}") from err
+
     @callback
     def mark_given(self, entry_id: str) -> dict[str, Any]:
         entry = self._entry(entry_id)
         entry["given"] = model.GIVEN_DONE
         entry["given_at"] = _now_iso()
         self._changed()
+        self.notices.clear(entry_id)
         return entry
+
+    @callback
+    def set_goal(self, member_id: str, reward_id: str | None) -> dict[str, Any]:
+        """The reward a member is saving for, or None to stop."""
+        member = self.member(member_id)
+        if reward_id is not None:
+            self.reward(reward_id)
+        member["goal"] = reward_id
+        self._changed()
+        return member
 
     @callback
     def adjust(self, member_id: str, points: int, reason: str | None) -> dict[str, Any]:
@@ -667,6 +943,12 @@ class FamilyManager:
             "color": raw.get("color")
             or MEMBER_COLORS[len(self.members) % len(MEMBER_COLORS)],
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            # Points added every week (0: none).
+            "allowance": model.clean_points(raw.get("allowance") or 0, "Allowance"),
+            # Chosen on the Family dashboard, not here: kept as it is.
+            "goal": next(
+                (m.get("goal") for m in self.members if m["id"] == member_id), None
+            ),
         }
         new = self._upsert(self.members, member)
         self._changed(members=new)
@@ -680,11 +962,21 @@ class FamilyManager:
         todo_list = raw.get("todo_list") or None
         if todo_list is not None and not str(todo_list).startswith("todo."):
             raise FamilyError("Pick a to-do list")
+        members = self._known_members(raw.get("members"))
+        turns = bool(raw.get("turns"))
+        turn_every = raw.get("turn_every") or model.TURN_EVERY_TIME
+        if turns and len(members) < 2:
+            raise FamilyError("Pick at least two people to take turns")
+        if turn_every not in model.TURN_EVERY:
+            raise FamilyError("Pick when the turn moves on")
+        turn_first = raw.get("turn_first")
+        if turns and turn_first not in members:
+            turn_first = members[0]
         chore = {
             "id": raw.get("id") or _id(),
             "name": model.clean_name(raw.get("name"), "The chore's name"),
             "points": model.clean_points(raw.get("points", 0)),
-            "members": self._known_members(raw.get("members")),
+            "members": members,
             "repeat": repeat,
             # For "after_days": back this many days after it was done.
             "repeat_days": max(1, min(int(raw.get("repeat_days") or 1), 365))
@@ -696,6 +988,15 @@ class FamilyManager:
             "todo_list": todo_list,
             # Extra points taken if it didn't happen; None: the family's.
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
+            # Only on these weekdays (Monday 0), and between these hours.
+            "days": model.clean_days(raw.get("days")),
+            "from_time": model.clean_time(raw.get("from_time"), "From"),
+            "until_time": model.clean_time(raw.get("until_time"), "Until"),
+            # Its people take turns: turn_first's turn from now on.
+            "turns": turns,
+            "turn_every": turn_every if turns else None,
+            "turn_first": turn_first if turns else None,
+            "turn_from": _now_iso() if turns else None,
         }
         self._upsert(self.chores, chore)
         self._changed()
@@ -717,6 +1018,11 @@ class FamilyManager:
             if raw.get("limit") in model.REWARD_LIMITS
             else None,
         }
+        if kind == model.REWARD_MUSIC_TIME:
+            if not raw.get("speaker"):
+                raise FamilyError("Pick the speaker the time is for")
+            minutes = model.clean_points(raw.get("minutes"), "Minutes", minimum=1)
+            reward.update(speaker=raw["speaker"], minutes=min(minutes, 240))
         if kind == model.REWARD_TV_TIME:
             if not raw.get("tv"):
                 raise FamilyError("Pick the TV the time is for")
@@ -831,6 +1137,13 @@ class FamilyManager:
         if collection == "members":
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
+            for row in [*(self.settings.get("calendars") or []), *self.notes]:
+                if row.get("member") == item_id:
+                    row["member"] = None
+        if collection == "rewards":
+            for member in self.members:
+                if member.get("goal") == item_id:
+                    member["goal"] = None
         if collection == "todo_lists":
             self._watch_todo_lists()
             self.todo_items.pop(item_id, None)
@@ -950,6 +1263,7 @@ class FamilyManager:
             {
                 **r,
                 "tv_name": self._tv_name(r.get("tv")),
+                "speaker_name": self._tv_name(r.get("speaker")),
                 "used_by": sorted(model.reward_used_by(r, self.entries, now)),
             }
             for r in self.rewards
@@ -979,6 +1293,22 @@ class FamilyManager:
                 "streak": int(self.settings.get("streak_bonus") or 0),
             },
             "recent": recent,
+            "today": self.calendar.events,
+            "meals": [
+                {"date": day, **self.meals.get(day, {})}
+                for day in model.week_days(today)
+            ],
+            "notes": sorted(
+                (n for n in self.notes if model.note_current(n, today)),
+                key=lambda n: n["at"],
+                reverse=True,
+            ),
+            "money": {
+                "value": self.settings.get("point_value"),
+                "currency": self.settings.get("currency") or "",
+            }
+            if self.settings.get("point_value")
+            else None,
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
             "undo_seconds": model.UNDO_SECONDS,
@@ -987,6 +1317,19 @@ class FamilyManager:
             result["settings"] = {
                 "auto_check": self.settings.get("auto_check"),
                 "penalty": int(self.settings.get("penalty") or 0),
+                "notify_targets": list(self.settings.get("notify_targets") or []),
+                "notify_done": bool(self.settings.get("notify_done")),
+                "notify_rewards": bool(self.settings.get("notify_rewards")),
+                "weekly_summary": bool(self.settings.get("weekly_summary")),
+                "allowance_day": int(
+                    self.settings.get("allowance_day", model.DEFAULT_ALLOWANCE_DAY)
+                ),
+                "allowance_hour": int(
+                    self.settings.get("allowance_hour", model.DEFAULT_ALLOWANCE_HOUR)
+                ),
+                "point_value": self.settings.get("point_value"),
+                "currency": self.settings.get("currency") or "",
+                "calendars": list(self.settings.get("calendars") or []),
             }
             result["all_chores"] = self.chores
             result["todo_lists"] = [

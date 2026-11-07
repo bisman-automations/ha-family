@@ -26,6 +26,24 @@ const REPEATS = [
   { id: "always", label: "Right away, every time it's done" },
   { id: "after_check", label: "Once a parent checks it" },
 ];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const TURN_EVERY = [
+  { id: "time", label: "Each time it's done" },
+  { id: "day", label: "Each day" },
+  { id: "week", label: "Each week (from Monday)" },
+];
+const timeText = (hhmm) => {
+  if (!hhmm) return "";
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date(2000, 0, 1, h, m);
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
+// "Tue, Thu", "8:00 AM to 9:00 AM": when a chore shows, for the Parents list.
+const whenShown = (c) => {
+  const days = c.days?.length ? c.days.map((d) => DAYS[d]).join(", ") : "";
+  const hours = c.from_time && c.until_time ? `${timeText(c.from_time)} to ${timeText(c.until_time)}` : c.from_time ? `from ${timeText(c.from_time)}` : c.until_time ? `until ${timeText(c.until_time)}` : "";
+  return [days, hours].filter(Boolean).join(" ");
+};
 const repeatText = (c) =>
   c.repeat === "after_days" ? `Back ${c.repeat_days || 1} ${c.repeat_days === 1 ? "day" : "days"} after it's done` : REPEATS.find((r) => r.id === c.repeat)?.label || "";
 
@@ -78,6 +96,22 @@ const whenText = (iso) => {
 };
 
 const pts = (n) => `${n} ${Math.abs(n) === 1 ? "point" : "points"}`;
+const MEALS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"]];
+const WEEKDAYS_LONG = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// An ISO date (YYYY-MM-DD) as "Mon 9", "Today" or "Tomorrow".
+const dayText = (iso, index) => {
+  if (index === 0) return "Today";
+  if (index === 1) return "Tomorrow";
+  const d = new Date(`${iso}T12:00:00`);
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+};
+// When a calendar event starts: "All day", or its time.
+const eventTime = (e) => (e.all_day ? "All day" : new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+const money = (points, m) => {
+  if (!m?.value) return "";
+  const amount = points * m.value;
+  return `${m.currency || ""}${amount.toFixed(amount % 1 ? 2 : 0)}`;
+};
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 
 const STYLES = `
@@ -149,6 +183,19 @@ const STYLES = `
   .bar > span { display: block; height: 100%; background: var(--primary-color); border-radius: 4px; }
   .tile:disabled .bar { opacity: 1; }
   .streak { font-size: 15px; font-weight: 600; }
+  .goal-mini { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 14px; }
+  .goal-card {
+    display: flex; align-items: center; gap: 16px; width: 100%; margin: 8px 0 4px; padding: 14px 18px;
+    border-radius: var(--fam-radius); border: 2px solid var(--primary-color); background: var(--fam-card);
+    color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box;
+  }
+  .goal-card .emoji { font-size: 38px; line-height: 1; }
+  .goal-card .goal-text { display: grid; gap: 6px; flex: 1; }
+  .goal-card .label { font-size: 18px; font-weight: 500; }
+  .goal-card .sub { font-size: 14px; color: var(--fam-muted); }
+  .tile.short { opacity: .6; }
+  .tile.goal { border-color: var(--primary-color); box-shadow: inset 0 0 0 2px var(--primary-color); opacity: 1; }
+  .goal-tag { color: var(--primary-color) !important; font-weight: 600; }
   .streak-line { font-size: 17px; font-weight: 500; color: var(--fam-muted); margin-left: 8px; }
   @media (max-width: 500px) {
     .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -173,6 +220,30 @@ const STYLES = `
     display: block; margin: 14px auto 0; font: inherit; font-size: 17px; font-weight: 600; min-height: 48px;
     padding: 0 28px; border-radius: 24px; border: 1px solid var(--fam-divider); background: var(--fam-card);
     color: var(--primary-color); cursor: pointer;
+  }
+  .tile.note { position: relative; cursor: default; min-height: 96px; border-left: 6px solid var(--c, var(--primary-color)); background: color-mix(in srgb, var(--c, var(--primary-color)) 8%, var(--card-background-color, #fff)); }
+  .tile.note .note-text { font-size: 17px; line-height: 1.35; padding-right: 26px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tile.note .sub { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+  .note-x { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent; color: var(--fam-muted); font-size: 16px; cursor: pointer; }
+  .note-x:hover { background: var(--divider-color); }
+  .tile.add-note { min-height: 96px; border-style: dashed; background: transparent; box-shadow: none; align-items: center; justify-content: center; text-align: center; }
+  .tile.event { cursor: default; min-height: 90px; border-left: 6px solid var(--c, var(--divider-color)); }
+  .tile.event .when { font-size: 14px; font-weight: 600; color: var(--primary-color); }
+  .tile.meal { cursor: default; min-height: 90px; gap: 4px; }
+  .tile.meal .meal-line { font-size: 16px; }
+  .tile.meal .meal-line small { display: block; font-size: 12px; color: var(--fam-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .small-people { flex-wrap: wrap; }
+  .person.pick { cursor: pointer; flex-direction: row; gap: 8px; padding: 8px 12px; min-width: 0; }
+  .person.pick input { margin: 0; }
+  .sheet textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 10px; border-radius: 10px; border: 1px solid var(--divider-color); background: var(--card-background-color, #fff); color: var(--primary-text-color); }
+  .meal-row { display: grid; grid-template-columns: 150px repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--divider-color); }
+  .meal-row .meal-day { align-self: center; }
+  .meal-row .field { min-width: 0; }
+  .meal-row input { width: 100%; min-width: 0; box-sizing: border-box; }
+  .money { color: var(--fam-muted); font-weight: 400; }
+  @media (max-width: 700px) {
+    .meal-row { grid-template-columns: 1fr 1fr; }
+    .meal-row .meal-day { grid-column: 1 / -1; }
   }
   .tile.control { min-height: 110px; }
   .tile.control .icon { --mdc-icon-size: 34px; color: var(--fam-muted); line-height: 1; }
@@ -239,7 +310,7 @@ const STYLES = `
   .field small { color: var(--fam-muted); }
   .inline { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
   .check { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
-  input[type="text"], input[type="number"], select {
+  input[type="text"], input[type="number"], input[type="time"], select {
     font: inherit; font-size: 15px; padding: 8px 10px; min-height: 40px; box-sizing: border-box;
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
@@ -415,9 +486,30 @@ class FamilyPanel extends HTMLElement {
     return `<div class="people" role="group">${members
       .map((m) => `<button class="person" style="--c:${esc(m.color)}" ${attr}="${esc(m.id)}" aria-pressed="${m.id === selected}">
           ${this._avatar(m)}<span class="name">${esc(m.name)}</span>
-          <span class="points"><b>${m.points}</b> ${m.points === 1 ? "point" : "points"}</span>
-          ${m.streak >= 2 ? `<span class="streak" title="${m.streak} days in a row">🔥 ${m.streak}</span>` : ""}</button>`)
+          <span class="points"><b>${m.points}</b> ${m.points === 1 ? "point" : "points"}${this._data?.money ? `<small class="money"> · ${esc(money(m.points, this._data.money))}</small>` : ""}</span>
+          ${m.streak >= 2 ? `<span class="streak" title="${m.streak} days in a row">🔥 ${m.streak}</span>` : ""}${this._goalBar(m)}</button>`)
       .join("")}</div>`;
+  }
+
+  // The reward someone's saving for, if it's still there.
+  _goal(m) {
+    return m?.goal ? this._data?.rewards.find((r) => r.id === m.goal) : null;
+  }
+
+  _bar(have, need) {
+    return `<span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${need}" aria-valuenow="${Math.min(have, need)}"><span style="width:${Math.min(100, Math.round((100 * have) / Math.max(1, need)))}%"></span></span>`;
+  }
+
+  _goalBar(m) {
+    const goal = this._goal(m);
+    if (!goal) return "";
+    return `<span class="goal-mini" title="Saving for ${esc(goal.name)}">${goal.emoji ? esc(goal.emoji) : "🎯"} ${this._bar(m.points, goal.points)}</span>`;
+  }
+
+  _rewardSub(r) {
+    if (r.kind === "tv_time") return `${r.minutes} min of TV${r.tv_name ? ` · ${r.tv_name}` : ""}`;
+    if (r.kind === "music_time") return `${r.minutes} min of music${r.speaker_name ? ` · ${r.speaker_name}` : ""}`;
+    return "";
   }
 
   _feed(entries, review = false) {
@@ -427,7 +519,7 @@ class FamilyPanel extends HTMLElement {
         const m = this._memberById(e.member);
         const gone = e.review === "rejected";
         const cls = gone ? "gone" : e.points >= 0 ? "plus" : "minus";
-        const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : e.kind === "bonus" ? `earned a bonus: <b>${esc(e.title)}</b>` : e.kind === "penalty" ? `lost points: <b>${esc(e.title)}</b> didn't happen` : `<b>${esc(e.title)}</b>`;
+        const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : e.kind === "bonus" ? `earned a bonus: <b>${esc(e.title)}</b>` : e.kind === "penalty" ? `lost points: <b>${esc(e.title)}</b> didn't happen` : e.kind === "allowance" ? "got their <b>weekly allowance</b>" : `<b>${esc(e.title)}</b>`;
         const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.auto ? " · checked automatically" : e.given === "to_give" ? " · to hand out" : "";
         return `<li>${m ? this._avatar(m, true) : ""}<span class="what">${esc(m?.name || "Someone")} ${what}<br><small class="muted">${esc(whenText(e.at))}${note}</small></span>
           <span class="amount ${cls}">${signed(e.points)}</span>${review && e.kind === "chore" && !gone ? `<button class="btn bad" data-review="${esc(e.id)}" data-approved="0">Didn't happen</button>` : ""}</li>`;
@@ -469,6 +561,12 @@ class FamilyPanel extends HTMLElement {
     const t = this._toastMsg;
     const undo = t?.undo ? `<button class="undo" data-undo="${esc(t.undo)}">Undo</button>` : "";
     const toast = t ? `<div class="toast${t.bad ? " bad" : ""}" role="status"><span>${esc(t.text)}</span>${undo}</div>` : "";
+    // Don't wipe a note someone is typing: only the toast changes then.
+    if (this._sheet?.type === "note" && overlay.querySelector("[data-note-form]")) {
+      overlay.querySelector(".toast")?.remove();
+      if (toast) overlay.insertAdjacentHTML("beforeend", toast);
+      return;
+    }
     overlay.innerHTML = (this._sheet ? this._renderSheet() : "") + toast;
   }
 
@@ -491,7 +589,7 @@ class FamilyPanel extends HTMLElement {
             return `<button class="tile" data-chore="${esc(c.id)}">
               ${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}
               <span class="label">${esc(c.name)}</span>
-              ${c.list && !own ? `<span class="sub">${esc(c.list)}</span>` : ""}${who}
+              ${c.list && !own ? `<span class="sub">${esc(c.list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               <span class="worth">+${pts(c.points)}</span></button>`;
           })
           .join("")}</div>`
@@ -501,10 +599,13 @@ class FamilyPanel extends HTMLElement {
           .map((r) => {
             const short = member && member.points < r.points;
             const used = member && (r.used_by || []).includes(member.id);
-            const sub = r.kind === "tv_time" ? `${r.minutes} min of TV${r.tv_name ? ` · ${r.tv_name}` : ""}` : "";
+            const goal = member && member.goal === r.id;
+            const sub = this._rewardSub(r);
             const note = used ? AGAIN[r.limit] : short ? `${member.points} of ${r.points} · ${r.points - member.points} more to go` : LIMIT_TEXT[r.limit] || "";
-            const bar = short && !used ? `<span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${r.points}" aria-valuenow="${member.points}"><span style="width:${Math.round((100 * member.points) / Math.max(1, r.points))}%"></span></span>` : "";
-            return `<button class="tile" data-reward="${esc(r.id)}" ${short || used ? "disabled" : ""}>
+            const bar = short && !used ? this._bar(member.points, r.points) : "";
+            // Not enough yet: a tap offers to save up for it.
+            return `<button class="tile${short ? " short" : ""}${goal ? " goal" : ""}" data-reward="${esc(r.id)}" ${used ? "disabled" : ""}>
+              ${goal ? `<span class="sub goal-tag">🎯 Saving for this</span>` : ""}
               ${r.emoji ? `<span class="emoji">${esc(r.emoji)}</span>` : ""}
               <span class="label">${esc(r.name)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
               <span class="worth">${pts(r.points)}</span>
@@ -525,13 +626,54 @@ class FamilyPanel extends HTMLElement {
       })
       .join("")}</div>`;
     const streak = member?.streak >= 2 ? ` <span class="streak-line">🔥 ${member.streak} days in a row</span>` : "";
-    return `<h2>${member ? `Hi ${esc(member.name)}!${streak}` : "Who's here?"}</h2>
-      ${this._people(d.members, "data-member", this._member)}
+    const goal = this._goal(member);
+    const goalCard = goal
+      ? `<button class="goal-card" data-reward="${esc(goal.id)}">
+          <span class="emoji">${esc(goal.emoji || "🎯")}</span>
+          <span class="goal-text"><span class="label">Saving for ${esc(goal.name)}</span>
+          ${this._bar(member.points, goal.points)}
+          <span class="sub">${member.points >= goal.points ? "You have enough! Tap to get it." : `${member.points} of ${goal.points} · ${goal.points - member.points} more to go`}</span></span></button>`
+      : "";
+    const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
+    // "Add a note" comes first, so it's never folded away with the rest.
+    const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
+    const events = (d.today || []).filter((e) => !member || !e.member || e.member === member.id);
+    const eventTiles = `<div class="tiles events" data-fit="today">${events
+      .map((e) => {
+        const m = this._memberById(e.member);
+        return `<div class="tile event"${m ? ` style="--c:${esc(m.color)}"` : ""}><span class="when">${esc(eventTime(e))}</span>
+          <span class="label">${esc(e.title)}</span>${m && !member ? `<span class="who">${this._avatar(m, true)}</span>` : ""}</div>`;
+      })
+      .join("")}</div>`;
+    const meals = (d.meals || []).slice(0, 2).filter((day) => MEALS.some(([k]) => day[k]));
+    const mealTiles = `<div class="tiles meals" data-fit="meals">${meals
+      .map((day) => {
+        const index = (d.meals || []).indexOf(day);
+        return `<div class="tile meal"><span class="sub">${esc(dayText(day.date, index))}</span>
+          ${MEALS.filter(([k]) => day[k]).map(([k, label]) => `<span class="meal-line"><small>${label}</small> ${esc(day[k])}</span>`).join("")}</div>`;
+      })
+      .join("")}</div>`;
+    const cash = member && d.money ? ` <span class="streak-line">${esc(money(member.points, d.money))}</span>` : "";
+    return `<h2>${member ? `Hi ${esc(member.name)}!${streak}${cash}` : "Who's here?"}</h2>
+      ${this._people(d.members, "data-member", this._member)}${goalCard}
+      ${this._section("notes", "Notes", noteTiles, notes.length)}
+      ${events.length ? this._section("today", "Today", eventTiles, events.length) : ""}
+      ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
       ${this._section("chores", "Chores", choreTiles, chores.length)}
       ${done.length ? this._section("done", "Done today", doneTiles, done.length) : ""}
       ${this._section("rewards", "Rewards", rewardTiles, d.rewards.length)}
       ${home}
       ${this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`)}`;
+  }
+
+  _noteTile(n) {
+    const m = this._memberById(n.member);
+    // A parent's note can only be taken down by a parent.
+    const canRemove = !n.parent || this._data.is_admin;
+    return `<div class="tile note"${m ? ` style="--c:${esc(m.color)}"` : ""}>
+      <span class="note-text">${esc(n.text)}</span>
+      <span class="sub">${m ? `${this._avatar(m, true)} ${esc(m.name)}` : n.parent ? "From a parent" : ""}${n.until ? ` · until ${esc(dayText(n.until, -1))}` : ""}</span>
+      ${canRemove ? `<button class="note-x" data-note-remove="${esc(n.id)}" aria-label="Take down this note">✕</button>` : ""}</div>`;
   }
 
   // Sections: the first row by default (as many as fit across the screen),
@@ -680,6 +822,19 @@ class FamilyPanel extends HTMLElement {
   _renderSheet() {
     const s = this._sheet;
     const d = this._data;
+    if (s.type === "note") {
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Add a note">
+        <h3>Add a note</h3>
+        <form data-note-form>
+          <textarea name="text" rows="3" maxlength="200" placeholder="Dentist at 4, soccer bag by the door…" required></textarea>
+          <p class="muted">From</p>
+          <div class="people small-people">${d.members.map((m) => `<label class="person pick" style="--c:${esc(m.color)}"><input type="radio" name="member_id" value="${esc(m.id)}" ${m.id === s.member ? "checked" : ""}>${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></label>`).join("")}
+            <label class="person pick"><input type="radio" name="member_id" value="" ${s.member ? "" : "checked"}><span class="name">Everyone</span></label></div>
+          <label class="field"><span>Show until (optional)</span><input type="date" name="until"></label>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button>
+          <button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Put it up</button></div>
+        </form></div></div>`;
+    }
     if (s.type === "control") {
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.verb)}">
         <h3>${esc(s.verb)} ${esc(s.name)}?</h3>
@@ -712,7 +867,16 @@ class FamilyPanel extends HTMLElement {
         ${can.length ? this._people(can, "data-sheet-member", null) : `<p>Nobody has enough points yet.</p>`}
         <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
     }
-    const tv = reward.kind === "tv_time" ? ` You'll get ${reward.minutes} minutes on ${esc(reward.tv_name || "the TV")} straight away.` : " A parent will give it to you.";
+    if (member.points < reward.points) {
+      const saving = member.goal === reward.id;
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Save up">
+        <h3>${esc(reward.emoji || "")} ${esc(reward.name)}</h3>
+        <p>${esc(member.name)} has ${member.points} of ${pts(reward.points)}: ${reward.points - member.points} more to go.${saving ? "" : " Save up for it?"}</p>
+        ${this._bar(member.points, reward.points)}
+        <div class="actions" style="margin-top:18px"><button class="big" data-close>Not now</button>
+        ${saving ? `<button class="big" data-goal="">Stop saving for it</button>` : `<button class="big primary" data-goal="${esc(reward.id)}" ${this._busy ? "disabled" : ""}>Save for this</button>`}</div></div></div>`;
+    }
+    const tv = reward.kind === "tv_time" ? ` You'll get ${reward.minutes} minutes on ${esc(reward.tv_name || "the TV")} straight away.` : reward.kind === "music_time" ? ` You'll get ${reward.minutes} minutes of music on ${esc(reward.speaker_name || "the speaker")} straight away.` : " A parent will give it to you.";
     return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Get a reward">
       <h3>${esc(reward.name)}</h3><p>Spend ${pts(reward.points)} of ${esc(member.name)}'s ${member.points}?${tv}</p>
       <div class="actions"><button class="big" data-close>No</button>
@@ -729,6 +893,8 @@ class FamilyPanel extends HTMLElement {
       ["chores", "Chores"],
       ["rewards", "Rewards"],
       ["home", "Home"],
+      ["meals", "Meals"],
+      ["notes", "Notes"],
       ["family", "Family"],
       ["history", "History"],
     ];
@@ -740,6 +906,8 @@ class FamilyPanel extends HTMLElement {
       chores: () => this._renderChores(),
       rewards: () => this._renderRewards(),
       home: () => this._renderHome(),
+      meals: () => this._renderMeals(),
+      notes: () => this._renderNotes(),
       family: () => this._renderMembers(),
       history: () => `<div class="card">${this._feed(d.history || [], true)}</div>`,
     }[this._tab]();
@@ -778,7 +946,26 @@ class FamilyPanel extends HTMLElement {
         <label class="field" style="margin-top:16px"><span>Count chores nobody checked as done right</span>
           <select data-auto-check>${AUTO_CHECKS.map((a) => `<option value="${a.id}" ${auto === a.id ? "selected" : ""}>${a.label}</option>`).join("")}</select>
           <small>You can still mark one <b>Didn't happen</b> from History.</small></label></div>
-      <div class="card"><h2>Rewards to hand out</h2>${give}</div>`;
+      <div class="card"><h2>Rewards to hand out</h2>${give}</div>
+      ${this._phonesCard()}`;
+  }
+
+  _phonesCard() {
+    const st = this._data.settings || {};
+    const phones = this._choices?.notify || [];
+    const picked = new Set(st.notify_targets || []);
+    const list = phones.length
+      ? `<div class="inline">${phones.map((p) => `<label class="check"><input type="checkbox" name="notify_targets" value="${esc(p.service)}" ${picked.has(p.service) ? "checked" : ""}> ${esc(p.name)}</label>`).join("")}</div>`
+      : `<small>No phones yet. Install the Home Assistant app on a phone and log in, and it shows up here.</small>`;
+    return `<div class="card"><h2>Phones</h2>
+      <p class="muted">Get a notification on your phone, and check chores from it with <b>Done right</b> and <b>Didn't happen</b>. Only a parent's phone can check them.</p>
+      <form class="edit" data-phones>
+        <div class="field"><span>Send to</span>${list}</div>
+        <label class="check"><input type="checkbox" name="notify_done" ${st.notify_done ? "checked" : ""}> When a chore is marked done</label>
+        <label class="check"><input type="checkbox" name="notify_rewards" ${st.notify_rewards ? "checked" : ""}> When a reward needs handing out</label>
+        <label class="check"><input type="checkbox" name="weekly_summary" ${st.weekly_summary ? "checked" : ""}> A summary of the week, on Sunday at 6:00 PM</label>
+        <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
+      </form></div>`;
   }
 
   _whoText(ids) {
@@ -800,7 +987,7 @@ class FamilyPanel extends HTMLElement {
     const chores = d.all_chores.length
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${esc(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
-              <small>+${pts(c.points)} · ${esc(repeatText(c))} · ${esc(this._whoText(c.members))}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
+              <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : this._whoText(c.members))}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -838,10 +1025,27 @@ class FamilyPanel extends HTMLElement {
       <label class="field"><span>Also keep it on a to-do list</span><select name="todo_list">
         <option value="">No list</option>${(this._choices?.todo_lists || []).map((l) => `<option value="${esc(l.entity_id)}" ${l.entity_id === c.todo_list ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
         <small>It's added to the list while it can be done, ticked off when it's done, and opened again when it comes back.</small></label>
+      <div class="field"><span>Which days</span><div class="inline">${DAYS.map((d, i) => `<label class="check"><input type="checkbox" name="days" value="${i}" ${(c.days || []).includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div>
+        <small>None ticked: every day. Trash day? Tick just that day.</small></div>
+      <div class="inline">
+        <label class="field"><span>Shown from</span><input type="time" name="from_time" value="${esc(c.from_time || "")}"></label>
+        <label class="field"><span>Until</span><input type="time" name="until_time" value="${esc(c.until_time || "")}"></label>
+        <small style="align-self:end">Empty: all day. For a morning or bedtime chore, such as 6:00 AM to 9:00 AM.</small>
+      </div>
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
+      <label class="check"><input type="checkbox" name="turns" data-turns ${c.turns ? "checked" : ""}> They take turns (tick two or more people above)</label>
+      <div class="inline" data-turn-fields ${c.turns ? "" : "hidden"}>
+        <label class="field"><span>The turn moves on</span><select name="turn_every">${TURN_EVERY.map((t) => `<option value="${t.id}" ${(c.turn_every || "time") === t.id ? "selected" : ""}>${t.label}</option>`).join("")}</select></label>
+        <label class="field"><span>Whose turn is it now?</span><select name="turn_first">${this._data.members.map((m) => `<option value="${esc(m.id)}" ${this._currentTurn(c) === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>
+      </div>
       <label class="check"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Show it on the Family dashboard</label>
       <div class="form-actions"><button class="btn primary" type="submit">Save chore</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
+  }
+
+  // Whose turn a chore is now, from the Family dashboard's view of it.
+  _currentTurn(c) {
+    return this._data.chores.find((x) => x.id === c.id)?.turn || c.turn_first || c.members?.[0];
   }
 
   _listName(entityId) {
@@ -883,7 +1087,7 @@ class FamilyPanel extends HTMLElement {
     const rows = d.rewards.length
       ? `<ul class="rows">${d.rewards
           .map((r) => `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
-              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : " · handed out by a parent"}</small></span>
+              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : r.kind === "music_time" ? ` · ${r.minutes} min of music on ${esc(r.speaker_name || "a speaker that's gone")}` : " · handed out by a parent"}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
               <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -907,6 +1111,7 @@ class FamilyPanel extends HTMLElement {
 
   _rewardForm(item) {
     const tvs = this._choices?.tvs || [];
+    const speakers = this._choices?.speakers || [];
     const r = item || { name: "", points: 20, kind: tvs.length ? "tv_time" : "custom", minutes: 30, tv: tvs[0]?.id, whole_home: false };
     const kind = this._rewardKind || r.kind;
     const tvFields = kind === "tv_time"
@@ -918,7 +1123,15 @@ class FamilyPanel extends HTMLElement {
           <label class="check"><input type="checkbox" name="whole_home" ${r.whole_home ? "checked" : ""}> Give the whole home the same time too</label>
           <small class="muted">The TV time is given in TV Mgmt as soon as the reward is picked.</small>`
         : `<p class="error">TV time needs TV Mgmt with at least one TV set up.</p>`)
-      : `<small class="muted">A parent hands it out; it shows under To check until then.</small>`;
+      : kind === "music_time"
+        ? (speakers.length
+          ? `<div class="inline">
+              <label class="field"><span>Speaker</span><select name="speaker">${speakers.map((t) => `<option value="${esc(t.id)}" ${t.id === r.speaker ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
+              <label class="field"><span>Minutes</span><input type="number" name="minutes" min="1" max="240" value="${esc(r.minutes || 30)}"></label>
+            </div>
+            <small class="muted">The listening time is given in Media Mgmt as soon as the reward is picked.</small>`
+          : `<p class="error">Music time needs Media Mgmt with at least one speaker set up.</p>`)
+        : `<small class="muted">A parent hands it out; it shows under To check until then.</small>`;
     return `<form class="edit" data-form="rewards" data-id="${esc(r.id || "")}">
       <div class="inline">
         <label class="field"><span>Reward</span><input type="text" name="name" value="${esc(r.name)}" required placeholder="30 minutes of TV"></label>
@@ -927,6 +1140,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>How often</span><select name="limit">${LIMITS.map((l) => `<option value="${l.id}" ${(r.limit || "") === l.id ? "selected" : ""}>${l.label}</option>`).join("")}</select></label>
         <label class="field"><span>What it is</span><select name="kind" data-reward-kind>
           <option value="tv_time" ${kind === "tv_time" ? "selected" : ""}>TV time</option>
+          <option value="music_time" ${kind === "music_time" ? "selected" : ""}>Music time</option>
           <option value="custom" ${kind === "custom" ? "selected" : ""}>Something else</option></select></label>
       </div>
       ${tvFields}
@@ -992,12 +1206,90 @@ class FamilyPanel extends HTMLElement {
     </form>`;
   }
 
+  _renderMeals() {
+    const d = this._data;
+    const rows = (d.meals || [])
+      .map((day, i) => {
+        const date = new Date(`${day.date}T12:00:00`);
+        const label = i < 2 ? `${dayText(day.date, i)} · ${WEEKDAYS_LONG[(date.getDay() + 6) % 7]}` : `${WEEKDAYS_LONG[(date.getDay() + 6) % 7]} ${date.getDate()}`;
+        return `<form class="meal-row" data-meals="${esc(day.date)}">
+          <b class="meal-day">${esc(label)}</b>
+          ${MEALS.map(([k, name]) => `<label class="field"><span>${name}</span><input type="text" name="${k}" maxlength="80" value="${esc(day[k] || "")}"></label>`).join("")}
+          <button class="btn" type="submit">Save</button></form>`;
+      })
+      .join("");
+    return `<div class="card"><h2>Meals for the week</h2>
+      <p class="muted">What's for breakfast, lunch and dinner. Today's and tomorrow's show on the Family dashboard. Leave a meal empty to leave it out.</p>
+      ${rows}</div>`;
+  }
+
+  _renderNotes() {
+    const d = this._data;
+    const notes = d.notes || [];
+    const rows = notes.length
+      ? `<ul class="rows">${notes
+          .map((n) => {
+            const m = this._memberById(n.member);
+            return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(n.text)}<small>${esc(whenText(n.at))}${n.by ? ` · by ${esc(n.by)}` : ""}${m ? ` · for ${esc(m.name)}` : ""}${n.until ? ` · until ${esc(dayText(n.until, -1))}` : ""}</small></span>
+              <button class="btn bad" data-note-remove="${esc(n.id)}">Take down</button></li>`;
+          })
+          .join("")}</ul>`
+      : `<p class="empty">No notes on the board.</p>`;
+    const people = d.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+    return `<div class="card"><h2>Notes</h2>
+      <p class="muted">Short notes and reminders on the Family dashboard. Anyone can put one up there too; a parent's note can only be taken down by a parent.</p>
+      ${rows}
+      <form class="edit" data-note-form>
+        <label class="field"><span>Note</span><input type="text" name="text" maxlength="200" required placeholder="Library books due Friday"></label>
+        <div class="inline">
+          <label class="field"><span>For</span><select name="member_id"><option value="">Everyone</option>${people}</select></label>
+          <label class="field"><span>Show until (optional)</span><input type="date" name="until"></label>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Put it up</button></div>
+      </form></div>`;
+  }
+
+  _allowanceCard() {
+    const st = this._data.settings || {};
+    const day = st.allowance_day ?? 6;
+    const hour = st.allowance_hour ?? 8;
+    const hours = Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === hour ? "selected" : ""}>${esc(timeText(`${String(h).padStart(2, "0")}:00`))}</option>`).join("");
+    return `<div class="card"><h2>Allowance and money</h2>
+      <p class="muted">Give each family member points every week: set how many when you edit them, under Family. Add what a point is worth to show their points as money too.</p>
+      <form class="edit" data-allowance>
+        <div class="inline">
+          <label class="field"><span>Given on</span><select name="allowance_day">${WEEKDAYS_LONG.map((name, i) => `<option value="${i}" ${i === day ? "selected" : ""}>${name}</option>`).join("")}</select></label>
+          <label class="field"><span>At</span><select name="allowance_hour">${hours}</select></label>
+          <label class="field"><span>One point is worth</span><input type="number" name="point_value" min="0" max="100" step="0.01" value="${esc(st.point_value ?? "")}" placeholder="No money value" style="width:130px"></label>
+          <label class="field"><span>Money sign</span><input type="text" name="currency" maxlength="4" value="${esc(st.currency || "")}" placeholder="$" style="width:70px"></label>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
+      </form></div>`;
+  }
+
+  _calendarCard() {
+    const st = this._data.settings || {};
+    const picked = new Map((st.calendars || []).map((c) => [c.entity_id, c.member || ""]));
+    const calendars = this._choices?.calendars || [];
+    const members = this._data.members;
+    const rows = calendars.length
+      ? `<ul class="rows">${calendars
+          .map((c) => `<li><label class="check grow"><input type="checkbox" name="calendar" value="${esc(c.entity_id)}" ${picked.has(c.entity_id) ? "checked" : ""}> ${esc(c.name)}</label>
+            <select name="member:${esc(c.entity_id)}" aria-label="Whose calendar is ${esc(c.name)}"><option value="">Everyone's</option>${members.map((m) => `<option value="${esc(m.id)}" ${picked.get(c.entity_id) === m.id ? "selected" : ""}>${esc(m.name)}'s</option>`).join("")}</select></li>`)
+          .join("")}</ul>`
+      : `<p class="empty">No calendars yet. Add one to Home Assistant, such as Local Calendar or Google Calendar.</p>`;
+    return `<div class="card"><h2>Today's calendar</h2>
+      <p class="muted">Today's events from these calendars show on the Family dashboard. A calendar for one person shows on their own page; everyone's shows on every page.</p>
+      <form class="edit" data-calendars>${rows}
+        ${calendars.length ? `<div class="form-actions"><button class="btn primary" type="submit">Save</button></div>` : ""}</form></div>`;
+  }
+
   _renderMembers() {
     const d = this._data;
     const edit = this._edit;
     const rows = d.members.length
       ? `<ul class="rows">${d.members
-          .map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b> · ${pts(m.points)}
+          .map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b> · ${pts(m.points)}${d.money ? ` (${esc(money(m.points, d.money))})` : ""}${m.allowance ? ` · +${m.allowance} a week` : ""}
               <small>${m.person ? `Linked to ${esc(this._choices?.people.find((p) => p.entity_id === m.person)?.name || m.person)}` : "Not linked to a Home Assistant person"}</small></span>
               <form class="inline" data-adjust="${esc(m.id)}">
                 <input type="number" name="points" placeholder="± points" aria-label="Points for ${esc(m.name)}" style="width:100px">
@@ -1011,6 +1303,8 @@ class FamilyPanel extends HTMLElement {
     return `<div class="card"><h2>Family</h2>
       <p class="muted">Link someone to their Home Assistant person to use its picture. If they log in to Home Assistant, the Family dashboard opens on their own page.</p>
       ${rows}${form}</div>
+      ${this._allowanceCard()}
+      ${this._calendarCard()}
       <div class="card"><h2>Shared screen</h2>
         <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>. You can also add the <b>Family</b> card to any dashboard yourself.</p>
         <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>Make a Family dashboard</button></div>`;
@@ -1049,7 +1343,7 @@ class FamilyPanel extends HTMLElement {
   }
 
   _memberForm(item) {
-    const m = item || { name: "", person: "", emoji: "", color: "" };
+    const m = item || { name: "", person: "", emoji: "", color: "", allowance: 0 };
     // Someone already linked to another family member isn't offered again.
     const taken = new Set(this._data.members.filter((x) => x.person && x.id !== m.id).map((x) => x.person));
     const people = (this._choices?.people || []).filter((p) => !taken.has(p.entity_id));
@@ -1058,6 +1352,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Name</span><input type="text" name="name" value="${esc(m.name)}" required></label>
         <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(m.emoji || "")}" size="3" placeholder="🦖"></label>
         <label class="field"><span>Color</span><input type="color" name="color" value="${esc(m.color || "#3F51B5")}"></label>
+        <label class="field"><span>Allowance (points a week)</span><input type="number" name="allowance" min="0" max="10000" value="${esc(m.allowance || 0)}" style="width:100px"></label>
         <label class="field"><span>Home Assistant person</span><select name="person" data-person><option value="">None</option>${people.map((p) => `<option value="${esc(p.entity_id)}" ${p.entity_id === m.person ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div>
@@ -1091,6 +1386,11 @@ class FamilyPanel extends HTMLElement {
       this._setSection(ds.more, this._sectionMode(ds.more) === "all" ? "first" : "all");
     } else if ("makeDashboard" in ds) {
       this._makeDashboard();
+    } else if ("noteNew" in ds) {
+      this._sheet = { type: "note", member: this._member };
+      this._renderOverlay();
+    } else if (ds.noteRemove) {
+      this._call({ type: `${DOMAIN}/note/remove`, note_id: ds.noteRemove }, "Note taken down.");
     } else if (ds.undo) {
       this._undo(ds.undo);
     } else if (ds.control) {
@@ -1106,6 +1406,8 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.sheetMember) {
       this._sheet = { ...this._sheet, member: ds.sheetMember };
       this._renderOverlay();
+    } else if ("goal" in ds) {
+      this._setGoal(ds.goal || null);
     } else if ("confirm" in ds) {
       this._confirm();
     } else if (ds.tab) {
@@ -1139,6 +1441,11 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.turns !== undefined) {
+      const fields = ev.target.closest("form").querySelector("[data-turn-fields]");
+      if (fields) fields.hidden = !ev.target.checked;
+      return;
+    }
     if (ev.target.dataset.repeat !== undefined) {
       const days = ev.target.closest("form").querySelector("[data-days-field]");
       if (days) days.hidden = ev.target.value !== "after_days";
@@ -1176,7 +1483,7 @@ class FamilyPanel extends HTMLElement {
     const data = new FormData(form);
     const out = {};
     for (const [key, value] of data.entries()) {
-      if (key === "members") (out.members ||= []).push(value);
+      if (key === "members" || key === "days" || key === "notify_targets") (out[key] ||= []).push(value);
       else out[key] = value;
     }
     return out;
@@ -1188,6 +1495,34 @@ class FamilyPanel extends HTMLElement {
     if (form.dataset.penaltySetting !== undefined) {
       const value = Math.max(0, Math.round(Number(this._formValues(form).penalty) || 0));
       return this._call({ type: `${DOMAIN}/settings`, penalty: value }, "Saved.");
+    }
+    if (form.dataset.phones !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/settings`, notify_targets: v.notify_targets || [], notify_done: !!v.notify_done, notify_rewards: !!v.notify_rewards, weekly_summary: !!v.weekly_summary }, "Saved.");
+    }
+    if (form.dataset.noteForm !== undefined) {
+      const v = this._formValues(form);
+      if (!String(v.text || "").trim()) return this._toast("Write something for the note.", true);
+      const ok = await this._call({ type: `${DOMAIN}/note/add`, text: v.text, member_id: v.member_id || null, until: v.until || null }, "Note put up.");
+      if (ok) {
+        this._sheet = null;
+        this._renderOverlay();
+      }
+      return;
+    }
+    if (form.dataset.meals) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/meals`, date: form.dataset.meals, breakfast: v.breakfast || "", lunch: v.lunch || "", dinner: v.dinner || "" }, "Meals saved.");
+    }
+    if (form.dataset.allowance !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/settings`, allowance_day: Number(v.allowance_day), allowance_hour: Number(v.allowance_hour), point_value: v.point_value === "" ? null : Number(v.point_value), currency: v.currency || "" }, "Saved.");
+    }
+    if (form.dataset.calendars !== undefined) {
+      const calendars = [...form.querySelectorAll('input[name="calendar"]')]
+        .filter((el) => el.checked)
+        .map((el) => ({ entity_id: el.value, member: form.querySelector(`select[name="member:${el.value}"]`)?.value || null }));
+      return this._call({ type: `${DOMAIN}/settings`, calendars }, "Saved.");
     }
     if (form.dataset.bonus !== undefined) {
       const v = this._formValues(form);
@@ -1204,13 +1539,13 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], enabled: !!v.enabled };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {
-      item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null };
+      item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)) };
     } else {
       item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [] };
       const itemPoints = {};
@@ -1241,6 +1576,25 @@ class FamilyPanel extends HTMLElement {
     } catch (err) {
       this._toast(err?.message || String(err), true);
       return false;
+    }
+  }
+
+  async _setGoal(rewardId) {
+    const s = this._sheet;
+    if (!s?.member || this._busy) return;
+    const reward = this._data.rewards.find((r) => r.id === s.id);
+    this._busy = true;
+    try {
+      await this._ws({ type: `${DOMAIN}/goal`, member_id: s.member, reward_id: rewardId });
+      this._sheet = null;
+      this._toast(rewardId ? `Saving for ${reward?.name || "it"}!` : "Not saving for it any more.");
+      await this._load();
+    } catch (err) {
+      this._sheet = null;
+      this._toast(err?.message || String(err), true);
+    } finally {
+      this._busy = false;
+      this._renderOverlay();
     }
   }
 

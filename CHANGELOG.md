@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-11-07
+
+### Added
+
+- **Chores on set days and times.** Pick the days a chore is on (the trash on Tuesdays), and the hours it shows (6:00 AM to 9:00 AM for a morning chore, or a bedtime chore that runs past midnight). The Family dashboard changes on its own when a chore's time starts or ends.
+- **Taking turns.** The people picked for a chore can take turns: it's only for whoever's turn it is, and the turn moves on each time it's done, each day or each week. The Family dashboard says whose turn it is, and a chore that didn't happen stays their turn.
+- **Saving for a reward.** On their own page, kids tap a reward they can't afford yet and pick **Save for this**. Their page shows how far they are, with a little bar on their picture too.
+- **Check chores from your phone.** Under **To check** → **Phones**, pick the parents' phones. They get a notification when a chore is marked done, with **Done right** and **Didn't happen** buttons, and when a reward needs handing out, with **Handed out**. Only a parent's phone can check a chore, and the notification goes away once it's checked anywhere.
+- **A weekly summary.** Every Sunday at 6:00 PM: each person's chores, points earned and spent, and how many chores are still to check.
+- **Music time rewards.** Kids can spend points on listening time on a speaker in [Media Mgmt](https://github.com/bisman-automations/ha-media-mgmt), given straight away like TV time.
+- **Notes.** A board of short notes on the Family dashboard: "Dentist at 4", "Library books due Friday". Anyone can put one up from the screen, for everyone or for one person, and a note can go away by itself after a chosen day. A parent's note can only be taken down by a parent. Parents also see and manage them under the new **Notes** tab.
+- **Today's calendar.** Pick calendars under **Family → Today's calendar**, each for everyone or for one person, and today's events show on the Family dashboard under **Today**.
+- **Meals for the week.** Plan breakfast, lunch and dinner under the new **Meals** tab. Today's and tomorrow's show on the Family dashboard.
+- **Allowance.** Give each family member points every week, on the day and time you pick under **Family → Allowance and money**.
+- **Points as money.** Set what a point is worth and a money sign, and everyone's points also show as money.
+
+### Changed
+
+- Test tools: ruff 0.17.3.
+
 ## [1.5.0] - 2026-11-06
 
 ### Added
@@ -70,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.6.0]: https://github.com/bisman-automations/ha-family/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/bisman-automations/ha-family/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/bisman-automations/ha-family/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/bisman-automations/ha-family/compare/v1.2.0...v1.3.0

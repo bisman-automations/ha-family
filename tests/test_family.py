@@ -37,6 +37,8 @@ class Client:
     async def __call__(self, type_: str, **msg: Any) -> dict[str, Any]:
         await self.ws.send_json_auto_id({"type": f"{DOMAIN}/{type_}", **msg})
         res = await self.ws.receive_json()
+        while res.get("type") == "event":  # a subscription's news: not the answer
+            res = await self.ws.receive_json()
         return res
 
     async def ok(self, type_: str, **msg: Any) -> dict[str, Any]:
@@ -614,7 +616,8 @@ async def test_chores_checked_automatically(
     await hass.async_block_till_done()
     state = await client.ok("state")
     assert state["to_check"] == []
-    assert state["settings"] == {"auto_check": "day", "penalty": 0}
+    assert state["settings"]["auto_check"] == "day"
+    assert state["settings"]["penalty"] == 0
     assert state["history"][0]["auto"] is True
     assert events[0].data["automatic"] is True
 
@@ -1009,3 +1012,338 @@ async def test_chore_back_right_away(hass: HomeAssistant, client):
     state = await client.ok("state")
     assert state["members"][0]["points"] == 3
     assert alex in state["chores"][0]["can"]
+
+
+# ---- 1.6.0: set days and hours, turns, saving up, music time, parents' phones ----
+
+
+def _next(weekday: int, hour: int, minute: int = 0, second: int = 0):
+    """A time on the coming weekday (Monday 0), a week or more ahead: time
+    listeners only fire forwards."""
+    now = dt_util.now()
+    day = now + timedelta(days=7 + (weekday - now.weekday()) % 7)
+    return day.replace(hour=hour, minute=minute, second=second, microsecond=0)
+
+
+async def test_chores_on_set_days_and_hours(hass: HomeAssistant, client, freezer):
+    # A Tuesday morning.
+    tuesday = _next(1, 7)
+    freezer.move_to(tuesday)
+    alex, _sam = await _family(client)
+    await client.ok(
+        "save",
+        collection="chores",
+        item={
+            "name": "Brush teeth",
+            "points": 1,
+            "days": [1, 3],
+            "from_time": "6:00",
+            "until_time": "09:00",
+        },
+    )
+    wednesday = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={"name": "Take out the trash", "points": 3, "days": [2]},
+        )
+    )["item"]
+    assert wednesday["days"] == [2]
+    state = await client.ok("state")
+    assert [c["name"] for c in state["chores"]] == ["Brush teeth"]
+    assert state["all_chores"][0]["from_time"] == "06:00"
+    res = await client("complete", member_id=alex, chore_id=wednesday["id"])
+    assert res["error"]["message"] == "Take out the trash isn't for right now"
+    res = await client(
+        "save", collection="chores", item={"name": "Bad", "from_time": "nine"}
+    )
+    assert not res["success"]
+
+    # The dashboards hear when the morning's over.
+    await client.ws.send_json_auto_id({"type": f"{DOMAIN}/subscribe"})
+    sub = await client.ws.receive_json()
+    assert sub["success"]
+    freezer.move_to(tuesday.replace(hour=9, second=30))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    event = await client.ws.receive_json()
+    assert event["id"] == sub["id"]
+    assert event["event"] == {"changed": True}
+    assert (await client.ok("state"))["chores"] == []
+
+    # Wednesday: the trash.
+    freezer.move_to(tuesday + timedelta(days=1, hours=5))
+    state = await client.ok("state")
+    assert [c["name"] for c in state["chores"]] == ["Take out the trash"]
+
+
+async def test_chores_taken_in_turns(hass: HomeAssistant, client):
+    alex, sam = await _family(client)
+    res = await client(
+        "save",
+        collection="chores",
+        item={"name": "Dishes", "points": 4, "members": [alex], "turns": True},
+    )
+    assert res["error"]["message"] == "Pick at least two people to take turns"
+    chore = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={
+                "name": "Dishes",
+                "points": 4,
+                "repeat": "always",
+                "members": [alex, sam],
+                "turns": True,
+                "turn_first": sam,
+            },
+        )
+    )["item"]
+    state = await client.ok("state")
+    [dishes] = state["chores"]
+    assert dishes["turn"] == sam
+    assert dishes["rotation"] == [alex, sam]
+    assert dishes["can"] == [sam]
+    res = await client("complete", member_id=alex, chore_id=chore["id"])
+    assert not res["success"]
+    await client.ok("complete", member_id=sam, chore_id=chore["id"])
+    [dishes] = (await client.ok("state"))["chores"]
+    assert dishes["turn"] == alex
+
+    # Not done after all: it's Sam's turn again.
+    entry_id = (await client.ok("state"))["to_check"][0]["id"]
+    await client.ok("review", entry_id=entry_id, approved=False)
+    [dishes] = (await client.ok("state"))["chores"]
+    assert dishes["turn"] == sam
+
+
+async def test_saving_for_a_reward(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    alex, _sam = await _family(client)
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={"name": "Ice cream", "points": 10, "kind": "custom"},
+        )
+    )["item"]
+    # Picked on the shared screen, which isn't an admin.
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    await kiosk.ok("goal", member_id=alex, reward_id=reward["id"])
+    res = await kiosk("goal", member_id=alex, reward_id="nope")
+    assert not res["success"]
+    # Editing the member keeps it.
+    await client.ok("save", collection="members", item={"id": alex, "name": "Alexa"})
+    member = (await client.ok("state"))["members"][0]
+    assert member["goal"] == reward["id"]
+
+    # Spent on it: saved up, so the goal's done.
+    await client.ok("adjust", member_id=alex, points=10)
+    await kiosk.ok("redeem", member_id=alex, reward_id=reward["id"])
+    assert (await client.ok("state"))["members"][0]["goal"] is None
+
+    # A reward that's removed stops being a goal.
+    await kiosk.ok("goal", member_id=alex, reward_id=reward["id"])
+    await client.ok("delete", collection="rewards", item_id=reward["id"])
+    assert (await client.ok("state"))["members"][0]["goal"] is None
+    await kiosk.ok("goal", member_id=alex, reward_id=None)
+
+
+async def test_music_time_reward(hass: HomeAssistant, client):
+    speaker = MockConfigEntry(domain="media_mgmt", title="Kids Room")
+    speaker.add_to_hass(hass)
+    calls: list[ServiceCall] = []
+
+    async def grant(call: ServiceCall) -> None:
+        calls.append(call)
+
+    alex, _sam = await _family(client)
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={
+                "name": "Music",
+                "points": 5,
+                "kind": "music_time",
+                "speaker": speaker.entry_id,
+                "minutes": 20,
+            },
+        )
+    )["item"]
+    await client.ok("adjust", member_id=alex, points=5)
+    res = await client("redeem", member_id=alex, reward_id=reward["id"])
+    assert res["error"]["message"] == "Music time needs Media Mgmt, which isn't set up"
+
+    hass.services.async_register("media_mgmt", "grant_extension", grant)
+    choices = await client.ok("choices")
+    assert choices["speakers"] == [{"id": speaker.entry_id, "name": "Kids Room"}]
+    state = await client.ok("state")
+    assert state["rewards"][0]["speaker_name"] == "Kids Room"
+    done = await client.ok("redeem", member_id=alex, reward_id=reward["id"])
+    assert done["entry"]["given"] == "given"
+    assert calls[0].data == {
+        "profile_id": speaker.entry_id,
+        "minutes": 20,
+        "reason": "Alex's reward: Music",
+    }
+    await client.ok("undo", entry_id=done["entry"]["id"])
+    assert calls[1].data["minutes"] == -20
+
+
+async def test_media_mgmt_before_reasons(hass: HomeAssistant, client):
+    speaker = MockConfigEntry(domain="media_mgmt", title="Kids Room")
+    speaker.add_to_hass(hass)
+    calls: list[ServiceCall] = []
+
+    async def grant(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register(
+        "media_mgmt",
+        "grant_extension",
+        grant,
+        vol.Schema({vol.Required("profile_id"): str, vol.Required("minutes"): int}),
+    )
+    alex, _sam = await _family(client)
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={
+                "name": "Music",
+                "points": 0,
+                "kind": "music_time",
+                "speaker": speaker.entry_id,
+                "minutes": 15,
+            },
+        )
+    )["item"]
+    await client.ok("redeem", member_id=alex, reward_id=reward["id"])
+    assert calls[0].data == {"profile_id": speaker.entry_id, "minutes": 15}
+
+
+async def test_parents_check_chores_from_their_phones(
+    hass: HomeAssistant, client, hass_admin_user, hass_read_only_user
+):
+    from homeassistant.core import Context  # noqa: PLC0415
+
+    sent = async_mock_service(hass, "notify", "mobile_app_dads_phone")
+    alex, _sam = await _family(client)
+    res = await client("settings", notify_targets=["mobile_app_nobody"])
+    assert (
+        res["error"]["message"] == "There's no notify action called mobile_app_nobody"
+    )
+    choices = await client.ok("choices")
+    assert {"service": "mobile_app_dads_phone", "name": "Dads phone"} in choices[
+        "notify"
+    ]
+    chore = (
+        await client.ok("save", collection="chores", item={"name": "Bed", "points": 5})
+    )["item"]
+
+    # Off until it's turned on.
+    await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await hass.async_block_till_done()
+    assert sent == []
+    await client.ok("undo", entry_id=(await client.ok("state"))["to_check"][0]["id"])
+
+    settings = (
+        await client.ok(
+            "settings",
+            notify_targets=["mobile_app_dads_phone"],
+            notify_done=True,
+            notify_rewards=True,
+        )
+    )["settings"]
+    assert settings["notify_targets"] == ["mobile_app_dads_phone"]
+    await hass.async_block_till_done()
+    sent.clear()
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    entry_id = done["entry"]["id"]
+    await hass.async_block_till_done()
+    [note] = sent
+    assert note.data["title"] == "Alex did Bed"
+    assert note.data["data"]["tag"] == f"family-{entry_id}"
+    actions = [a["action"] for a in note.data["data"]["actions"]]
+    assert actions == [f"FAMILY_RIGHT_{entry_id}", f"FAMILY_DIDNT_{entry_id}"]
+
+    # Someone who isn't a parent can't check it from a phone.
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"FAMILY_DIDNT_{entry_id}"},
+        context=Context(user_id=hass_read_only_user.id),
+    )
+    await hass.async_block_till_done()
+    assert (await client.ok("state"))["to_check"][0]["id"] == entry_id
+
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"FAMILY_RIGHT_{entry_id}"},
+        context=Context(user_id=hass_admin_user.id),
+    )
+    await hass.async_block_till_done()
+    state = await client.ok("state")
+    assert state["to_check"] == []
+    assert state["history"][0]["review"] == "approved"
+    # Checked: its notification is taken away.
+    assert sent[-1].data == {
+        "message": "clear_notification",
+        "data": {"tag": f"family-{entry_id}"},
+    }
+    # A second press does nothing harmful.
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": "FAMILY_RIGHT_gone"},
+        context=Context(user_id=hass_admin_user.id),
+    )
+    await hass.async_block_till_done()
+
+    # A reward to hand out.
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={"name": "Ice cream", "points": 1, "kind": "custom"},
+        )
+    )["item"]
+    sent.clear()
+    got = await client.ok("redeem", member_id=alex, reward_id=reward["id"])
+    await hass.async_block_till_done()
+    assert sent[0].data["title"] == "Alex picked Ice cream"
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"FAMILY_GIVEN_{got['entry']['id']}"},
+        context=Context(user_id=hass_admin_user.id),
+    )
+    await hass.async_block_till_done()
+    assert (await client.ok("state"))["to_give"] == []
+
+
+async def test_weekly_summary(hass: HomeAssistant, client, freezer):
+    sent = async_mock_service(hass, "notify", "mobile_app_dads_phone")
+    # Saturday evening: nothing. Sunday at 18:00: the summary.
+    sunday = _next(6, 18)
+    freezer.move_to(sunday - timedelta(days=1))
+    alex, _sam = await _family(client)
+    chore = (
+        await client.ok("save", collection="chores", item={"name": "Bed", "points": 5})
+    )["item"]
+    await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await client.ok(
+        "settings", notify_targets=["mobile_app_dads_phone"], weekly_summary=True
+    )
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert sent == []
+    freezer.move_to(sunday)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    [summary] = sent
+    assert summary.data["title"] == "Family this week"
+    assert summary.data["message"].splitlines() == [
+        "Alex: 1 chore, +5, 5 now",
+        "Sam: 0 chores, +0, 0 now",
+        "1 chore to check",
+    ]

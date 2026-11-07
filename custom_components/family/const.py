@@ -25,6 +25,16 @@ ATTR_REASON = "reason"
 # TV time rewards go through TV Mgmt's action.
 TV_MGMT_DOMAIN = "tv_mgmt"
 TV_MGMT_GRANT = "grant_extension"
+# Music time rewards go through Media Mgmt's action of the same name.
+MEDIA_MGMT_DOMAIN = "media_mgmt"
+MEDIA_MGMT_GRANT = "grant_extension"
+
+# Phone notifications for parents: the Companion app's button presses.
+EVENT_NOTIFICATION_ACTION = "mobile_app_notification_action"
+ACTION_PREFIX = "FAMILY_"
+# The weekly summary goes out on Sunday at this hour.
+SUMMARY_WEEKDAY = 6
+SUMMARY_HOUR = 18
 
 # Ledger entries older than this are folded into each member's balance.
 KEEP_HISTORY_DAYS = 400

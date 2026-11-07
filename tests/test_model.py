@@ -223,3 +223,156 @@ def test_chores_that_come_back_once_done():
     assert model.done_by(check, [done(1)], at(9)) == {"a", "*"}
     assert model.done_by(check, [done(1, review="approved")], at(1)) == set()
     assert model.done_by(check, [done(1, review="rejected")], at(1)) == set()
+
+
+def test_set_days_and_hours():
+    # 2026-11-03 is a Tuesday (weekday 1).
+    tuesday = {"days": [1]}
+    assert model.available(tuesday, at(3))
+    assert not model.available(tuesday, at(4))
+    assert model.available({}, at(4))
+    morning = {"from_time": "06:00", "until_time": "09:00"}
+    assert model.available(morning, at(4, 7))
+    assert not model.available(morning, at(4, 9))
+    assert not model.available(morning, at(4, 5))
+    # Only a start, or only an end.
+    assert model.available({"from_time": "18:00"}, at(4, 20))
+    assert not model.available({"from_time": "18:00"}, at(4, 17))
+    assert not model.available({"until_time": "10:00"}, at(4, 11))
+    # Across midnight: after midnight, the day it started counts.
+    bedtime = {"days": [1], "from_time": "20:00", "until_time": "01:00"}
+    assert model.available(bedtime, at(3, 21))
+    assert model.available(bedtime, datetime(2026, 11, 4, 0, 30))
+    assert not model.available(bedtime, datetime(2026, 11, 4, 21))
+    assert not model.available(bedtime, at(3, 12))
+
+
+def test_clean_days_and_times():
+    assert model.clean_days(["1", 3, 3]) == [1, 3]
+    assert model.clean_days(range(7)) == []  # every day
+    with pytest.raises(ValueError):
+        model.clean_days([7])
+    assert model.clean_time("7:5", "From") == "07:05"
+    assert model.clean_time("", "From") is None
+    with pytest.raises(ValueError):
+        model.clean_time("25:00", "From")
+    with pytest.raises(ValueError):
+        model.clean_time("soon", "From")
+
+
+def _did(chore_id, day, member="a", review="pending"):
+    return {
+        "kind": "chore",
+        "chore_id": chore_id,
+        "member": member,
+        "at": at(day).isoformat(),
+        "review": review,
+    }
+
+
+def test_turns():
+    chore = {
+        "id": "dishes",
+        "members": ["a", "b", "c"],
+        "turns": True,
+        "turn_first": "b",
+        "turn_from": at(2, 8).isoformat(),  # a Monday
+    }
+    # Each time it's done: the next person, and a chore that didn't happen
+    # doesn't move it on.
+    assert model.turn_member(chore, [], at(2)) == "b"
+    entries = [_did("dishes", 2, "b")]
+    assert model.turn_member(chore, entries, at(2, 13)) == "c"
+    entries.append(_did("dishes", 3, "c", review="rejected"))
+    assert model.turn_member(chore, entries, at(3, 13)) == "c"
+    entries.append(_did("dishes", 4, "c"))
+    assert model.turn_member(chore, entries, at(4, 13)) == "a"
+    # Done before the turns were set doesn't count.
+    assert model.turn_member(chore, [_did("dishes", 1, "a")], at(2)) == "b"
+    # Each day, or each week (from Monday).
+    daily = {**chore, "turn_every": "day"}
+    assert [model.turn_member(daily, [], at(d)) for d in (2, 3, 4, 5)] == [
+        "b",
+        "c",
+        "a",
+        "b",
+    ]
+    weekly = {**chore, "turn_every": "week"}
+    assert model.turn_member(weekly, [], at(8)) == "b"  # Sunday: same week
+    assert model.turn_member(weekly, [], at(9)) == "c"
+    assert model.turn_member(weekly, [], at(16)) == "a"
+    # Not in turns, or only one person: nobody's turn.
+    assert model.turn_member({**chore, "turns": False}, [], at(2)) is None
+    assert model.turn_member({**chore, "members": ["a"]}, [], at(2)) is None
+
+
+def test_a_turn_is_done_once():
+    chore = {"id": "dishes", "members": ["b"], "turns": True, "repeat": "daily"}
+    done = model.done_by(chore, [_did("dishes", 4, "b")], at(4, 18))
+    assert done == {"b", "*"}
+    assert not model.can_do("b", chore, done)
+    assert model.can_do("b", chore, set())
+    assert not model.can_do("a", chore, set())
+
+
+def test_week_summary():
+    members = [{"id": "a", "name": "Alex"}, {"id": "b", "name": "Sam"}]
+    entries = [
+        {**_did("bed", 3, "a"), "points": 5},
+        {**_did("bed", 4, "a", review="rejected"), "points": 5},
+        {"kind": "reward", "member": "a", "points": -10, "at": at(4).isoformat()},
+        {**_did("bed", 1, "b"), "points": 5},  # more than a week ago
+    ]
+    assert model.week_summary(members, entries, {"a": 20, "b": 5}, at(8, 18)) == [
+        "Alex: 1 chore, +5, spent 10, 20 now",
+        "Sam: 0 chores, +0, 5 now",
+    ]
+
+
+# ---- allowance, money, meals and notes --------------------------------------------------
+
+
+def test_allowance_due_once_a_week():
+    from datetime import date
+
+    # Sunday 8:00 is the moment; 2026-11-08 is a Sunday.
+    assert model.week_key(date(2026, 11, 8)) == "2026-W45"
+    assert model.allowance_due(datetime(2026, 11, 8, 7, 59), 6, 8, None) is None
+    assert model.allowance_due(datetime(2026, 11, 8, 8, 0), 6, 8, None) == "2026-W45"
+    # Given already this week.
+    assert model.allowance_due(datetime(2026, 11, 8, 9, 0), 6, 8, "2026-W45") is None
+    # Monday's allowance: due from Monday morning, all week.
+    assert (
+        model.allowance_due(datetime(2026, 11, 6, 20, 0), 0, 6, "2026-W44")
+        == "2026-W45"
+    )
+
+
+def test_point_value():
+    assert model.clean_point_value("") is None
+    assert model.clean_point_value("0.25") == 0.25
+    for bad in ("0", "-1", "lots", 500):
+        with pytest.raises(ValueError):
+            model.clean_point_value(bad)
+
+
+def test_meals_and_notes():
+    from datetime import date
+
+    assert model.clean_meals({"dinner": "  Tacos  ", "lunch": "", "snack": "x"}) == {
+        "dinner": "Tacos"
+    }
+    with pytest.raises(ValueError):
+        model.clean_meals({"dinner": "x" * 81})
+    assert model.clean_note(" Dentist   at 4 ") == "Dentist at 4"
+    for bad in ("", "x" * 201):
+        with pytest.raises(ValueError):
+            model.clean_note(bad)
+    today = date(2026, 11, 7)
+    assert model.note_current({"until": None}, today)
+    assert model.note_current({"until": "2026-11-07"}, today)
+    assert not model.note_current({"until": "2026-11-06"}, today)
+    assert model.week_days(today, 3) == ["2026-11-07", "2026-11-08", "2026-11-09"]
+    assert model.clean_day("2026-11-09T10:00") == "2026-11-09"
+    with pytest.raises(ValueError):
+        model.clean_day("someday")

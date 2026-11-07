@@ -20,8 +20,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import model
-from .const import DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
+from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
+from .parents_notify import target_name
 
 COLLECTIONS = ("members", "chores", "rewards", "todo_lists", "controls")
 
@@ -35,7 +36,11 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_redeem,
         ws_control,
         ws_undo,
+        ws_goal,
+        ws_note_add,
+        ws_note_remove,
         ws_review,
+        ws_meals,
         ws_given,
         ws_adjust,
         ws_save,
@@ -161,6 +166,55 @@ async def ws_undo(hass, connection, msg, manager) -> dict[str, Any]:
     return {}
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/goal",
+        vol.Required("member_id"): str,
+        vol.Required("reward_id"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_goal(hass, connection, msg, manager) -> dict[str, Any]:
+    """The reward someone is saving for (None: not saving for one)."""
+    return {"member": manager.set_goal(msg["member_id"], msg["reward_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/note/add",
+        vol.Required("text"): str,
+        vol.Optional("member_id"): vol.Any(None, str),
+        vol.Optional("until"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_note_add(hass, connection, msg, manager) -> dict[str, Any]:
+    """Put a note on the board (anyone, the shared screen too)."""
+    user = connection.user
+    return {
+        "note": manager.add_note(
+            msg["text"],
+            msg.get("member_id"),
+            msg.get("until"),
+            by_admin=bool(user and user.is_admin),
+            by=user.name if user else None,
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/note/remove", vol.Required("note_id"): str}
+)
+@websocket_api.async_response
+@_handler
+async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
+    """Take a note down. A parent's note only by a parent."""
+    manager.remove_note(msg["note_id"], by_admin=_user(connection)[1])
+    return {}
+
+
 # ---- parents (admins) ----------------------------------------------------------------------
 
 
@@ -278,6 +332,17 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("streak_days"): vol.Any(None, int),
         vol.Optional("streak_bonus"): vol.Any(None, int),
         vol.Optional("penalty"): vol.Any(None, int),
+        vol.Optional("notify_targets"): [str],
+        vol.Optional("notify_done"): bool,
+        vol.Optional("notify_rewards"): bool,
+        vol.Optional("weekly_summary"): bool,
+        vol.Optional("allowance_day"): vol.All(int, vol.Range(min=0, max=6)),
+        vol.Optional("allowance_hour"): vol.All(int, vol.Range(min=0, max=23)),
+        vol.Optional("point_value"): vol.Any(None, vol.Coerce(float)),
+        vol.Optional("currency"): vol.Any(None, str),
+        vol.Optional("calendars"): [
+            {vol.Required("entity_id"): str, vol.Optional("member"): vol.Any(None, str)}
+        ],
     }
 )
 @websocket_api.require_admin
@@ -285,6 +350,21 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
 @_handler
 async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
     return {"settings": manager.save_settings(msg)}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/meals",
+        vol.Required("date"): str,
+        **{vol.Optional(meal): vol.Any(None, str) for meal in model.MEALS},
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_handler
+async def ws_meals(hass, connection, msg, manager) -> dict[str, Any]:
+    """A day's meals (empty clears them)."""
+    return {"meals": manager.save_meals(msg["date"], msg)}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/choices"})
@@ -306,6 +386,24 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         for e in hass.config_entries.async_entries(TV_MGMT_DOMAIN)
         if not e.disabled_by
     ]
+    speakers = [
+        {"id": e.entry_id, "name": e.title}
+        for e in hass.config_entries.async_entries(MEDIA_MGMT_DOMAIN)
+        if not e.disabled_by
+    ]
+    # Phones first (the Companion app's notify actions), then the rest.
+    notify = sorted(
+        (
+            {"service": name, "name": target_name(name)}
+            for name in hass.services.async_services_for_domain("notify")
+            if name not in ("send_message", "persistent_notification")
+        ),
+        key=lambda t: (not t["service"].startswith("mobile_app_"), t["name"]),
+    )
+    calendars = [
+        {"entity_id": s.entity_id, "name": s.name}
+        for s in sorted(hass.states.async_all("calendar"), key=lambda s: s.name)
+    ]
     entities = [
         {"entity_id": s.entity_id, "name": s.name, "domain": s.domain}
         for s in sorted(
@@ -317,5 +415,8 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         "people": people,
         "todo_lists": todo_lists,
         "tvs": tvs,
+        "speakers": speakers,
+        "notify": notify,
         "entities": entities,
+        "calendars": calendars,
     }

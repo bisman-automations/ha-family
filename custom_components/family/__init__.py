@@ -17,7 +17,15 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.helpers.typing import ConfigType
 
-from .const import ATTR_MEMBER, ATTR_POINTS, ATTR_REASON, DOMAIN, SERVICE_ADD_POINTS
+from .const import (
+    ATTR_MEMBER,
+    ATTR_POINTS,
+    ATTR_REASON,
+    DOMAIN,
+    EVENT_NOTIFICATION_ACTION,
+    SERVICE_ADD_POINTS,
+    SUMMARY_HOUR,
+)
 from .manager import FamilyError, FamilyManager, manager_of
 
 PLATFORMS = [Platform.SENSOR]
@@ -75,6 +83,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
         async_track_time_interval(hass, _sync_todo, timedelta(hours=1))
     )
     _sync_todo()
+    # The weekly allowance (and old notes and meals cleared), checked hourly.
+    entry.async_on_unload(
+        async_track_time_interval(hass, manager.async_allowance, timedelta(hours=1))
+    )
+    # Today's calendar: every 15 minutes and just after midnight.
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, manager.calendar.schedule, timedelta(minutes=15)
+        )
+    )
+    entry.async_on_unload(
+        async_track_time_change(
+            hass, manager.calendar.schedule, hour=0, minute=0, second=10
+        )
+    )
+    # Chores with set days, hours or turns: the dashboards follow them.
+    entry.async_on_unload(async_track_time_change(hass, manager.async_tick, second=1))
+    manager.async_tick()
+    # Parents' phones: buttons on notifications, and the Sunday summary.
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            EVENT_NOTIFICATION_ACTION, manager.notices.async_on_action
+        )
+    )
+    entry.async_on_unload(
+        async_track_time_change(
+            hass, manager.notices.weekly_tick, hour=SUMMARY_HOUR, minute=0, second=0
+        )
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     from .panel import async_register_panels  # noqa: PLC0415
 

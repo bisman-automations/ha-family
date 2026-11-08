@@ -95,11 +95,18 @@ To show it on a shared display, point the display's browser or kiosk app at `/fa
 
 ### As a shared screen's default dashboard
 
-Home Assistant only lets a login pick a dashboard as its default, and the Family page in the sidebar isn't one. So on the **Parents** dashboard, under **Family**, tap **Make a Family dashboard**. It makes a dashboard called **Family dashboard** that shows the Family page full screen. It's left out of the sidebar, since **Family** is already there.
+Home Assistant only lets a login pick a dashboard as its default, and the Family page in the sidebar isn't one. So on the **Parents** dashboard, under **Family**, tap **Make a Family dashboard**. It makes a dashboard called **Family dashboard** that shows the Family page full screen, with a **Home** tab for everyone and a tab for each family member that always shows their page. It's left out of the sidebar, since **Family** is already there.
+
+The tabs follow your family: adding, renaming or removing someone on the **Parents** dashboard adds, renames or removes their tab. Anything you add to the dashboard yourself in Home Assistant, such as another card on a tab or a tab of your own, is kept. The button becomes **Update the Family dashboard** once the dashboard is there, for bringing the tabs back in line, for example after removing one by hand.
 
 Then log in on the shared screen as its user, open your profile, and pick **Family dashboard** under **Dashboard**.
 
-You can also put the **Family** card (`custom:family-card`) on any dashboard yourself, for example in a panel view.
+You can also put the **Family** card (`custom:family-card`) on any dashboard yourself, for example in a panel view. To show one person's page only, give it their member id (it's in the tab's card on the Family dashboard):
+
+```yaml
+type: custom:family-card
+member: <member id>
+```
 
 ## The Parents dashboard
 

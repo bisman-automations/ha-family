@@ -17,6 +17,20 @@ const IDLE_MS = 2 * 60 * 1000; // which Family dashboard sections are open, on t
 // The dashboard the Parents dashboard makes for a shared screen's default.
 const DASHBOARD_PATH = "family-dashboard";
 const DASHBOARD_TITLE = "Family dashboard";
+// The Family dashboard's tabs that Family keeps up to date: Home (everyone),
+// then one per family member. Tabs added by hand are kept, after these.
+const HOME_VIEW = "family";
+const MEMBER_VIEW = "family-member-";
+
+function familyViews(views, members) {
+  const old = new Map((views || []).map((v) => [v.path, v]));
+  // An existing tab keeps whatever was added to it; only its name follows.
+  const tab = (path, title, card) => (old.has(path) ? { ...old.get(path), title } : { title, path, type: "panel", cards: [card] });
+  const home = tab(HOME_VIEW, "Home", { type: "custom:family-card" });
+  const people = members.map((m) => tab(`${MEMBER_VIEW}${m.id}`, m.emoji ? `${m.emoji} ${m.name}` : m.name, { type: "custom:family-card", member: m.id }));
+  const others = (views || []).filter((v) => v.path !== HOME_VIEW && !String(v.path || "").startsWith(MEMBER_VIEW));
+  return [home, ...people, ...others];
+}
 
 const REPEATS = [
   { id: "daily", label: "Every day" },
@@ -396,10 +410,16 @@ class FamilyPanel extends HTMLElement {
     this._idleTimer = setInterval(() => this._idleCheck(), 15000);
   }
 
+  // Whose page this screen goes back to: the card's own member, else the login's.
+  _homeMember() {
+    if (this._pinned && this._data?.members.some((m) => m.id === this._pinned)) return this._pinned;
+    return this._data?.me ?? null;
+  }
+
   _idleCheck() {
     if (this._mode !== "family" || !this._data || this._sheet || this._busy) return;
     if (Date.now() - this._lastTouch < IDLE_MS) return;
-    const home = this._data.me ?? null;
+    const home = this._homeMember();
     const opened = Object.values(this._sections).includes("all");
     if (this._member === home && !opened) return;
     this._member = home;
@@ -425,8 +445,19 @@ class FamilyPanel extends HTMLElement {
       this._data = await this._hass.callWS({ type: `${DOMAIN}/state` });
       this._error = "";
       // Someone logged in as a family member sees their own page.
-      if (this._member === null && this._data.me && this._mode === "family") this._member = this._data.me;
-      if (this._member && !this._data.members.some((m) => m.id === this._member)) this._member = null;
+      if (this._member === null && this._mode === "family") this._member = this._homeMember();
+      if (this._member && !this._data.members.some((m) => m.id === this._member)) this._member = this._homeMember();
+      if (this._mode === "parents" && this._hasDashboard === undefined) {
+        this._hasDashboard = null;
+        this._ws({ type: "lovelace/dashboards/list" })
+          .then((list) => {
+            this._hasDashboard = list.some((d) => d.url_path === DASHBOARD_PATH);
+            this._render();
+          })
+          .catch(() => {
+            this._hasDashboard = false;
+          });
+      }
       if (this._mode === "parents" && !this._choices) {
         this._choices = await this._hass.callWS({ type: `${DOMAIN}/choices` });
       }
@@ -480,6 +511,11 @@ class FamilyPanel extends HTMLElement {
       ? `<img src="${esc(this._hass.hassUrl ? this._hass.hassUrl(m.picture) : m.picture)}" alt="">`
       : esc(m.emoji || m.name.slice(0, 1).toUpperCase());
     return `<span class="avatar${small ? " small" : ""}" style="--c:${esc(m.color)}">${inner}</span>`;
+  }
+
+  // A card set to one family member shows only their page.
+  _pinnedMember() {
+    return this._pinned ? this._memberById(this._pinned) : null;
   }
 
   _people(members, attr, selected) {
@@ -655,7 +691,7 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
     const cash = member && d.money ? ` <span class="streak-line">${esc(money(member.points, d.money))}</span>` : "";
     return `<h2>${member ? `Hi ${esc(member.name)}!${streak}${cash}` : "Who's here?"}</h2>
-      ${this._people(d.members, "data-member", this._member)}${goalCard}
+      ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}${goalCard}
       ${this._section("notes", "Notes", noteTiles, notes.length)}
       ${events.length ? this._section("today", "Today", eventTiles, events.length) : ""}
       ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
@@ -1307,39 +1343,65 @@ class FamilyPanel extends HTMLElement {
       ${this._allowanceCard()}
       ${this._calendarCard()}
       <div class="card"><h2>Shared screen</h2>
-        <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>. You can also add the <b>Family</b> card to any dashboard yourself.</p>
-        <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>Make a Family dashboard</button></div>`;
+        <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>.</p>
+        <p class="muted">It has a <b>Home</b> tab for everyone and a tab for each family member, and the tabs follow when you add, rename or remove someone here. You can add your own tabs and cards to it in Home Assistant; they're kept. You can also add the <b>Family</b> card to any dashboard yourself, for everyone or for one person.</p>
+        <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button></div>`;
   }
 
   async _makeDashboard() {
     if (this._busy) return;
     this._busy = true;
     try {
-      const dashboards = await this._ws({ type: "lovelace/dashboards/list" });
-      if (dashboards.some((d) => d.url_path === DASHBOARD_PATH)) {
-        this._toast(`${DASHBOARD_TITLE} is already there.`);
-      } else {
-        await this._ws({
-          type: "lovelace/dashboards/create",
-          url_path: DASHBOARD_PATH,
-          title: DASHBOARD_TITLE,
-          icon: "mdi:home-heart",
-          mode: "storage",
-          require_admin: false,
-          // The Family page is in the sidebar already.
-          show_in_sidebar: false,
-        });
-        await this._ws({
-          type: "lovelace/config/save",
-          url_path: DASHBOARD_PATH,
-          config: { title: DASHBOARD_TITLE, views: [{ title: "Family", path: "family", type: "panel", cards: [{ type: "custom:family-card" }] }] },
-        });
-        this._toast(`Made ${DASHBOARD_TITLE}. Pick it as the shared screen's default dashboard.`);
-      }
+      const made = await this._syncDashboard(true);
+      this._toast(made ? `Made ${DASHBOARD_TITLE}. Pick it as the shared screen's default dashboard.` : `Updated ${DASHBOARD_TITLE}.`);
     } catch (err) {
       this._toast(err?.message || String(err), true);
     } finally {
       this._busy = false;
+      this._render();
+    }
+  }
+
+  // Makes the Family dashboard (when `make` is set) or brings its tabs up to
+  // date with the family members. Returns true when it was made.
+  async _syncDashboard(make) {
+    const dashboards = await this._ws({ type: "lovelace/dashboards/list" });
+    const exists = dashboards.some((d) => d.url_path === DASHBOARD_PATH);
+    this._hasDashboard = exists;
+    if (!exists && !make) return false;
+    let config = { title: DASHBOARD_TITLE, views: [] };
+    if (exists) {
+      try {
+        config = await this._ws({ type: "lovelace/config", url_path: DASHBOARD_PATH });
+      } catch (err) {
+        // Made but never saved: start from nothing.
+        if (err?.code !== "config_not_found") throw err;
+      }
+    } else {
+      await this._ws({
+        type: "lovelace/dashboards/create",
+        url_path: DASHBOARD_PATH,
+        title: DASHBOARD_TITLE,
+        icon: "mdi:home-heart",
+        mode: "storage",
+        require_admin: false,
+        // The Family page is in the sidebar already.
+        show_in_sidebar: false,
+      });
+    }
+    const views = familyViews(config.views, this._data.members);
+    if (exists && JSON.stringify(views) === JSON.stringify(config.views)) return false;
+    await this._ws({ type: "lovelace/config/save", url_path: DASHBOARD_PATH, config: { ...config, views } });
+    this._hasDashboard = true;
+    return !exists;
+  }
+
+  // After a family member is added, renamed or removed.
+  async _followMembers() {
+    try {
+      await this._syncDashboard(false);
+    } catch (err) {
+      this._toast(`Couldn't update ${DASHBOARD_TITLE}: ${err?.message || err}`, true);
     }
   }
 
@@ -1378,6 +1440,7 @@ class FamilyPanel extends HTMLElement {
       return;
     }
     if (ds.member) {
+      if (this._pinnedMember()) return;
       this._member = this._member === ds.member ? null : ds.member;
       this._render();
     } else if (ds.sectionToggle) {
@@ -1430,7 +1493,9 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.delete) {
       const what = { controls: "this from the Family dashboard", chores: "this chore", rewards: "this reward", members: "this family member and their points", todo_lists: "this to-do list from Family (the list itself stays)" }[ds.delete];
       if (!window.confirm(`Remove ${what}?`)) return;
-      this._call({ type: `${DOMAIN}/delete`, collection: ds.delete, item_id: ds.id }, "Removed.");
+      this._call({ type: `${DOMAIN}/delete`, collection: ds.delete, item_id: ds.id }, "Removed.").then((ok) => {
+        if (ok && ds.delete === "members") this._followMembers();
+      });
     } else if (ds.review) {
       const msg = { type: `${DOMAIN}/review`, entry_id: ds.review, approved: ds.approved === "1" };
       const box = this.shadowRoot.querySelector(`[data-penalty-for="${CSS.escape(ds.review)}"]`);
@@ -1562,6 +1627,7 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.dataset.id) item.id = form.dataset.id;
     const ok = await this._call({ type: `${DOMAIN}/save`, collection, item }, "Saved.");
+    if (ok && collection === "members") this._followMembers();
     if (ok) {
       this._edit = null;
       this._render();
@@ -1663,8 +1729,11 @@ class FamilyCard extends FamilyPanel {
     return "family";
   }
 
+  // `member`: a family member's id, to show only their page.
   setConfig(config) {
     this._config = config || {};
+    this._pinned = this._config.member || null;
+    this._member = this._pinned;
   }
 
   getCardSize() {
@@ -1686,6 +1755,6 @@ if (!customElements.get("family-card")) {
   window.customCards.push({
     type: "family-card",
     name: "Family",
-    description: "Chores, rewards and home controls for a shared screen.",
+    description: "Chores, rewards and home controls for a shared screen, for everyone or one family member.",
   });
 }

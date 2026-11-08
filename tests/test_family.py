@@ -655,13 +655,16 @@ async def test_a_person_links_to_one_member(hass: HomeAssistant, client):
 
 
 async def test_family_dashboard_messages(hass: HomeAssistant, hass_ws_client):
-    """What the Parents dashboard sends to make the shared screen's dashboard."""
+    """What the Parents dashboard sends to make and update the shared screen's dashboard."""
     assert await async_setup_component(hass, "lovelace", {})
     client = await hass_ws_client(hass)
 
-    async def ok(type_: str, **msg: Any) -> Any:
+    async def send(type_: str, **msg: Any) -> dict[str, Any]:
         await client.send_json_auto_id({"type": type_, **msg})
-        res = await client.receive_json()
+        return await client.receive_json()
+
+    async def ok(type_: str, **msg: Any) -> Any:
+        res = await send(type_, **msg)
         assert res["success"], res
         return res["result"]
 
@@ -675,20 +678,30 @@ async def test_family_dashboard_messages(hass: HomeAssistant, hass_ws_client):
         require_admin=False,
         show_in_sidebar=False,
     )
+    # A dashboard that was made but never saved answers config_not_found,
+    # which the Parents dashboard treats as empty.
+    res = await send("lovelace/config", url_path="family-dashboard")
+    assert res["error"]["code"] == "config_not_found"
+
+    def card(member: str | None = None) -> dict[str, Any]:
+        return {"type": "custom:family-card", **({"member": member} if member else {})}
+
     config = {
         "title": "Family dashboard",
         "views": [
+            {"title": "Home", "path": "family", "type": "panel", "cards": [card()]},
             {
-                "title": "Family",
-                "path": "family",
+                "title": "Alex",
+                "path": "family-member-a1",
                 "type": "panel",
-                "cards": [{"type": "custom:family-card"}],
-            }
+                "cards": [card("a1")],
+            },
         ],
     }
     await ok("lovelace/config/save", url_path="family-dashboard", config=config)
     (dashboard,) = await ok("lovelace/dashboards/list")
     assert dashboard["url_path"] == "family-dashboard"
+    # Read back to update the tabs, keeping anything added by hand.
     assert await ok("lovelace/config", url_path="family-dashboard") == config
 
 

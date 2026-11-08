@@ -122,6 +122,7 @@ window.hass = {
     if (msg.type === "lovelace/dashboards/list") return window.dashboards || [];
     if (msg.type === "lovelace/dashboards/create") { (window.dashboards ||= []).push({ url_path: msg.url_path, title: msg.title }); return {}; }
     if (msg.type === "lovelace/config/save") { window.savedDashboard = msg; return null; }
+    if (msg.type === "lovelace/config") { if (!window.savedDashboard) throw { code: "config_not_found", message: "No config found." }; return structuredClone(window.savedDashboard.config); }
     const t = msg.type.replace("family/", "");
     if (t === "state") return state();
     if (t === "choices") return { people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
@@ -165,7 +166,7 @@ window.hass = {
     }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
     if (t === "save") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); } return { item: msg.item }; }
-    if (t === "delete") return {};
+    if (t === "delete") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; const i = list ? list.findIndex((x) => x.id === msg.item_id) : -1; if (i >= 0) list.splice(i, 1); return {}; }
     if (t === "adjust") { m.points += msg.points; return { points: m.points }; }
     throw { message: "unknown " + msg.type };
   },
@@ -176,7 +177,8 @@ window.hass = {
   // ?mode=card: the Family card, as on a dashboard.
   const card = params.get("mode") === "card";
   const el = document.createElement(card ? "family-card" : "family-panel");
-  if (card) el.setConfig({});
+  // &member=<id>: the card for one family member.
+  if (card) el.setConfig(params.get("member") ? { member: params.get("member") } : {});
   else el.panel = { config: { mode: params.get("mode") || "family" } };
   el.narrow = window.innerWidth < 870;
   el.hass = window.hass;

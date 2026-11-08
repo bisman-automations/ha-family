@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-11-08
+
+### Added
+
+- **The Family dashboard has a tab for each person.** **Make a Family dashboard** now makes a **Home** tab for everyone and a tab for each family member, showing only their page. Someone's tab stays on their page, so a tablet in a child's room can show just their chores.
+- **The tabs follow the family.** Adding, renaming or removing someone on the Parents dashboard adds, renames or removes their tab. Cards and tabs you add to the dashboard yourself are kept. Once the dashboard is there, the button reads **Update the Family dashboard**; tap it to bring an existing dashboard up to date with the new tabs.
+- **The Family card can show one person.** Give it `member:` and that person's id to put just their page on any dashboard.
+
 ## [1.7.0] - 2026-11-08
 
 ### Added
@@ -96,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.8.0]: https://github.com/bisman-automations/ha-family/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/bisman-automations/ha-family/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/bisman-automations/ha-family/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/bisman-automations/ha-family/compare/v1.4.0...v1.5.0

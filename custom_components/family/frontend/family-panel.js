@@ -1087,7 +1087,7 @@ class FamilyPanel extends HTMLElement {
     const rows = d.rewards.length
       ? `<ul class="rows">${d.rewards
           .map((r) => `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
-              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : r.kind === "music_time" ? ` · ${r.minutes} min of music on ${esc(r.speaker_name || "a speaker that's gone")}` : " · handed out by a parent"}</small></span>
+              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : r.kind === "music_time" ? ` · ${r.minutes} min of music on ${esc(r.speaker_name || "a speaker that's gone")}${r.whole_home ? " and the whole home" : ""}` : " · handed out by a parent"}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
               <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -1129,7 +1129,8 @@ class FamilyPanel extends HTMLElement {
               <label class="field"><span>Speaker</span><select name="speaker">${speakers.map((t) => `<option value="${esc(t.id)}" ${t.id === r.speaker ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
               <label class="field"><span>Minutes</span><input type="number" name="minutes" min="1" max="240" value="${esc(r.minutes || 30)}"></label>
             </div>
-            <small class="muted">The listening time is given in Media Mgmt as soon as the reward is picked.</small>`
+            <label class="check"><input type="checkbox" name="whole_home" ${r.whole_home ? "checked" : ""}> Give the whole home the same time too</label>
+            <small class="muted">The listening time is given in Media Mgmt as soon as the reward is picked. The whole home's time needs Media Mgmt 1.5.0 or newer.</small>`
           : `<p class="error">Music time needs Media Mgmt with at least one speaker set up.</p>`)
         : `<small class="muted">A parent hands it out; it shows under To check until then.</small>`;
     return `<form class="edit" data-form="rewards" data-id="${esc(r.id || "")}">

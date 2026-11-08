@@ -725,6 +725,7 @@ class FamilyManager:
                 entry["speaker"],
                 -int(entry.get("minutes", 0)),
                 f"Undone: {entry['title']}",
+                bool(entry.get("whole_home")),
             )
         chore_id = entry.get("chore_id", "")
         if chore_id.startswith(TODO_PREFIX):
@@ -770,6 +771,7 @@ class FamilyManager:
             tv = {
                 "speaker": reward["speaker"],
                 "minutes": int(reward.get("minutes", 0)),
+                "whole_home": bool(reward.get("whole_home", False)),
             }
         given_now = kind in (model.REWARD_TV_TIME, model.REWARD_MUSIC_TIME)
         entry = {
@@ -849,25 +851,30 @@ class FamilyManager:
             speaker,
             int(reward.get("minutes", 0)),
             f"{member['name']}'s reward: {reward['name']}",
+            bool(reward.get("whole_home", False)),
         )
 
     async def _async_grant_music_time(
-        self, speaker: str, minutes: int, reason: str
+        self, speaker: str, minutes: int, reason: str, whole_home: bool = False
     ) -> None:
         """Give (or take back) listening time in Media Mgmt."""
         if not self.hass.services.has_service(MEDIA_MGMT_DOMAIN, MEDIA_MGMT_GRANT):
             raise FamilyError("Music time needs Media Mgmt, which isn't set up")
         data = {"profile_id": speaker, "minutes": minutes}
+        extra: dict[str, Any] = {"reason": reason[:100]}
+        if whole_home:
+            extra["whole_home"] = True
         try:
             try:
                 await self.hass.services.async_call(
                     MEDIA_MGMT_DOMAIN,
                     MEDIA_MGMT_GRANT,
-                    {**data, "reason": reason[:100]},
+                    {**data, **extra},
                     blocking=True,
                 )
             except vol.Invalid:
-                # Media Mgmt before 1.5.0 doesn't take a reason.
+                # Media Mgmt before 1.5.0 takes neither a reason nor the whole
+                # home (it has no whole-home limit to give time to).
                 await self.hass.services.async_call(
                     MEDIA_MGMT_DOMAIN, MEDIA_MGMT_GRANT, data, blocking=True
                 )
@@ -1022,7 +1029,11 @@ class FamilyManager:
             if not raw.get("speaker"):
                 raise FamilyError("Pick the speaker the time is for")
             minutes = model.clean_points(raw.get("minutes"), "Minutes", minimum=1)
-            reward.update(speaker=raw["speaker"], minutes=min(minutes, 240))
+            reward.update(
+                speaker=raw["speaker"],
+                minutes=min(minutes, 240),
+                whole_home=bool(raw.get("whole_home")),
+            )
         if kind == model.REWARD_TV_TIME:
             if not raw.get("tv"):
                 raise FamilyError("Pick the TV the time is for")

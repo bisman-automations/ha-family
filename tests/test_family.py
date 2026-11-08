@@ -1192,6 +1192,44 @@ async def test_music_time_reward(hass: HomeAssistant, client):
     assert calls[1].data["minutes"] == -20
 
 
+async def test_music_time_for_the_whole_home(hass: HomeAssistant, client):
+    speaker = MockConfigEntry(domain="media_mgmt", title="Kids Room")
+    speaker.add_to_hass(hass)
+    calls: list[ServiceCall] = []
+
+    async def grant(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("media_mgmt", "grant_extension", grant)
+    alex, _sam = await _family(client)
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={
+                "name": "Party music",
+                "points": 0,
+                "kind": "music_time",
+                "speaker": speaker.entry_id,
+                "minutes": 30,
+                "whole_home": True,
+            },
+        )
+    )["item"]
+    assert reward["whole_home"] is True
+    done = await client.ok("redeem", member_id=alex, reward_id=reward["id"])
+    assert calls[0].data == {
+        "profile_id": speaker.entry_id,
+        "minutes": 30,
+        "reason": "Alex's reward: Party music",
+        "whole_home": True,
+    }
+    # Undo takes the whole home's time back too.
+    await client.ok("undo", entry_id=done["entry"]["id"])
+    assert calls[1].data["minutes"] == -30
+    assert calls[1].data["whole_home"] is True
+
+
 async def test_media_mgmt_before_reasons(hass: HomeAssistant, client):
     speaker = MockConfigEntry(domain="media_mgmt", title="Kids Room")
     speaker.add_to_hass(hass)

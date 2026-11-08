@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-11-08
+
+### Added
+
+- **Music time for the whole home.** A music time reward can also give the whole home the same time, like TV time rewards can. It needs Media Mgmt 1.5.0, which added whole-home limits. Undoing the reward takes that time back too.
+
 ## [1.6.0] - 2026-11-07
 
 ### Added
@@ -90,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.7.0]: https://github.com/bisman-automations/ha-family/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/bisman-automations/ha-family/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/bisman-automations/ha-family/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/bisman-automations/ha-family/compare/v1.3.0...v1.4.0

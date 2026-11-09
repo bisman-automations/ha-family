@@ -353,6 +353,23 @@ const STYLES = `
   .tab { border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; font: inherit; border-radius: 999px; padding: 8px 16px; cursor: pointer; white-space: nowrap; }
   .tab[aria-selected="true"] { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .card { background: var(--fam-card); border: 1px solid var(--fam-divider); border-radius: var(--fam-radius); padding: 16px; margin-bottom: 16px; }
+  .matrix summary { cursor: pointer; list-style-position: inside; }
+  .matrix summary h2 { display: inline; }
+  .matrix-wrap { overflow-x: auto; }
+  .matrix table { border-collapse: collapse; }
+  .matrix th, .matrix td { padding: 8px 6px; min-width: 64px; border-top: 1px solid var(--fam-divider); text-align: center; font-weight: 400; }
+  .matrix tr:first-child th { border-top: 0; font-size: 14px; vertical-align: bottom; }
+  .matrix tr:first-child th span { display: block; margin-top: 4px; }
+  .matrix th.chore { text-align: left; font-weight: 500; position: sticky; left: 0; z-index: 1; background: var(--card-background-color); min-width: 140px; max-width: 260px; }
+  .matrix th.chore small, .matrix .group small { display: block; font-weight: 400; color: var(--fam-muted); font-size: 13px; }
+  .matrix .group th { text-align: left; font-weight: 600; padding-top: 16px; background: var(--fam-divider, var(--divider-color)); }
+  .matrix .group th { position: sticky; left: 0; }
+  .matrix .mark { font-size: 18px; }
+  .matrix .mark.own { color: var(--primary-color); font-weight: 600; }
+  .matrix .mark.turn { color: var(--primary-color); opacity: .6; }
+  .matrix .mark.grab { color: var(--fam-muted); }
+  .matrix .totals th { text-align: left; font-weight: 500; }
+  .matrix .totals td { font-weight: 600; }
   .rows { list-style: none; margin: 0; padding: 0; }
   .rows li { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--fam-divider); }
   .rows li:first-child { border-top: 0; }
@@ -1206,10 +1223,56 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
     const listForm = edit?.collection === "todo_lists" ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
-    return `<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>
+    return `${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>
       <div class="card"><h2>Chores from to-do lists</h2>
         <p class="muted">Every open item on these lists is a chore. Put the points at the end of an item to change them, like <b>Feed the dog [5]</b>. When it's marked done, the item is ticked off its list.</p>
         ${lists}${listForm}</div>`;
+  }
+
+  // Who does what, lined up: a row per chore, a column per person, grouped
+  // by their own chores, turns, and up for grabs.
+  _choreMatrix() {
+    const d = this._data;
+    const people = d.members;
+    if (!people.length) return "";
+    const lists = d.todo_lists.map((t) => ({ ...t, name: t.name || this._listName(t.entity_id), list: true }));
+    const all = [...d.all_chores.filter((c) => c.enabled), ...lists];
+    const kind = (c) => (c.turns ? "turns" : !c.members?.length ? "everyone" : c.grab ? "grab" : "own");
+    const groups = [
+      ["own", "Their own", "Each person ticked does it. Counts for the all-done bonus and streaks."],
+      ["turns", "Taking turns", "Their own chore, for whoever's turn it is."],
+      ["grab", "Up for grabs, for some", "Whoever's first, of the people ticked. Extra points."],
+      ["everyone", "Up for grabs, for everyone", "Whoever's first. Extra points."],
+    ];
+    const mark = {
+      own: (c, m) => (c.members.includes(m.id) ? `<span class="mark own" title="${esc(m.name)}'s own">●</span>` : ""),
+      turns: (c, m) => (c.members.includes(m.id) ? (this._currentTurn(c) === m.id ? `<span class="mark own" title="${esc(m.name)}'s turn now">↻ now</span>` : `<span class="mark turn" title="Takes turns">↻</span>`) : ""),
+      grab: (c, m) => (c.members.includes(m.id) ? `<span class="mark grab" title="Up for grabs for ${esc(m.name)}">○</span>` : ""),
+      everyone: () => `<span class="mark grab" title="Up for grabs">○</span>`,
+    };
+    const head = `<tr><th class="chore"></th>${people.map((m) => `<th>${this._avatar(m, true)}<span>${esc(m.name)}</span></th>`).join("")}</tr>`;
+    const body = groups
+      .map(([key, title, help]) => {
+        const rows = all.filter((c) => kind(c) === key);
+        if (!rows.length) return "";
+        return `<tr class="group"><th colspan="${people.length + 1}">${title} <small>${help}</small></th></tr>${rows
+          .map((c) => {
+            const when = c.list ? `To-do list · +${pts(c.points)} each` : `+${pts(c.points)} · ${repeatText(c)}${whenShown(c) ? ` · ${whenShown(c)}` : ""}`;
+            return `<tr><th class="chore">${c.emoji ? `${esc(c.emoji)} ` : ""}${esc(c.name)}<small>${esc(when)}</small></th>${people.map((m) => `<td>${mark[key](c, m)}</td>`).join("")}</tr>`;
+          })
+          .join("")}`;
+      })
+      .join("");
+    // How many of their own chores today, and how many are left.
+    const totals = `<tr class="totals"><th>Their own today</th>${people
+      .map((m) => {
+        const own = m.own_today || {};
+        return `<td>${own.total ? `${own.total - own.left} of ${own.total}` : "–"}</td>`;
+      })
+      .join("")}</tr>`;
+    return `<div class="card"><details class="matrix" open><summary><h2>Who does what</h2></summary>
+      <p class="muted">● their own &nbsp; ↻ taking turns &nbsp; ○ up for grabs. Only chores shown on the Family dashboard.</p>
+      ${body ? `<div class="matrix-wrap"><table>${head}${body}${totals}</table></div>` : `<p class="empty">No chores yet.</p>`}</details></div>`;
   }
 
   _choreForm(item) {

@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-11-09
+
+### Added
+
+- **Who does what.** The Parents dashboard's **Chores** tab starts with every chore lined up against each person: their own, taking turns (and whose turn it is now), or up for grabs, grouped by kind, with how many of their own chores each person has done today. Tap the heading to fold it away.
+
+### Changed
+
+- **Family is in the HACS default list.** The install steps now start with searching for **Family** in the Marketplace or HACS; adding it from a link or as a custom repository is only needed if the search doesn't find it.
+
 ## [1.10.0] - 2026-11-09
 
 ### Added
@@ -129,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.11.0]: https://github.com/bisman-automations/ha-family/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/bisman-automations/ha-family/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/bisman-automations/ha-family/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/bisman-automations/ha-family/compare/v1.7.0...v1.8.0

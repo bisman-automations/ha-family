@@ -25,26 +25,33 @@ Chores and rewards are the first part of Family; more family tools will join the
 
 ## Installation
 
-### Marketplace (Home Assistant 2026.11 and newer)
-
-[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=bisman-automations&repository=ha-family&category=integration)
-
-1. Select the button above, or go to **Settings > Marketplace**, choose **Add
-   from link**, enter `bisman-automations/ha-family` under **GitHub link**, and
-   select **Add**. Adding a repository from a link needs a GitHub connection;
-   the Marketplace asks you to connect one if you haven't.
-2. Install **Family**. If a repair asks you to restart Home Assistant, restart it.
-
-New versions show up under **Settings > Updates**.
-
 ### HACS (Home Assistant 2026.10 and older)
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bisman-automations&repository=ha-family&category=integration)
 
-1. Select the button above, or in HACS open the menu, choose **Custom
-   repositories** and add `https://github.com/bisman-automations/ha-family` as an
-   **Integration**.
+1. In HACS, search for **Family**, or select the button above.
 2. Download **Family** and restart Home Assistant.
+
+If the search doesn't list it, add the repository yourself: in HACS open the
+menu, choose **Custom repositories**, and add
+`https://github.com/bisman-automations/ha-family` as an **Integration**.
+
+### Marketplace (Home Assistant 2026.11 and newer)
+
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=bisman-automations&repository=ha-family&category=integration)
+
+1. Go to **Settings > Marketplace** and search for **Family**, or select the
+   button above.
+2. Install **Family**. If a repair asks you to restart Home Assistant, restart it.
+
+New versions show up under **Settings > Updates**. Already installed Family
+with HACS? There's nothing to do: Home Assistant moves it into the Marketplace
+the first time it starts on 2026.11.
+
+If the search doesn't list it, choose **Add from link**, enter
+`bisman-automations/ha-family` under **GitHub link**, and select **Add**.
+Adding a repository from a link needs a GitHub connection; the Marketplace asks
+you to connect one if you haven't.
 
 ### Manual
 
@@ -113,6 +120,7 @@ member: <member id>
 ## The Parents dashboard
 
 - **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Above them are rewards the kids want to get together: **Yes** gives the reward (TV and music time straight away), **No** gives everyone their points back. Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.
+- **Who does what** (top of **Chores**). Every chore shown on the Family dashboard lined up against each person: ● their own, ↻ taking turns (with whose turn it is now), ○ up for grabs, grouped by kind, with how many of their own chores each person has done today.
 - **Chores.** Add, edit or turn off chores. For each: its points, when it **comes back**, who can do it (nobody ticked means anyone), and **How it's done**: **Their own chore** (each person ticked does it, and it counts for the all-done bonus and streaks) or **Up for grabs** (whoever's first, for extra points; with people ticked, only they see it). A chore with nobody ticked is always up for grabs. To-do lists have the same choice for their items. A chore comes back:
   - **every day** or **every week** (from Monday), or it's done **just once**;
   - **some days after it's done**, for example 3 days after the plants were last watered;

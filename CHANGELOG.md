@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-11-09
+
+### Added
+
+- **To-do lists can show items only when they're due.** Set a list's **When items show** to **Only when due today or overdue**: items due on a later day stay off the Family dashboard until their day, an item with a due time shows once that time comes, and items with no due date always show. The Family dashboard updates on its own when an item becomes due.
+
 ## [1.12.0] - 2026-11-09
 
 ### Added
@@ -151,6 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.13.0]: https://github.com/bisman-automations/ha-family/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/bisman-automations/ha-family/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/bisman-automations/ha-family/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/bisman-automations/ha-family/compare/v1.10.0...v1.11.0

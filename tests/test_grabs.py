@@ -108,3 +108,63 @@ async def test_to_do_lists_can_be_up_for_grabs(hass: HomeAssistant, client):
         {"entity_id": "todo.chores", "members": [alex], "grab": False}
     )
     assert manager.todo_lists[0]["grab"] is False
+
+
+async def test_lists_can_show_only_items_due(hass: HomeAssistant, client, freezer):
+    from homeassistant.core import ServiceCall, SupportsResponse
+    from tests.test_family import TODO
+
+    freezer.move_to(
+        dt_util.start_of_local_day(dt_util.now() + timedelta(days=30)).replace(hour=10)
+    )
+    today = dt_util.now().date()
+    at = lambda h: dt_util.start_of_local_day(today).replace(hour=h).isoformat()  # noqa: E731
+    items = [
+        {"uid": "1", "summary": "No date", "status": "needs_action"},
+        {
+            "uid": "2",
+            "summary": "Overdue",
+            "status": "needs_action",
+            "due": (today - timedelta(days=2)).isoformat(),
+        },
+        {
+            "uid": "3",
+            "summary": "Today",
+            "status": "needs_action",
+            "due": today.isoformat(),
+        },
+        {"uid": "4", "summary": "This morning", "status": "needs_action", "due": at(9)},
+        {"uid": "5", "summary": "Tonight", "status": "needs_action", "due": at(18)},
+        {
+            "uid": "6",
+            "summary": "Later",
+            "status": "needs_action",
+            "due": (today + timedelta(days=5)).isoformat(),
+        },
+    ]
+
+    async def get_items(call: ServiceCall):
+        return {TODO: {"items": items}}
+
+    hass.services.async_register(
+        "todo", "get_items", get_items, supports_response=SupportsResponse.ONLY
+    )
+    hass.states.async_set(TODO, "6", {"friendly_name": "Chores"})
+    await _family(client)
+
+    async def names() -> set[str]:
+        return {c["name"] for c in (await client.ok("state"))["chores"]}
+
+    await client.ok(
+        "save", collection="todo_lists", item={"entity_id": TODO, "points": 1}
+    )
+    assert len(await names()) == 6
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={"entity_id": TODO, "points": 1, "due_only": True},
+    )
+    assert await names() == {"No date", "Overdue", "Today", "This morning"}
+    # Its time comes.
+    freezer.move_to(dt_util.start_of_local_day(today).replace(hour=18, minute=1))
+    assert "Tonight" in await names()

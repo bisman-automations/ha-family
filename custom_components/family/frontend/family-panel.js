@@ -1220,7 +1220,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.todo_lists
           .map((t) => {
             const own = (t.items || []).filter((i) => i.rated).length;
-            return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(t.grab || !t.members?.length ? `Up for grabs: ${this._whoText(t.members)}` : `Their own: ${this._whoText(t.members)}`)}</small></span>
+            return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(t.grab || !t.members?.length ? `Up for grabs: ${this._whoText(t.members)}` : `Their own: ${this._whoText(t.members)}`)}${t.due_only ? " · only when due" : ""}</small></span>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Points for items</button>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Edit</button>
               <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>`;
@@ -1342,6 +1342,10 @@ class FamilyPanel extends HTMLElement {
       </div>
       <div class="field"><span>Who can do them</span>${this._whoChecks(t.members)}</div>
       ${this._grabField(t.grab)}
+      <label class="field"><span>When items show</span><select name="due_only">
+        <option value="" ${t.due_only ? "" : "selected"}>Always, while they're on the list</option>
+        <option value="1" ${t.due_only ? "selected" : ""}>Only when due today or overdue</option></select>
+        <small>With a due time, an item shows once that time comes. Items with no due date always show.</small></label>
       ${item ? this._itemPoints(t) : ""}
       <div class="form-actions"><button class="btn primary" type="submit">Save list</button><button class="btn" type="button" data-cancel>Cancel</button></div>
       ${item ? `<input type="hidden" name="entity_id_keep" value="${esc(t.entity_id)}">` : ""}
@@ -1872,7 +1876,7 @@ class FamilyPanel extends HTMLElement {
     } else if (collection === "members") {
       item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)) };
     } else {
-      item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [], grab: !!v.grab };
+      item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [], grab: !!v.grab, due_only: !!v.due_only };
       const itemPoints = {};
       for (const input of form.querySelectorAll("[data-item-name]")) {
         const value = input.value.trim();

@@ -480,3 +480,13 @@ def test_up_for_grabs():
     assert not model.can_do("b", chore, {"a", "*"})
     assert model.is_own({"members": ["a"]}, "a")
     assert not model.is_own(chore, "a")
+
+
+def test_todo_due():
+    now = datetime(2030, 1, 10, 12, 0)
+    assert model.todo_due(None, now)
+    assert model.todo_due(date(2030, 1, 9), now)
+    assert model.todo_due(date(2030, 1, 10), now)
+    assert not model.todo_due(date(2030, 1, 11), now)
+    assert model.todo_due(datetime(2030, 1, 10, 9, 0), now)
+    assert not model.todo_due(datetime(2030, 1, 10, 18, 0), now)

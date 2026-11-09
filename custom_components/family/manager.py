@@ -11,7 +11,7 @@ a parent then hands out.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import logging
 from typing import Any
 from uuid import uuid4
@@ -183,7 +183,7 @@ class FamilyManager:
         if not any(
             c.get("days") or c.get("from_time") or c.get("until_time") or c.get("turns")
             for c in self.chores
-        ):
+        ) and not any(t.get("due_only") for t in self.todo_lists):
             return
         seen = tuple((c["id"], c.get("turn")) for c in self.chores_for(None))
         if seen != self._seen_chores:
@@ -369,6 +369,11 @@ class FamilyManager:
             list_name = state.name if state else entity_id
             mine = self.linked_uids(entity_id)
             for item in self.todo_items.get(entity_id, []):
+                # Only due (today, by its time) or overdue items, when set.
+                if todo.get("due_only") and not model.todo_due(
+                    _local_due(item.get("due")), now
+                ):
+                    continue
                 if item.get("uid") in mine:
                     continue  # a dashboard chore Family keeps on this list
                 name, points, _rated = model.todo_item_points(
@@ -1268,6 +1273,9 @@ class FamilyManager:
             "grab": bool(raw.get("grab")),
             "item_points": rated,
             "item_members": assigned,
+            # Only items due now or overdue show as chores; ones with no due
+            # date always do.
+            "due_only": bool(raw.get("due_only")),
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }
         self._upsert(self.todo_lists, todo)
@@ -1653,3 +1661,16 @@ def _item_members(todo: dict[str, Any], name: str) -> list[str]:
     """Who a to-do item is for: its own people, else the list's."""
     own = (todo.get("item_members") or {}).get(model.item_key(name))
     return list(own or todo.get("members") or [])
+
+
+def _local_due(due: Any) -> date | datetime | None:
+    """A to-do item's due date (all day) or time, in local time."""
+    if not due:
+        return None
+    text = str(due)
+    try:
+        if len(text) == 10:
+            return date.fromisoformat(text)
+        return dt_util.as_local(datetime.fromisoformat(text))
+    except ValueError:
+        return None

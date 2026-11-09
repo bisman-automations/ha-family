@@ -775,3 +775,13 @@ def event_days(first: date, last: date, today: date, days: int) -> list[str]:
     return [
         (start + timedelta(days=i)).isoformat() for i in range((stop - start).days + 1)
     ]
+
+
+def todo_due(due: date | datetime | None, now: datetime) -> bool:
+    """Whether a to-do item is due: no due date, a day up to today, or a
+    time that has come (a time later today isn't due yet)."""
+    if due is None:
+        return True
+    if isinstance(due, datetime):
+        return due <= now
+    return due <= now.date()

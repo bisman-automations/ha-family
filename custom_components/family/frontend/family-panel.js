@@ -690,9 +690,10 @@ class FamilyPanel extends HTMLElement {
     }
     const member = this._memberById(this._member);
     // On someone's page: their own chores, then ones up for grabs for them.
-    // On everyone's: only those up for grabs; each person's are on their page.
+    // On everyone's: only those up for grabs for everyone; ones up for grabs
+    // for some people, and each person's own, are on their pages.
     const mine = member ? d.chores.filter((c) => !c.grab && c.can.includes(member.id)) : [];
-    const grabs = d.chores.filter((c) => c.grab && (!member || c.can.includes(member.id)));
+    const grabs = d.chores.filter((c) => c.grab && (member ? c.can.includes(member.id) : !c.members?.length));
     const choreTiles = (chores, fit) =>
       `<div class="tiles" data-fit="${fit}">${chores
           .map((c) => {

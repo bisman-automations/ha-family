@@ -127,6 +127,30 @@ const money = (points, m) => {
   return `${m.currency || ""}${amount.toFixed(amount % 1 ? 2 : 0)}`;
 };
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
+// "Alex", "Alex and Sam", "Alex, Sam and Riley".
+const namesText = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+// A reward's points shared as evenly as each one's points allow, like
+// model.split_points: [[id, points], ...] in, {id: share} or null out.
+function splitPoints(cost, balances) {
+  const left = Object.fromEntries(balances.map(([id, p]) => [id, Math.max(0, p)]));
+  const shares = Object.fromEntries(balances.map(([id]) => [id, 0]));
+  let remaining = Math.max(0, cost);
+  while (remaining > 0) {
+    const able = balances.map(([id]) => id).filter((id) => left[id] > 0);
+    if (!able.length) return null;
+    const each = Math.floor(remaining / able.length);
+    const extra = remaining % able.length;
+    able.forEach((id, i) => {
+      const give = Math.min(left[id], each + (i < extra ? 1 : 0));
+      shares[id] += give;
+      left[id] -= give;
+      remaining -= give;
+    });
+  }
+  return shares;
+}
+// A timed event that's already over.
+const eventOver = (e, now = Date.now()) => !e.all_day && !!e.end && new Date(e.end).getTime() <= now;
 
 const STYLES = `
   :host {
@@ -216,7 +240,22 @@ const STYLES = `
     .tile { padding: 12px; min-height: 104px; }
     .tile .label { font-size: 16px; }
   }
-  h2.sec { margin: 20px 0 8px; }
+  h2.sec { margin: 20px 0 8px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .sec-extra { font-size: 15px; }
+  .tile.event.over { opacity: .55; }
+  .tile.event.over .label { text-decoration: line-through; }
+  .over-tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: var(--fam-divider, var(--divider-color)); color: var(--primary-text-color); margin-left: 4px; }
+  .tile.event.empty-day { justify-content: center; color: var(--fam-muted); }
+  .sheet.wide { width: min(900px, 100%); max-height: calc(100vh - 32px); overflow: auto; text-align: left; }
+  .sheet.wide h3, .sheet.wide .actions { text-align: center; }
+  ul.days { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 14px; }
+  ul.days h4 { margin: 0 0 6px; font-size: 18px; font-weight: 500; }
+  ul.days .nothing { margin: 0; font-size: 15px; }
+  ul.days .tile.event { min-height: 0; }
+  .sheet .split { font-size: 18px; color: var(--primary-text-color); margin-top: 12px; }
+  .sheet .split.ready { font-weight: 500; }
+  .avatars { display: inline-flex; }
+  .avatars > * + * { margin-left: -8px; }
   .sec-toggle {
     font: inherit; font-size: 22px; font-weight: 500; color: inherit; background: none; border: 0;
     padding: 4px 8px 4px 0; min-height: 48px; cursor: pointer; display: inline-flex; align-items: center; gap: 12px;
@@ -281,6 +320,7 @@ const STYLES = `
   .sheet .people { justify-content: center; flex-wrap: wrap; }
   .sheet .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .big { font: inherit; font-size: 18px; min-height: 56px; padding: 0 28px; border-radius: 28px; cursor: pointer; border: 1px solid var(--fam-divider); background: transparent; color: inherit; }
+  .big:disabled, .btn:disabled { opacity: .45; cursor: default; }
   .big.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 6;
@@ -417,6 +457,11 @@ class FamilyPanel extends HTMLElement {
   }
 
   _idleCheck() {
+    if (this._mode === "family" && this._data && this._overCount() !== this._over) {
+      this._over = this._overCount();
+      if (this._sheet?.type === "days") this._renderOverlay();
+      else if (!this._sheet && !this._busy) this._render();
+    }
     if (this._mode !== "family" || !this._data || this._sheet || this._busy) return;
     if (Date.now() - this._lastTouch < IDLE_MS) return;
     const home = this._homeMember();
@@ -520,7 +565,7 @@ class FamilyPanel extends HTMLElement {
 
   _people(members, attr, selected) {
     return `<div class="people" role="group">${members
-      .map((m) => `<button class="person" style="--c:${esc(m.color)}" ${attr}="${esc(m.id)}" aria-pressed="${m.id === selected}">
+      .map((m) => `<button class="person" style="--c:${esc(m.color)}" ${attr}="${esc(m.id)}" aria-pressed="${Array.isArray(selected) ? selected.includes(m.id) : m.id === selected}">
           ${this._avatar(m)}<span class="name">${esc(m.name)}</span>
           <span class="points"><b>${m.points}</b> ${m.points === 1 ? "point" : "points"}${this._data?.money ? `<small class="money"> · ${esc(money(m.points, this._data.money))}</small>` : ""}</span>
           ${m.streak >= 2 ? `<span class="streak" title="${m.streak} days in a row">🔥 ${m.streak}</span>` : ""}${this._goalBar(m)}</button>`)
@@ -556,7 +601,7 @@ class FamilyPanel extends HTMLElement {
         const gone = e.review === "rejected";
         const cls = gone ? "gone" : e.points >= 0 ? "plus" : "minus";
         const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : e.kind === "bonus" ? `earned a bonus: <b>${esc(e.title)}</b>` : e.kind === "penalty" ? `lost points: <b>${esc(e.title)}</b> didn't happen` : e.kind === "allowance" ? "got their <b>weekly allowance</b>" : `<b>${esc(e.title)}</b>`;
-        const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.auto ? " · checked automatically" : e.given === "to_give" ? " · to hand out" : "";
+        const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.auto ? " · checked automatically" : e.given === "to_give" ? " · to hand out" : e.given === "to_approve" ? " · waiting for a parent to say yes" : "";
         return `<li>${m ? this._avatar(m, true) : ""}<span class="what">${esc(m?.name || "Someone")} ${what}<br><small class="muted">${esc(whenText(e.at))}${note}</small></span>
           <span class="amount ${cls}">${signed(e.points)}</span>${review && e.kind === "chore" && !gone ? `<button class="btn bad" data-review="${esc(e.id)}" data-approved="0">Didn't happen</button>` : ""}</li>`;
       })
@@ -674,13 +719,9 @@ class FamilyPanel extends HTMLElement {
     // "Add a note" comes first, so it's never folded away with the rest.
     const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
     const events = (d.today || []).filter((e) => !member || !e.member || e.member === member.id);
-    const eventTiles = `<div class="tiles events" data-fit="today">${events
-      .map((e) => {
-        const m = this._memberById(e.member);
-        return `<div class="tile event"${m ? ` style="--c:${esc(m.color)}"` : ""}><span class="when">${esc(eventTime(e))}</span>
-          <span class="label">${esc(e.title)}</span>${m && !member ? `<span class="who">${this._avatar(m, true)}</span>` : ""}</div>`;
-      })
-      .join("")}</div>`;
+    const eventTiles = `<div class="tiles events" data-fit="today">${
+      events.length ? events.map((e) => this._eventTile(e, !member)).join("") : `<div class="tile event empty-day"><span class="label">Nothing today</span></div>`
+    }</div>`;
     const meals = (d.meals || []).slice(0, 2).filter((day) => MEALS.some(([k]) => day[k]));
     const mealTiles = `<div class="tiles meals" data-fit="meals">${meals
       .map((day) => {
@@ -693,7 +734,7 @@ class FamilyPanel extends HTMLElement {
     return `<h2>${member ? `Hi ${esc(member.name)}!${streak}${cash}` : "Who's here?"}</h2>
       ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}${goalCard}
       ${this._section("notes", "Notes", noteTiles, notes.length)}
-      ${events.length ? this._section("today", "Today", eventTiles, events.length) : ""}
+      ${d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : ""}
       ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
       ${this._section("chores", "Chores", choreTiles, chores.length)}
       ${done.length ? this._section("done", "Done today", doneTiles, done.length) : ""}
@@ -728,11 +769,25 @@ class FamilyPanel extends HTMLElement {
     this._render();
   }
 
-  _section(key, title, body, count) {
+  // `extra`: a button after the title, such as Today's "Next few days".
+  _section(key, title, body, count, extra = "") {
     const closed = this._sectionMode(key) === "closed";
     const badge = count ? ` <span class="count">${count}</span>` : "";
-    const head = `<h2 class="sec"><button class="sec-toggle" data-section-toggle="${key}" aria-expanded="${!closed}"><span class="chev"></span>${esc(title)}${badge}</button></h2>`;
+    const head = `<h2 class="sec"><button class="sec-toggle" data-section-toggle="${key}" aria-expanded="${!closed}"><span class="chev"></span>${esc(title)}${badge}</button>${extra}</h2>`;
     return closed ? head : `${head}${body}<button class="more" data-more="${key}" hidden></button>`;
+  }
+
+  // An event; one that's already over today is faded and says so.
+  _eventTile(e, showWho) {
+    const m = this._memberById(e.member);
+    const over = eventOver(e);
+    return `<div class="tile event${over ? " over" : ""}"${m ? ` style="--c:${esc(m.color)}"` : ""}><span class="when">${esc(eventTime(e))}${over ? ` <span class="over-tag">Over</span>` : ""}</span>
+      <span class="label">${esc(e.title)}</span>${m && showWho ? `<span class="who">${this._avatar(m, true)}</span>` : ""}</div>`;
+  }
+
+  // How many of today's events are over: the page is drawn again when it changes.
+  _overCount() {
+    return (this._data?.today || []).filter((e) => eventOver(e)).length;
   }
 
   // Hide what doesn't fit in the first row, and say how many there are.
@@ -871,6 +926,19 @@ class FamilyPanel extends HTMLElement {
           <button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Put it up</button></div>
         </form></div></div>`;
     }
+    if (s.type === "days") {
+      const member = this._memberById(s.member);
+      const days = (d.upcoming || []).map((day, index) => {
+        const events = day.events.filter((e) => !member || !e.member || e.member === member.id);
+        return `<li class="day"><h4>${esc(dayText(day.date, index))}</h4>${
+          events.length ? `<div class="tiles events">${events.map((e) => this._eventTile(e, !member)).join("")}</div>` : `<p class="muted nothing">Nothing planned</p>`
+        }</li>`;
+      });
+      return `<div class="sheet-bg" data-close><div class="sheet wide" role="dialog" aria-modal="true" aria-label="Next few days">
+        <h3>Next few days</h3><ul class="days">${days.join("")}</ul>
+        <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
+    }
+    if (s.type === "together") return this._togetherSheet();
     if (s.type === "control") {
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.verb)}">
         <h3>${esc(s.verb)} ${esc(s.name)}?</h3>
@@ -900,8 +968,8 @@ class FamilyPanel extends HTMLElement {
       const can = d.members.filter((m) => m.points >= reward.points && !(reward.used_by || []).includes(m.id));
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who's it for?">
         <h3>Who's ${esc(reward.name)} for?</h3><p>${pts(reward.points)}</p>
-        ${can.length ? this._people(can, "data-sheet-member", null) : `<p>Nobody has enough points yet.</p>`}
-        <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
+        ${can.length ? this._people(can, "data-sheet-member", null) : `<p>Nobody has enough points on their own yet.</p>`}
+        <div class="actions"><button class="big" data-close>Cancel</button>${this._canShare(reward) ? `<button class="big" data-together-start>Get it together</button>` : ""}</div></div></div>`;
     }
     if (member.points < reward.points) {
       const saving = member.goal === reward.id;
@@ -910,20 +978,56 @@ class FamilyPanel extends HTMLElement {
         <p>${esc(member.name)} has ${member.points} of ${pts(reward.points)}: ${reward.points - member.points} more to go.${saving ? "" : " Save up for it?"}</p>
         ${this._bar(member.points, reward.points)}
         <div class="actions" style="margin-top:18px"><button class="big" data-close>Not now</button>
-        ${saving ? `<button class="big" data-goal="">Stop saving for it</button>` : `<button class="big primary" data-goal="${esc(reward.id)}" ${this._busy ? "disabled" : ""}>Save for this</button>`}</div></div></div>`;
+        ${saving ? `<button class="big" data-goal="">Stop saving for it</button>` : `<button class="big primary" data-goal="${esc(reward.id)}" ${this._busy ? "disabled" : ""}>Save for this</button>`}
+        ${this._canShare(reward) ? `<button class="big" data-together-start>Get it together</button>` : ""}</div></div></div>`;
     }
     const tv = reward.kind === "tv_time" ? ` You'll get ${reward.minutes} minutes on ${esc(reward.tv_name || "the TV")} straight away.` : reward.kind === "music_time" ? ` You'll get ${reward.minutes} minutes of music on ${esc(reward.speaker_name || "the speaker")} straight away.` : " A parent will give it to you.";
     return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Get a reward">
       <h3>${esc(reward.name)}</h3><p>Spend ${pts(reward.points)} of ${esc(member.name)}'s ${member.points}?${tv}</p>
       <div class="actions"><button class="big" data-close>No</button>
+      ${this._canShare(reward) ? `<button class="big" data-together-start>Get it together</button>` : ""}
       <button class="big primary" data-confirm ${this._busy ? "disabled" : ""}>Yes, please!</button></div></div></div>`;
+  }
+
+  // Others who could put points in with whoever's getting it.
+  _shareable(reward) {
+    return this._data.members.filter((m) => !(reward.used_by || []).includes(m.id));
+  }
+
+  _canShare(reward) {
+    return this._shareable(reward).length >= 2;
+  }
+
+  // Getting a reward together: pick who's putting in points; a parent says yes.
+  _togetherSheet() {
+    const s = this._sheet;
+    const d = this._data;
+    const reward = d.rewards.find((r) => r.id === s.id);
+    if (!reward) return "";
+    const picked = s.with.filter((id) => this._memberById(id));
+    const people = this._shareable(reward);
+    const shares = picked.length >= 2 ? splitPoints(reward.points, picked.map((id) => [id, this._memberById(id).points])) : null;
+    const broke = shares && reward.points ? picked.filter((id) => !shares[id]).map((id) => this._memberById(id).name) : [];
+    const have = picked.reduce((sum, id) => sum + Math.max(0, this._memberById(id).points), 0);
+    let line;
+    if (picked.length < 2) line = "Who's putting in points? Pick two or more.";
+    else if (!shares) line = `Together you have ${have} of ${pts(reward.points)}: ${reward.points - have} more to go.`;
+    else if (broke.length) line = `${esc(namesText(broke))} ${broke.length === 1 ? "has" : "have"} no points to put in.`;
+    else line = picked.map((id) => `${esc(this._memberById(id).name)} ${shares[id]}`).join(" · ");
+    const ready = shares && !broke.length;
+    return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Get it together">
+      <h3>${esc(reward.emoji || "")} ${esc(reward.name)}</h3><p>Get it together: ${pts(reward.points)}, shared. A parent says yes first, and until then the points are held.</p>
+      ${this._people(people, "data-together", picked)}
+      <p class="split${ready ? " ready" : ""}">${line}</p>
+      <div class="actions"><button class="big" data-close>Cancel</button>
+      <button class="big primary" data-confirm ${ready && !this._busy ? "" : "disabled"}>Ask a parent</button></div></div></div>`;
   }
 
   // Parents ---------------------------------------------------------------------
 
   _renderParents() {
     const d = this._data;
-    const checks = (d.to_check?.length || 0) + (d.to_give?.length || 0);
+    const checks = (d.to_check?.length || 0) + (d.to_give?.length || 0) + (d.to_approve?.length || 0);
     const tabs = [
       ["review", `To check${checks ? `<span class="badge">${checks}</span>` : ""}`],
       ["chores", "Chores"],
@@ -963,17 +1067,31 @@ class FamilyPanel extends HTMLElement {
           })
           .join("")}</ul>`
       : `<p class="empty">Nothing to check. Chores the kids mark done show up here.</p>`;
+    const approve = (d.to_approve || []).length
+      ? `<div class="card"><h2>Rewards to say yes to</h2>
+        <p class="muted">Bought together: each one's points are held until you say yes. <b>No</b> gives them back.</p>
+        <ul class="rows">${d.to_approve
+          .map((r) => {
+            const people = r.shares.map((sh) => this._memberById(sh.member)).filter(Boolean);
+            const split = r.shares.map((sh) => `${esc(this._memberById(sh.member)?.name || "Someone")} ${sh.points}`).join(" · ");
+            return `<li><span class="avatars">${people.map((m) => this._avatar(m, true)).join("")}</span><span class="grow">${esc(namesText(people.map((m) => m.name)))}: <b>${esc(r.title)}</b><small>${esc(whenText(r.at))} · ${split}</small></span>
+              <button class="btn good" data-approve="${esc(r.group)}" data-yes="1">Yes</button>
+              <button class="btn bad" data-approve="${esc(r.group)}" data-yes="0">No</button></li>`;
+          })
+          .join("")}</ul></div>`
+      : "";
     const give = d.to_give.length
       ? `<ul class="rows">${d.to_give
           .map((e) => {
-            const m = this._memberById(e.member);
-            return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))}</small></span>
+            const people = (e.together || [e.member]).map((id) => this._memberById(id)).filter(Boolean);
+            const who = people.length ? namesText(people.map((m) => m.name)) : "Someone";
+            return `<li><span class="avatars">${people.map((m) => this._avatar(m, true)).join("")}</span><span class="grow">${esc(who)}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))}</small></span>
               <button class="btn primary" data-given="${esc(e.id)}">Handed out</button></li>`;
           })
           .join("")}</ul>`
       : `<p class="empty">No rewards to hand out.</p>`;
     const auto = d.settings?.auto_check || "";
-    return `<div class="card"><h2>Chores to check</h2>
+    return `${approve}<div class="card"><h2>Chores to check</h2>
         <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}, and takes the penalty in the box next to it: the chore's own penalty, or the family's. Type a number to change it this time.</p>${check}
         <form class="inline penalty-setting" data-penalty-setting>
           <label class="field"><span>When a chore didn't happen, also take away</span>
@@ -1467,6 +1585,19 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.reward) {
       this._sheet = { type: "reward", id: ds.reward, member: this._member };
       this._renderOverlay();
+    } else if ("days" in ds) {
+      this._sheet = { type: "days", member: this._member };
+      this._renderOverlay();
+    } else if ("togetherStart" in ds) {
+      const s = this._sheet;
+      this._sheet = { type: "together", id: s.id, with: s.member ? [s.member] : [] };
+      this._renderOverlay();
+    } else if (ds.together) {
+      const s = this._sheet;
+      s.with = s.with.includes(ds.together) ? s.with.filter((id) => id !== ds.together) : [...s.with, ds.together];
+      this._renderOverlay();
+    } else if (ds.approve) {
+      this._call({ type: `${DOMAIN}/approve`, group_id: ds.approve, approved: ds.yes === "1" }, ds.yes === "1" ? "Said yes." : "Said no. The points are back.");
     } else if (ds.sheetMember) {
       this._sheet = { ...this._sheet, member: ds.sheetMember };
       this._renderOverlay();
@@ -1685,6 +1816,25 @@ class FamilyPanel extends HTMLElement {
       this._sheet = null;
       this._renderOverlay();
       if (control) await this._runControl(control, s.action, s.verb, s.name);
+      return;
+    }
+    if (s?.type === "together") {
+      if (this._busy || s.with.length < 2) return;
+      this._busy = true;
+      this._renderOverlay();
+      try {
+        const [first, ...rest] = s.with;
+        const res = await this._ws({ type: `${DOMAIN}/redeem`, member_id: first, reward_id: s.id, together: rest });
+        this._sheet = null;
+        this._toast("Asked a parent! Your points are held until they say yes.", false, res.entry?.id);
+        await this._load();
+      } catch (err) {
+        this._sheet = null;
+        this._toast(err?.message || String(err), true);
+      } finally {
+        this._busy = false;
+        this._renderOverlay();
+      }
       return;
     }
     if (!s?.member || this._busy) return;

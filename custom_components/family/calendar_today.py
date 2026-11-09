@@ -1,7 +1,7 @@
 """Today's calendar on the Family dashboard.
 
-Reads today's events from the calendars a parent picked (each one for a
-family member, or for everyone) with ``calendar.get_events``, when Family
+Reads the events of today and the next days (``DAYS``) from the calendars
+a parent picked (each one for a family member, or for everyone) with ``calendar.get_events``, when Family
 starts, every 15 minutes, just after midnight and whenever a calendar's
 state changes (an event starting or ending). The dashboards get the list
 in the snapshot; nothing is stored.
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +20,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
+from . import model
 from .const import SIGNAL_CHANGED
 
 if TYPE_CHECKING:
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 REFRESH = timedelta(minutes=15)
 TIMEOUT_SECONDS = 20
-MAX_EVENTS = 40
+MAX_EVENTS = 150
+# Today and the days after it, for the Today section's "Next few days".
+DAYS = 7
 
 
 def clean_calendars(raw: Any, members: set[str]) -> list[dict[str, Any]]:
@@ -96,10 +99,10 @@ class CalendarToday:
         try:
             now = dt_util.now()
             start = dt_util.start_of_local_day(now)
-            end = start + timedelta(days=1)
+            end = start + timedelta(days=DAYS)
             events: list[dict[str, Any]] = []
             for row in self.calendars:
-                events.extend(await self._read(row, start, end))
+                events.extend(await self._read(row, start, end, now.date()))
         finally:
             self._refreshing = False
         events.sort(key=lambda e: (not e["all_day"], e["start"], e["title"].casefold()))
@@ -108,8 +111,12 @@ class CalendarToday:
             self.events = events
             async_dispatcher_send(self.hass, SIGNAL_CHANGED)
 
+    def on(self, day: str) -> list[dict[str, Any]]:
+        """The events on one day (an ISO date)."""
+        return [e for e in self.events if day in e["days"]]
+
     async def _read(
-        self, row: dict[str, Any], start: datetime, end: datetime
+        self, row: dict[str, Any], start: datetime, end: datetime, today: date
     ) -> list[dict[str, Any]]:
         entity_id = row["entity_id"]
         state = self.hass.states.get(entity_id)
@@ -140,6 +147,9 @@ class CalendarToday:
             if not isinstance(event, dict):
                 continue
             begins = str(event.get("start") or "")
+            days = _days(begins, str(event.get("end") or ""), today)
+            if not days:
+                continue
             result.append(
                 {
                     "title": str(event.get("summary") or "Busy"),
@@ -149,6 +159,23 @@ class CalendarToday:
                     "all_day": len(begins) == 10,
                     "member": row.get("member"),
                     "calendar": state.name,
+                    "days": days,
                 }
             )
         return result
+
+
+def _days(start: str, end: str, today: date) -> list[str]:
+    """The days from today on that an event covers (its end isn't included)."""
+    try:
+        if len(start) == 10:  # all day: dates only, the end date is the day after
+            first = date.fromisoformat(start)
+            last = date.fromisoformat(end[:10]) - timedelta(days=1) if end else first
+        else:
+            begins = dt_util.as_local(datetime.fromisoformat(start))
+            ends = dt_util.as_local(datetime.fromisoformat(end)) if end else begins
+            first = begins.date()
+            last = max(first, (ends - timedelta(microseconds=1)).date())
+    except ValueError:
+        return []
+    return model.event_days(first, last, today, DAYS)

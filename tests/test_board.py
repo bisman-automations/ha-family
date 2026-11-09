@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
@@ -72,18 +72,38 @@ async def test_meals_for_the_week(
     assert (await kiosk.ok("state"))["meals"][0] == {"date": today}
 
 
+def _at(day: date, hour: int) -> str:
+    return dt_util.start_of_local_day(day).replace(hour=hour).isoformat()
+
+
 async def test_todays_calendar(hass: HomeAssistant, client):
     hass.states.async_set(CAL, "off", {"friendly_name": "Family"})
+    today = dt_util.now().date()
+    tomorrow = today + timedelta(days=1)
     events = [
+        {"summary": "Swim lesson", "start": _at(today, 16), "end": _at(today, 17)},
         {
-            "summary": "Swim lesson",
-            "start": "2030-01-01T16:00:00-06:00",
-            "end": "2030-01-01T17:00:00-06:00",
+            "summary": "No school",
+            "start": today.isoformat(),
+            "end": tomorrow.isoformat(),
         },
-        {"summary": "No school", "start": "2030-01-01", "end": "2030-01-02"},
+        {"summary": "Dentist", "start": _at(tomorrow, 9), "end": _at(tomorrow, 10)},
+        {
+            "summary": "Camp",
+            "start": tomorrow.isoformat(),
+            "end": (today + timedelta(days=4)).isoformat(),
+        },
+        # Past the next few days.
+        {
+            "summary": "Trip",
+            "start": (today + timedelta(days=9)).isoformat(),
+            "end": (today + timedelta(days=10)).isoformat(),
+        },
     ]
+    asked: list[dict] = []
 
     async def get_events(call):
+        asked.append(dict(call.data))
         return {CAL: {"events": events}}
 
     hass.services.async_register(
@@ -92,9 +112,16 @@ async def test_todays_calendar(hass: HomeAssistant, client):
     alex, _sam = await _family(client)
     choices = await client.ok("choices")
     assert choices["calendars"] == [{"entity_id": CAL, "name": "Family"}]
+    state = await client.ok("state")
+    assert state["has_calendars"] is False
     await client.ok("settings", calendars=[{"entity_id": CAL, "member": alex}])
     await hass.async_block_till_done()
     state = await client.ok("state")
+    assert state["has_calendars"] is True
+    # The next 7 days are read.
+    start = datetime.fromisoformat(asked[-1]["start_date_time"])
+    end = datetime.fromisoformat(asked[-1]["end_date_time"])
+    assert end - start == timedelta(days=7)
     # All-day events first.
     assert [(e["title"], e["all_day"], e["member"]) for e in state["today"]] == [
         ("No school", True, alex),
@@ -102,8 +129,19 @@ async def test_todays_calendar(hass: HomeAssistant, client):
     ]
     assert state["settings"]["calendars"] == [{"entity_id": CAL, "member": alex}]
 
+    # The next few days: today, tomorrow and on; a 3-day event on each day.
+    upcoming = state["upcoming"]
+    assert [d["date"] for d in upcoming] == [
+        (today + timedelta(days=i)).isoformat() for i in range(7)
+    ]
+    titles = [[e["title"] for e in d["events"]] for d in upcoming]
+    assert titles[0] == ["No school", "Swim lesson"]
+    assert titles[1] == ["Camp", "Dentist"]
+    assert titles[2] == titles[3] == ["Camp"]
+    assert titles[4:] == [[], [], []]
+
     # A calendar's event starting reads it again.
-    events.append({"summary": "Piano", "start": "2030-01-01T18:00:00-06:00", "end": ""})
+    events.append({"summary": "Piano", "start": _at(today, 18), "end": ""})
     hass.states.async_set(CAL, "on", {"friendly_name": "Family"})
     await hass.async_block_till_done()
     assert len((await client.ok("state"))["today"]) == 3

@@ -27,7 +27,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from . import model
-from .calendar_today import CalendarToday, clean_calendars
+from .calendar_today import DAYS as CALENDAR_DAYS, CalendarToday, clean_calendars
 from .const import (
     DOMAIN,
     EVENT_BONUS,
@@ -731,11 +731,16 @@ class FamilyManager:
         if chore_id.startswith(TODO_PREFIX):
             entity_id, _, uid = chore_id.removeprefix(TODO_PREFIX).rpartition(":")
             await self._async_set_todo(entity_id, uid, False)
+        group = entry.get("group")
         self.entries[:] = [
-            e for e in self.entries if e is not entry and e.get("for_entry") != entry_id
+            e
+            for e in self.entries
+            if e is not entry
+            and e.get("for_entry") != entry_id
+            and not (group and e.get("group") == group)
         ]
         self._changed()
-        self.notices.clear(entry_id)
+        self.notices.clear(group or entry_id)
 
     # ---- rewards --------------------------------------------------------------
 
@@ -745,8 +750,16 @@ class FamilyManager:
                 return reward
         raise FamilyError("That reward isn't on the list any more")
 
-    async def async_redeem(self, member_id: str, reward_id: str) -> dict[str, Any]:
-        """Spend points on a reward. TV time is given straight away."""
+    async def async_redeem(
+        self, member_id: str, reward_id: str, together: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Spend points on a reward. TV time is given straight away.
+
+        With ``together``, the others share the points, and a parent says yes
+        first (``async_approve``).
+        """
+        if together:
+            return self._redeem_together(member_id, reward_id, together)
         member = self.member(member_id)
         reward = self.reward(reward_id)
         cost = int(reward.get("points", 0))
@@ -802,6 +815,130 @@ class FamilyManager:
             },
         )
         return entry
+
+    @callback
+    def _redeem_together(
+        self, member_id: str, reward_id: str, together: list[str]
+    ) -> dict[str, Any]:
+        """Hold each member's share of the points until a parent says yes."""
+        ids = list(dict.fromkeys([member_id, *together]))
+        if len(ids) < 2:
+            raise FamilyError("Pick who's sharing it")
+        members = [self.member(i) for i in ids]
+        reward = self.reward(reward_id)
+        cost = int(reward.get("points", 0))
+        used = model.reward_used_by(reward, self.entries, dt_util.now())
+        for member in members:
+            if member["id"] in used:
+                when = (
+                    "today"
+                    if reward.get("limit") == model.REPEAT_DAILY
+                    else "this week"
+                )
+                raise FamilyError(
+                    f"{member['name']} already had {reward['name']} {when}"
+                )
+        shares = model.split_points(cost, [(i, self.points(i)) for i in ids])
+        if shares is None:
+            have = sum(max(0, self.points(i)) for i in ids)
+            raise FamilyError(
+                f"Together they have {have} of the {cost} points for {reward['name']}"
+            )
+        for member in members:
+            if cost and not shares[member["id"]]:
+                raise FamilyError(f"{member['name']} has no points to put in")
+        group = _id()
+        at = _now_iso()
+        entries = [
+            {
+                "id": _id(),
+                "at": at,
+                "kind": model.KIND_REWARD,
+                "member": member["id"],
+                "title": reward["name"],
+                "points": -shares[member["id"]],
+                "reward_id": reward_id,
+                "given": model.GIVEN_APPROVAL,
+                "group": group,
+                "together": ids,
+                "total": cost,
+            }
+            for member in members
+        ]
+        self.entries.extend(entries)
+        self._changed()
+        self.notices.reward_to_approve(
+            group,
+            model.names_text([m["name"] for m in members]),
+            reward["name"],
+            {m["name"]: shares[m["id"]] for m in members},
+        )
+        return entries[0]
+
+    def _group(self, group_id: str) -> list[dict[str, Any]]:
+        return [e for e in self.entries if e.get("group") == group_id]
+
+    async def async_approve(self, group_id: str, approved: bool) -> None:
+        """A parent says yes (the reward is given) or no (the points go back)."""
+        entries = [
+            e for e in self._group(group_id) if e.get("given") == model.GIVEN_APPROVAL
+        ]
+        if not entries:
+            raise FamilyError("Someone dealt with that already")
+        first = entries[0]
+        names = model.names_text([self._member_name(e["member"]) for e in entries])
+        if not approved:
+            self.entries[:] = [e for e in self.entries if e.get("group") != group_id]
+            self._changed()
+            self.notices.clear(group_id)
+            return
+        reward = self.reward(first["reward_id"])
+        kind = reward.get("kind")
+        extra: dict[str, Any] = {}
+        if kind == model.REWARD_TV_TIME:
+            await self._async_give_tv_time(reward, {"name": names})
+            extra = {"tv": reward["tv"]}
+        elif kind == model.REWARD_MUSIC_TIME:
+            await self._async_give_music_time(reward, {"name": names})
+            extra = {"speaker": reward["speaker"]}
+        if extra:
+            # Kept once, on the first share, for History.
+            first.update(
+                extra,
+                minutes=int(reward.get("minutes", 0)),
+                whole_home=bool(reward.get("whole_home", False)),
+            )
+        given_now = bool(extra)
+        for entry in entries:
+            entry["given"] = model.GIVEN_DONE if given_now else model.GIVEN_PENDING
+            entry["approved_at"] = _now_iso()
+            if given_now:
+                entry["given_at"] = entry["approved_at"]
+        for member in self.members:
+            if member["id"] in first["together"] and member.get("goal") == reward["id"]:
+                member["goal"] = None
+        self._changed()
+        self.notices.clear(group_id)
+        if not given_now:
+            self.notices.reward_to_give(first, {"name": names})
+        for entry in entries:
+            self.hass.bus.async_fire(
+                EVENT_REWARD_REDEEMED,
+                {
+                    "member": self._member_name(entry["member"]),
+                    "member_id": entry["member"],
+                    "reward": reward["name"],
+                    "points": -int(entry["points"]),
+                    "balance": self.points(entry["member"]),
+                    "together": names,
+                },
+            )
+
+    def _member_name(self, member_id: str) -> str:
+        for member in self.members:
+            if member["id"] == member_id:
+                return str(member["name"])
+        return "Someone"
 
     async def _async_give_tv_time(
         self, reward: dict[str, Any], member: dict[str, Any]
@@ -884,8 +1021,10 @@ class FamilyManager:
     @callback
     def mark_given(self, entry_id: str) -> dict[str, Any]:
         entry = self._entry(entry_id)
-        entry["given"] = model.GIVEN_DONE
-        entry["given_at"] = _now_iso()
+        # Bought together: the whole group's handed out.
+        for each in self._group(entry["group"]) if entry.get("group") else [entry]:
+            each["given"] = model.GIVEN_DONE
+            each["given_at"] = _now_iso()
         self._changed()
         self.notices.clear(entry_id)
         return entry
@@ -1304,7 +1443,13 @@ class FamilyManager:
                 "streak": int(self.settings.get("streak_bonus") or 0),
             },
             "recent": recent,
-            "today": self.calendar.events,
+            "today": self.calendar.on(today.isoformat()),
+            # The Today section's "Next few days": today and the days after it.
+            "upcoming": [
+                {"date": day, "events": self.calendar.on(day)}
+                for day in model.week_days(today, CALENDAR_DAYS)
+            ],
+            "has_calendars": bool(self.calendar.calendars),
             "meals": [
                 {"date": day, **self.meals.get(day, {})}
                 for day in model.week_days(today)
@@ -1356,11 +1501,38 @@ class FamilyManager:
                 for e in reversed(self.entries)
                 if e.get("review") == model.REVIEW_PENDING
             ]
-            result["to_give"] = [
-                e
-                for e in reversed(self.entries)
-                if e.get("given") == model.GIVEN_PENDING
-            ]
+            groups: set[str] = set()
+            result["to_give"] = []
+            for e in reversed(self.entries):
+                if e.get("given") != model.GIVEN_PENDING:
+                    continue
+                if e.get("group"):
+                    # A reward bought together is handed out once.
+                    if e["group"] in groups:
+                        continue
+                    groups.add(e["group"])
+                result["to_give"].append(e)
+            approve: dict[str, dict[str, Any]] = {}
+            for e in self.entries:
+                if e.get("given") != model.GIVEN_APPROVAL:
+                    continue
+                request = approve.setdefault(
+                    e["group"],
+                    {
+                        "group": e["group"],
+                        "at": e["at"],
+                        "title": e["title"],
+                        "reward_id": e.get("reward_id"),
+                        "points": int(e.get("total", 0)),
+                        "shares": [],
+                    },
+                )
+                request["shares"].append(
+                    {"member": e["member"], "points": -int(e["points"])}
+                )
+            result["to_approve"] = sorted(
+                approve.values(), key=lambda r: r["at"], reverse=True
+            )
             result["history"] = sorted(
                 self.entries, key=lambda e: e["at"], reverse=True
             )[:200]

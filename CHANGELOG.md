@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-11-08
+
+### Added
+
+- **Get a reward together.** Tap a reward, then **Get it together**, and pick who's putting in points. The points are shared as evenly as everyone's points allow: someone with fewer puts in what they have and the others cover the rest. The points are held until a parent says yes on the Parents dashboard (**To check**) or from their phone; **No** gives everyone their points back. TV and music time is given as soon as a parent says yes.
+- **Next few days.** The **Today** section has a **Next few days** button that opens today, tomorrow and the five days after in a pop-up, each with its events.
+
+### Changed
+
+- **Events that are already over stay under Today**, faded and marked **Over**, instead of looking like they're still to come.
+- **The Today section shows whenever calendars are picked**, with "Nothing today" on a quiet day, so **Next few days** is always there.
+
 ## [1.8.0] - 2026-11-08
 
 ### Added
@@ -104,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.9.0]: https://github.com/bisman-automations/ha-family/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/bisman-automations/ha-family/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/bisman-automations/ha-family/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/bisman-automations/ha-family/compare/v1.5.0...v1.6.0

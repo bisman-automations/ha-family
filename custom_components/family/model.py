@@ -52,6 +52,8 @@ REWARD_CUSTOM = "custom"
 REWARD_KINDS = (REWARD_TV_TIME, REWARD_MUSIC_TIME, REWARD_CUSTOM)
 GIVEN_PENDING = "to_give"  # a custom reward a parent still has to hand out
 GIVEN_DONE = "given"
+# A reward bought together: the points are held until a parent says yes.
+GIVEN_APPROVAL = "to_approve"
 
 MAX_POINTS = 10000
 
@@ -301,6 +303,9 @@ def can_undo(entry: dict[str, Any], now: datetime) -> bool:
     """A chore not checked yet, or a reward not handed out yet, just now."""
     if (now - datetime.fromisoformat(entry["at"])).total_seconds() > UNDO_SECONDS:
         return False
+    if entry.get("group"):
+        # Bought together: only while still waiting for a parent.
+        return entry.get("given") == GIVEN_APPROVAL
     if entry.get("kind") == KIND_CHORE:
         return entry.get("review") == REVIEW_PENDING
     if entry.get("kind") == KIND_REWARD:
@@ -652,3 +657,45 @@ def note_current(note: dict[str, Any], today: date) -> bool:
 
 def week_days(today: date, count: int = 7) -> list[str]:
     return [(today + timedelta(days=i)).isoformat() for i in range(count)]
+
+
+def split_points(cost: int, balances: list[tuple[str, int]]) -> dict[str, int] | None:
+    """Share a reward's points between members, as evenly as their points allow.
+
+    Anyone short puts in what they have and the others cover the rest; any
+    point left over from an uneven split goes to the first in the list. None
+    when they don't have enough between them.
+    """
+    left = {member: max(0, points) for member, points in balances}
+    shares = dict.fromkeys(left, 0)
+    remaining = max(0, cost)
+    while remaining > 0:
+        able = [member for member, _points in balances if left[member] > 0]
+        if not able:
+            return None
+        each, extra = divmod(remaining, len(able))
+        for index, member in enumerate(able):
+            give = min(left[member], each + (1 if index < extra else 0))
+            shares[member] += give
+            left[member] -= give
+            remaining -= give
+    return shares
+
+
+def names_text(names: list[str]) -> str:
+    """ "Alex", "Alex and Sam", "Alex, Sam and Riley"."""
+    if len(names) < 2:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def event_days(first: date, last: date, today: date, days: int) -> list[str]:
+    """The days in the next ``days`` (from today) that an event covers.
+
+    ``first`` and ``last`` are the event's first and last local day.
+    """
+    end = today + timedelta(days=days - 1)
+    start, stop = max(first, today), min(max(first, last), end)
+    return [
+        (start + timedelta(days=i)).isoformat() for i in range((stop - start).days + 1)
+    ]

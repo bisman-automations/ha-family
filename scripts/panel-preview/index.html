@@ -47,6 +47,8 @@ let rewards = [
 let entries = [
   { id: "e1", at: ago(30), kind: "chore", member: "a", title: "Make your bed", points: 5, review: "pending" },
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
+  { id: "e3a", at: ago(15), kind: "reward", member: "a", reward_id: "toy", title: "A new toy", points: -60, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
+  { id: "e3c", at: ago(15), kind: "reward", member: "c", reward_id: "toy", title: "A new toy", points: -40, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
   { id: "e3", at: ago(1500), kind: "chore", member: "c", title: "Feed the dog", points: 3, review: "rejected" },
 ];
 const st = (entity_id, state, attributes) => ({ entity_id, state, attributes: { friendly_name: entity_id, ...attributes } });
@@ -95,12 +97,26 @@ let notes = [
   { id: "n3", text: "I fed the fish 🐟", member: "c", until: null, at: ago(20), parent: false, by: null },
 ];
 const at = (h, m = 0) => { const d = new Date(now); d.setHours(h, m, 0, 0); return d.toISOString(); };
+// at(h) is today; on(n, h) is n days from now.
+const on = (n, h, m = 0) => { const d = new Date(now + n * 86400000); d.setHours(h, m, 0, 0); return d.toISOString(); };
+const laterEvents = [
+  { title: "Dentist", start: on(1, 9), end: on(1, 10), all_day: false, member: "b", calendar: "Sam's" },
+  { title: "Camp", start: dayIso(2), end: dayIso(5), all_day: true, member: "a", calendar: "Alex's school" },
+  { title: "Soccer practice", start: on(3, 17, 30), end: on(3, 19), all_day: false, member: null, calendar: "Family" },
+];
 const todayEvents = [
+  { title: "Breakfast with Grandpa", start: at(7), end: at(8), all_day: false, member: null, calendar: "Family" },
   { title: "No school", start: dayIso(0), end: dayIso(1), all_day: true, member: null, calendar: "Family" },
   { title: "Swim lesson", start: at(16), end: at(17), all_day: false, member: "a", calendar: "Alex's school" },
   { title: "Grandma visits", start: at(18, 30), end: at(20), all_day: false, member: null, calendar: "Family" },
 ];
 let bonus = { all_done: 5, streak_days: 7, streak: 10 };
+// Like model.split_points.
+function splitPoints(cost, balances) {
+  const left = Object.fromEntries(balances.map(([id, p]) => [id, Math.max(0, p)])); const shares = Object.fromEntries(balances.map(([id]) => [id, 0])); let remaining = cost;
+  while (remaining > 0) { const able = balances.map(([id]) => id).filter((id) => left[id] > 0); if (!able.length) return null; const each = Math.floor(remaining / able.length), extra = remaining % able.length; able.forEach((id, i) => { const give = Math.min(left[id], each + (i < extra ? 1 : 0)); shares[id] += give; left[id] -= give; remaining -= give; }); }
+  return shares;
+}
 const isToday = (iso) => new Date(iso).toDateString() === new Date().toDateString();
 const state = () => ({
   members, done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
@@ -109,9 +125,11 @@ const state = () => ({
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
     { name: "Water the plants", points: 5, rated: false, unrated: 5 },
   ] }],
-  today: todayEvents, notes: [...notes].sort((a, b) => (a.at < b.at ? 1 : -1)), money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null,
+  today: todayEvents, has_calendars: settings.calendars.length > 0,
+  upcoming: Array.from({ length: 7 }, (_, i) => ({ date: dayIso(i), events: i === 0 ? todayEvents : laterEvents.filter((e) => (e.all_day ? e.start <= dayIso(i) && dayIso(i) < e.end : iso(new Date(e.start)) === dayIso(i))) })),
+  to_approve: Object.values(entries.filter((e) => e.given === "to_approve").reduce((g, e) => { (g[e.group] ||= { group: e.group, at: e.at, title: e.title, reward_id: e.reward_id, points: e.total, shares: [] }).shares.push({ member: e.member, points: -e.points }); return g; }, {})), notes: [...notes].sort((a, b) => (a.at < b.at ? 1 : -1)), money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null,
   meals: Array.from({ length: 7 }, (_, i) => ({ date: dayIso(i), ...(meals[dayIso(i)] || {}) })),
-  to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e) => e.given === "to_give"), history: [...entries].reverse(),
+  to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e, i, all) => e.given === "to_give" && (!e.group || all.findIndex((x) => x.group === e.group && x.given === "to_give") === i)), history: [...entries].reverse(),
 });
 window.hass = {
   states, user: { is_admin: true },
@@ -143,6 +161,21 @@ window.hass = {
       if (c.id === "room") { const b = { id: "b" + entries.length, at: e.at, kind: "bonus", member: m.id, title: "All done today!", points: bonus.all_done, bonus: "all_done", for_entry: e.id }; entries.push(b); m.points += b.points; return { entry: { ...e, bonuses: [b] }, points: m.points }; }
       return { entry: e, points: m.points }; }
     if (t === "goal") { if (msg.reward_id && !rewards.some((r) => r.id === msg.reward_id)) throw { message: "That reward isn't on the list any more" }; m.goal = msg.reward_id; return { member: m }; }
+    if (t === "redeem" && msg.together?.length) {
+      const r = rewards.find((x) => x.id === msg.reward_id); const ids = [...new Set([msg.member_id, ...msg.together])];
+      if (ids.length < 2) throw { message: "Pick who's sharing it" };
+      const ms = ids.map((id) => members.find((x) => x.id === id));
+      const shares = splitPoints(r.points, ms.map((x) => [x.id, x.points]));
+      if (!shares) throw { message: `Together they have ${ms.reduce((s, x) => s + x.points, 0)} of the ${r.points} points for ${r.name}` };
+      const group = "g" + entries.length; const made = ms.map((x) => { x.points -= shares[x.id]; const e = { id: "n" + entries.length + x.id, at: new Date().toISOString(), kind: "reward", member: x.id, reward_id: r.id, title: r.name, points: -shares[x.id], given: "to_approve", group, together: ids, total: r.points }; entries.push(e); return e; });
+      return { entry: made[0], points: ms[0].points };
+    }
+    if (t === "approve") {
+      const group = entries.filter((e) => e.group === msg.group_id && e.given === "to_approve");
+      if (!group.length) throw { message: "Someone dealt with that already" };
+      if (!msg.approved) { for (const e of group) { members.find((x) => x.id === e.member).points -= e.points; entries.splice(entries.indexOf(e), 1); } return {}; }
+      const r = rewards.find((x) => x.id === group[0].reward_id); for (const e of group) e.given = r && (r.kind === "tv_time" || r.kind === "music_time") ? "given" : "to_give"; return {};
+    }
     if (t === "redeem") { const r = rewards.find((x) => x.id === msg.reward_id); if (m.points < r.points) throw { message: `${m.name} needs ${r.points} points for ${r.name}` }; if (r.limit && entries.some((e) => e.reward_id === r.id && e.member === m.id)) throw { message: `${m.name} already had ${r.name} today` }; m.points -= r.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "reward", member: m.id, reward_id: r.id, title: r.name, points: -r.points, given: r.kind === "tv_time" || r.kind === "music_time" ? "given" : "to_give" }; entries.push(e); if (m.goal === r.id) m.goal = null; return { entry: e, points: m.points }; }
     if (t === "undo") { const e = entries.find((x) => x.id === msg.entry_id); if (!e) throw { message: "That can't be found any more" }; const mm = members.find((x) => x.id === e.member); mm.points -= e.points; entries = entries.filter((x) => x !== e); return {}; }
     if (t === "settings") {

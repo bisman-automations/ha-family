@@ -73,12 +73,13 @@ On the **Parents** dashboard:
 
 - **Who's here?** Everyone's picture and points. Tap yours to see only your chores and the rewards you can afford.
 - **Notes.** Short notes and reminders for everyone, or for one person on their page. Tap **Add a note** to put one up from the screen, and ✕ to take it down. A note a parent put up can only be taken down by a parent. A note can show until a chosen day, then it goes by itself.
-- **Today.** Today's events from the calendars a parent picked, all-day ones first. On someone's own page, their calendar and the family's.
+- **Today.** Today's events from the calendars a parent picked, all-day ones first. On someone's own page, their calendar and the family's. Events that are already over stay, faded and marked **Over**. Tap **Next few days** for today, tomorrow and the five days after, in a pop-up.
 - **Meals.** Today's and tomorrow's breakfast, lunch and dinner, as planned on the Parents dashboard.
 - **Chores.** Tap one, say who did it, and the points are added straight away.
 - **Rewards.** Tap one and confirm. TV time is given on that TV in TV Mgmt at once, and music time on that speaker in Media Mgmt; anything else waits for a parent to hand it out. Rewards you can't afford yet say how many more points you need, and one that can only be had once a day or once a week says when it's back.
 - **Undo.** Tapped the wrong name or chore? Tap **Undo** on the message that pops up. It works for a minute, for a chore not checked yet and a reward not handed out yet; TV time is taken back off the TV.
 - **Home.** The scenes, lights and other things a parent added. Tap one to use it: a scene or script starts, a light or switch turns on or off, blinds open or close, a lock locks or unlocks, and a speaker plays or pauses. Anything that asks first shows "Are you sure?". Sensors, thermostats and the weather are only shown. Each tile shows what it's doing now.
+- **Getting a reward together.** Tap a reward, then **Get it together**, and pick who's putting in points. The points are shared as evenly as everyone's points allow: someone with fewer puts in what they have and the others cover the rest. Tap **Ask a parent**: the points are held (taken off everyone's points) until a parent says yes. If a parent says no, everyone gets their points back.
 - **Saving up.** On your own page, tap a reward you can't afford yet and pick **Save for this**. Your page shows how far you are, and your picture on **Who's here?** has a little bar. Once you get it, you're done saving; tap it again and pick **Stop saving for it** to change your mind.
 - **Turns.** A chore the kids take in turns says whose turn it is, and only they can do it.
 - **Lately.** What was done and spent recently.
@@ -110,7 +111,7 @@ member: <member id>
 
 ## The Parents dashboard
 
-- **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.
+- **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Above them are rewards the kids want to get together: **Yes** gives the reward (TV and music time straight away), **No** gives everyone their points back. Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.
 - **Chores.** Add, edit or turn off chores. For each: its points, when it **comes back**, and who can do it (nobody ticked means anyone). A chore for anyone is done by whoever does it first; a chore for chosen people can be done by each of them. A chore comes back:
   - **every day** or **every week** (from Monday), or it's done **just once**;
   - **some days after it's done**, for example 3 days after the plants were last watered;
@@ -127,7 +128,7 @@ member: <member id>
 - **Home.** Pick what shows under **Home** on the Family dashboard, and in what order. Search for a scene, script, button, light, switch, fan, blind, valve, lock, speaker or TV, or for a sensor, thermostat or weather to show. Give it a different name or an emoji if you like, choose who sees it (nobody ticked means everyone), and tick **Ask "Are you sure?" first** for locks and doors. Anyone at the Family dashboard can use what's here, so only add what the kids may use.
 - **Bonus points** (under **Rewards**). Extra points when someone finishes all of their own chores for the day (chores anyone can do don't count), and every so many days in a row, for example 10 points every 7 days. A bonus goes away if its chore is undone or marked **Didn't happen**.
 - **Penalties.** **Didn't happen** always takes a chore's points back. To take more, set **When a chore didn't happen, also take away** under **To check** for the whole family, or a **Penalty if it didn't happen** on a chore or to-do list. The box next to **Didn't happen** shows the penalty that will be taken; type a number to change it just this time. Marking it **Done right** later gives everything back.
-- **Phones** (under **To check**). Pick the parents' phones (any phone with the Home Assistant app), and what to send: a notification **when a chore is marked done**, with **Done right** and **Didn't happen** buttons; one **when a reward needs handing out**, with a **Handed out** button; and **a summary of the week** every Sunday at 6:00 PM: each person's chores, points earned and spent, and how many chores are still to check. Only a parent's (admin's) phone can check a chore. Once a chore is checked anywhere, its notification goes away.
+- **Phones** (under **To check**). Pick the parents' phones (any phone with the Home Assistant app), and what to send: a notification **when a chore is marked done**, with **Done right** and **Didn't happen** buttons; one **when a reward needs handing out**, with a **Handed out** button, and when the kids want a reward together, with **Yes** and **No** buttons; and **a summary of the week** every Sunday at 6:00 PM: each person's chores, points earned and spent, and how many chores are still to check. Only a parent's (admin's) phone can check a chore. Once a chore is checked anywhere, its notification goes away.
 - **Meals.** Plan breakfast, lunch and dinner for the week ahead. Leave a meal empty to leave it out.
 - **Notes.** Every note on the board, who put it up and until when. Put one up for everyone or for one person, or take any note down.
 - **Family.** Add, edit or remove family members, and add or take away points by hand, with a reason. Each member can have an **allowance**: points added every week.
@@ -164,7 +165,7 @@ For automations, for example to send a message or play a sound:
 | `family_chore_done` | A chore is marked done. | `member`, `member_id`, `chore`, `points`, `balance` |
 | `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `penalty` (extra points taken), `balance` |
 | `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
-| `family_reward_redeemed` | Points were spent on a reward. | `member`, `member_id`, `reward`, `points`, `balance` |
+| `family_reward_redeemed` | Points were spent on a reward. For a reward bought together, once per person when a parent says yes, with their share. | `member`, `member_id`, `reward`, `points`, `balance`, and `together` (everyone's names) for a reward bought together |
 
 ## Troubleshooting
 

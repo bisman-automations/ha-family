@@ -42,6 +42,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_review,
         ws_meals,
         ws_given,
+        ws_approve,
         ws_adjust,
         ws_save,
         ws_delete,
@@ -130,12 +131,16 @@ async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("type"): f"{DOMAIN}/redeem",
         vol.Required("member_id"): str,
         vol.Required("reward_id"): str,
+        # Others sharing the points; a parent says yes first.
+        vol.Optional("together"): [str],
     }
 )
 @websocket_api.async_response
 @_handler
 async def ws_redeem(hass, connection, msg, manager) -> dict[str, Any]:
-    entry = await manager.async_redeem(msg["member_id"], msg["reward_id"])
+    entry = await manager.async_redeem(
+        msg["member_id"], msg["reward_id"], msg.get("together")
+    )
     return {"entry": entry, "points": manager.points(msg["member_id"])}
 
 
@@ -248,6 +253,21 @@ async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
 @_handler
 async def ws_given(hass, connection, msg, manager) -> dict[str, Any]:
     return {"entry": manager.mark_given(msg["entry_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/approve",
+        vol.Required("group_id"): str,
+        vol.Required("approved"): bool,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_handler
+async def ws_approve(hass, connection, msg, manager) -> dict[str, Any]:
+    await manager.async_approve(msg["group_id"], msg["approved"])
+    return {}
 
 
 @websocket_api.websocket_command(

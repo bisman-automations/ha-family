@@ -35,6 +35,8 @@ PARENTS_PATH = "/family-parents"
 ACTION_RIGHT = f"{ACTION_PREFIX}RIGHT_"
 ACTION_DIDNT = f"{ACTION_PREFIX}DIDNT_"
 ACTION_GIVEN = f"{ACTION_PREFIX}GIVEN_"
+ACTION_YES = f"{ACTION_PREFIX}YES_"
+ACTION_NO = f"{ACTION_PREFIX}NO_"
 
 
 def tag_for(entry_id: str) -> str:
@@ -127,6 +129,34 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_reward")
 
     @callback
+    def reward_to_approve(
+        self, group: str, names: str, reward: str, shares: dict[str, int]
+    ) -> None:
+        """Members want a reward together: a parent says yes or no."""
+        if not self._settings.get("notify_rewards") or not self.targets():
+            return
+        split = ", ".join(f"{name} {points}" for name, points in shares.items())
+        data = {
+            "title": f"{names} want {reward} together",
+            "message": f"Points: {split}. They're held until you say yes.",
+            "data": {
+                "tag": tag_for(group),
+                "group": "family",
+                "url": PARENTS_PATH,
+                "clickAction": PARENTS_PATH,
+                "actions": [
+                    {"action": f"{ACTION_YES}{group}", "title": "Yes"},
+                    {
+                        "action": f"{ACTION_NO}{group}",
+                        "title": "No",
+                        "destructive": True,
+                    },
+                ],
+            },
+        }
+        self._spawn(self._send(data), "family_notify_approve")
+
+    @callback
     def clear(self, entry_id: str) -> None:
         """Take a chore's or reward's notification away: it's been dealt with."""
         if (
@@ -198,6 +228,10 @@ class ParentNotices:
                 await manager.async_review(action.removeprefix(ACTION_RIGHT), True)
             elif action.startswith(ACTION_DIDNT):
                 await manager.async_review(action.removeprefix(ACTION_DIDNT), False)
+            elif action.startswith(ACTION_YES):
+                await manager.async_approve(action.removeprefix(ACTION_YES), True)
+            elif action.startswith(ACTION_NO):
+                await manager.async_approve(action.removeprefix(ACTION_NO), False)
             elif action.startswith(ACTION_GIVEN):
                 manager.mark_given(action.removeprefix(ACTION_GIVEN))
         except HomeAssistantError as err:

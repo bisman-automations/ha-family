@@ -1,6 +1,6 @@
 """The chore and points rules on their own."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -376,3 +376,38 @@ def test_meals_and_notes():
     assert model.clean_day("2026-11-09T10:00") == "2026-11-09"
     with pytest.raises(ValueError):
         model.clean_day("someday")
+
+
+def test_split_points_as_evenly_as_points_allow() -> None:
+    assert model.split_points(10, [("a", 20), ("b", 20)]) == {"a": 5, "b": 5}
+    assert model.split_points(11, [("a", 20), ("b", 20)]) == {"a": 6, "b": 5}
+    assert model.split_points(25, [("a", 8), ("b", 30)]) == {"a": 8, "b": 17}
+    assert model.split_points(9, [("a", 1), ("b", 4), ("c", 9)]) == {
+        "a": 1,
+        "b": 4,
+        "c": 4,
+    }
+    assert model.split_points(30, [("a", 8), ("b", 20)]) is None
+    assert model.split_points(0, [("a", 0), ("b", 0)]) == {"a": 0, "b": 0}
+
+
+def test_names_text() -> None:
+    assert model.names_text(["Alex"]) == "Alex"
+    assert model.names_text(["Alex", "Sam"]) == "Alex and Sam"
+    assert model.names_text(["Alex", "Sam", "Riley"]) == "Alex, Sam and Riley"
+
+
+def test_event_days_within_the_next_few_days() -> None:
+    today = date(2030, 1, 1)
+    assert model.event_days(today, today, today, 7) == ["2030-01-01"]
+    # Started yesterday, ends tomorrow.
+    assert model.event_days(date(2029, 12, 31), date(2030, 1, 2), today, 7) == [
+        "2030-01-01",
+        "2030-01-02",
+    ]
+    # Past the window: cut at the last day.
+    assert model.event_days(date(2030, 1, 6), date(2030, 1, 20), today, 7) == [
+        "2030-01-06",
+        "2030-01-07",
+    ]
+    assert model.event_days(date(2030, 1, 9), date(2030, 1, 9), today, 7) == []

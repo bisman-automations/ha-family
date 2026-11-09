@@ -185,7 +185,7 @@ async def test_tv_time_needs_tv_mgmt(hass: HomeAssistant, client):
 
 
 async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
-    alex, _sam = await _family(client)
+    alex, sam = await _family(client)
     items = [
         {"uid": "1", "summary": "Feed the dog [3]", "status": "needs_action"},
         {"uid": "2", "summary": "Take out the trash", "status": "needs_action"},
@@ -242,6 +242,7 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
         "points": 3,
         "rated": False,
         "unrated": 3,
+        "members": [],
     }
     await client.ok(
         "save",
@@ -272,6 +273,36 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
     state = await client.ok("state")
     chores = {c["name"]: c["points"] for c in state["chores"]}
     assert chores == {"Feed the dog": 3, "take out  the TRASH": 8}
+
+    # Who single items are for: their own people, else the list's.
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={
+            "entity_id": TODO,
+            "points": 2,
+            "members": [alex],
+            "item_members": {"Take out the trash": [sam]},
+        },
+    )
+    state = await client.ok("state")
+    who = {c["name"]: c["members"] for c in state["chores"]}
+    assert who == {"Feed the dog": [alex], "take out  the TRASH": [sam]}
+    rows = {i["name"]: i["members"] for i in state["todo_lists"][0]["items"]}
+    assert rows == {"Feed the dog": [], "take out  the TRASH": [sam]}
+    # Nobody ticked: back to the list's people.
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={
+            "entity_id": TODO,
+            "points": 2,
+            "members": [alex],
+            "item_members": {"Take out the trash": []},
+        },
+    )
+    state = await client.ok("state")
+    assert {c["members"][0] for c in state["chores"]} == {alex}
 
 
 async def test_parents_only_actions(

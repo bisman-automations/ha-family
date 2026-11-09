@@ -381,8 +381,10 @@ class FamilyManager:
                         "id": f"{TODO_PREFIX}{entity_id}:{item['uid']}",
                         "name": name,
                         "points": points,
-                        "members": list(todo.get("members") or []),
-                        "grab": model.is_grab(todo),
+                        "members": _item_members(todo, name),
+                        "grab": model.is_grab(
+                            {**todo, "members": _item_members(todo, name)}
+                        ),
                         # A to-do item is done once; the list decides if it comes back.
                         "repeat": model.REPEAT_ONCE,
                         "enabled": True,
@@ -1247,6 +1249,16 @@ class FamilyManager:
                 rated.pop(key, None)
             else:
                 rated[key] = model.clean_points(value)
+        # Who single items are for, by name, kept the same way. None or
+        # nobody ticked: the list's people.
+        assigned = dict(existing.get("item_members") or {})
+        for name, ids in (raw.get("item_members") or {}).items():
+            if not (key := model.item_key(name)):
+                continue
+            if picked := self._known_members(ids or []):
+                assigned[key] = picked
+            else:
+                assigned.pop(key, None)
         todo = {
             "id": entity_id,
             "entity_id": entity_id,
@@ -1255,6 +1267,7 @@ class FamilyManager:
             # Its items are up for grabs for its people, not their own chores.
             "grab": bool(raw.get("grab")),
             "item_points": rated,
+            "item_members": assigned,
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }
         self._upsert(self.todo_lists, todo)
@@ -1604,7 +1617,16 @@ class FamilyManager:
             )
             _name, unrated = model.todo_points(summary, int(todo.get("points", 0)))
             rows.append(
-                {"name": name, "points": points, "rated": rated, "unrated": unrated}
+                {
+                    "name": name,
+                    "points": points,
+                    "rated": rated,
+                    "unrated": unrated,
+                    # Who it's for when it has its own people, else empty.
+                    "members": list(
+                        (todo.get("item_members") or {}).get(model.item_key(name), [])
+                    ),
+                }
             )
         return rows
 
@@ -1625,3 +1647,9 @@ def manager_of(hass: HomeAssistant) -> FamilyManager | None:
         if (manager := getattr(entry, "runtime_data", None)) is not None:
             return manager
     return None
+
+
+def _item_members(todo: dict[str, Any], name: str) -> list[str]:
+    """Who a to-do item is for: its own people, else the list's."""
+    own = (todo.get("item_members") or {}).get(model.item_key(name))
+    return list(own or todo.get("members") or [])

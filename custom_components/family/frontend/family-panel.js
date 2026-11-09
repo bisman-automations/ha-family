@@ -390,8 +390,12 @@ const STYLES = `
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 560px; }
-  .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); }
+  .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 980px; }
+  .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); flex-wrap: wrap; }
+  .items .item-name { flex: 1 1 200px; }
+  .items .item-who { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .items .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; white-space: nowrap; }
+  .items .chip input { width: auto; margin: 0; }
   .items li:first-child { border-top: 0; }
   .items input { width: 100px; }
   .penalty { display: inline-flex; gap: 6px; align-items: center; }
@@ -1348,12 +1352,15 @@ class FamilyPanel extends HTMLElement {
     const items = list.items || [];
     const rows = items.length
       ? `<ul class="items">${items
-          .map((i) => `<li><span>${esc(i.name)}</span>
+          .map((i) => `<li><span class="item-name">${esc(i.name)}</span>
+            <span class="item-who">${this._data.members
+              .map((m) => `<label class="chip"><input type="checkbox" data-item-member="${esc(i.name)}" value="${esc(m.id)}" ${(i.members || []).includes(m.id) ? "checked" : ""}>${esc(m.name)}</label>`)
+              .join("")}</span>
             <input type="number" min="0" max="10000" aria-label="Points for ${esc(i.name)}" data-item-name="${esc(i.name)}" data-rated="${i.rated ? 1 : ""}" data-unrated="${esc(i.unrated)}" value="${i.rated ? esc(i.points) : ""}" placeholder="${esc(i.unrated)}"></li>`)
           .join("")}</ul>`
       : `<p class="muted">Nothing open on this list right now.</p>`;
-    return `<div class="field"><span>Points for single items</span>
-      <small>Give an item its own points. Empty: the list's points, or the points written in the item. Repeating items keep their points when they come back.</small>${rows}</div>`;
+    return `<div class="field"><span>Single items: who and points</span>
+      <small>Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
   }
 
   _renderRewards() {
@@ -1876,6 +1883,11 @@ class FamilyPanel extends HTMLElement {
         }
       }
       item.item_points = itemPoints;
+      // Who each item is for; an empty list goes back to the list's people.
+      const itemMembers = {};
+      for (const input of form.querySelectorAll("[data-item-name]")) itemMembers[input.dataset.itemName] = [];
+      for (const box of form.querySelectorAll("[data-item-member]:checked")) itemMembers[box.dataset.itemMember].push(box.value);
+      item.item_members = itemMembers;
     }
     if (form.dataset.id) item.id = form.dataset.id;
     const ok = await this._call({ type: `${DOMAIN}/save`, collection, item }, "Saved.");

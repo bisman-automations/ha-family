@@ -253,6 +253,16 @@ def available(chore: dict[str, Any], now: datetime) -> bool:
     return on_day(chore, day)
 
 
+def hours_over(chore: dict[str, Any], now: datetime) -> bool:
+    """Whether today's hours for the chore have ended (it can't be done
+    again today). Hours that cross midnight end tomorrow, so never today."""
+    start = _minutes(chore.get("from_time"))
+    end = _minutes(chore.get("until_time"))
+    if end is None or (start is not None and end <= start):
+        return False
+    return now.hour * 60 + now.minute >= end
+
+
 TURN_EVERY_TIME = "time"  # the next person after each time it's done
 TURN_EVERY_DAY = "day"
 TURN_EVERY_WEEK = "week"

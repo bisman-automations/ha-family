@@ -55,7 +55,7 @@ async def test_only_own_chores_finish_the_day(hass: HomeAssistant, client):
     await _chore(client, name="Feed the cat")  # nobody picked: up for grabs
 
     own = _member(await client.ok("state"), alex)["own_today"]
-    assert own == {"total": 2, "left": 2, "done": False}
+    assert own == {"total": 2, "left": 2, "done": False, "missed": 0}
     assert _member(await client.ok("state"), sam)["own_today"]["total"] == 0
 
     done = await client.ok("complete", member_id=alex, chore_id=grab["id"])
@@ -65,7 +65,7 @@ async def test_only_own_chores_finish_the_day(hass: HomeAssistant, client):
     done = await client.ok("complete", member_id=alex, chore_id=teeth["id"])
     assert [b["title"] for b in done["entry"]["bonuses"]] == ["All done today!"]
     member = _member(await client.ok("state"), alex)
-    assert member["own_today"] == {"total": 2, "left": 0, "done": True}
+    assert member["own_today"] == {"total": 2, "left": 0, "done": True, "missed": 0}
     assert member["streak"] == 1
 
 
@@ -168,3 +168,34 @@ async def test_lists_can_show_only_items_due(hass: HomeAssistant, client, freeze
     # Its time comes.
     freezer.move_to(dt_util.start_of_local_day(today).replace(hour=18, minute=1))
     assert "Tonight" in await names()
+
+
+async def test_done_today_stays_done_and_late_ones_are_missed(
+    hass: HomeAssistant, client, freezer
+):
+    freezer.move_to(
+        dt_util.start_of_local_day(dt_util.now() + timedelta(days=30)).replace(hour=7)
+    )
+    alex, sam = await _family(client)
+    ready = await _chore(
+        client,
+        name="Get ready",
+        members=[alex, sam],
+        repeat="after_check",
+        from_time="06:30",
+        until_time="08:00",
+    )
+    await client.ok("complete", member_id=alex, chore_id=ready["id"])
+    state = await client.ok("state")
+    # Checked: it comes back, but Alex has done it today.
+    await client.ok("review", entry_id=state["to_check"][0]["id"], approved=True)
+    freezer.move_to(dt_util.now().replace(hour=9))
+    state = await client.ok("state")
+    assert _member(state, alex)["own_today"]["left"] == 0
+    # Sam didn't, and its hours are over: missed.
+    assert _member(state, sam)["own_today"] == {
+        "total": 1,
+        "left": 1,
+        "done": False,
+        "missed": 1,
+    }

@@ -78,7 +78,7 @@ On the **Parents** dashboard:
 
 ## The Family dashboard
 
-- **Who's here?** Everyone's picture and points, and how many of their own chores are left today (or **All done**). Tap yours to see your page.
+- **Who's here?** Everyone's picture and points, and how many of their own chores are left today (or **All done**). A chore whose hours are over for the day shows as **missed**. Tap yours to see your page.
 - **Going for** (on your own page). How many of today's own chores are done and the bonus for finishing them, your streak (🔥 days in a row) and the next streak bonus, and the reward you're saving for.
 - **Notes.** Short notes and reminders for everyone, or for one person on their page. Tap **Add a note** to put one up from the screen, and ✕ to take it down. A note a parent put up can only be taken down by a parent. A note can show until a chosen day, then it goes by itself.
 - **Today.** Today's events from the calendars a parent picked, all-day ones first. On someone's own page, their calendar and the family's. Events that are already over stay, faded and marked **Over**. Tap **Next few days** for today, tomorrow and the five days after, in a pop-up.

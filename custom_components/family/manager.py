@@ -567,12 +567,42 @@ class FamilyManager:
             for c in self.all_chores()
             if model.is_own(c, member_id) and model.on_day(c, today)
         ]
-        left = [
+        return len(own), len(self._own_left(member_id, own, now, just_done))
+
+    def _own_left(
+        self,
+        member_id: str,
+        own: list[dict[str, Any]],
+        now: datetime,
+        just_done: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Their own chores still to do today. One they did today counts as
+        done for the day, even one that came back (once a parent checked it,
+        or always there)."""
+        did = {
+            e["chore_id"]
+            for e in model.chores_done_on(self.entries, now.date(), member_id)
+            if e.get("review") != model.REVIEW_REJECTED
+        }
+        return [
             c
             for c in own
-            if c["id"] != just_done and model.can_do(member_id, c, self._done(c, now))
+            if c["id"] != just_done
+            and c["id"] not in did
+            and model.can_do(member_id, c, self._done(c, now))
         ]
-        return len(own), len(left)
+
+    def _own_missed(self, member_id: str) -> int:
+        """Their own chores left today whose hours are over: missed."""
+        now = dt_util.now()
+        own = [
+            c
+            for c in self.all_chores()
+            if model.is_own(c, member_id) and model.on_day(c, now.date())
+        ]
+        return sum(
+            1 for c in self._own_left(member_id, own, now) if model.hours_over(c, now)
+        )
 
     def _has_own(self, member_id: str) -> Callable[[date], bool]:
         """Whether a day had any of this member's own dashboard chores (one
@@ -1473,6 +1503,8 @@ class FamilyManager:
                     done=model.bonus_given(
                         self.entries, m["id"], model.BONUS_ALL_DONE, today
                     ),
+                    # Left, but their hours are over for today.
+                    missed=self._own_missed(m["id"]),
                 ),
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),

@@ -587,7 +587,11 @@ class FamilyPanel extends HTMLElement {
   _todoLine(m) {
     const own = m.own_today || {};
     if (!own.total) return "";
-    return own.done || !own.left ? `<span class="todo-line done">✓ All done</span>` : `<span class="todo-line">${own.left} to do</span>`;
+    if (own.done || !own.left) return `<span class="todo-line done">✓ All done</span>`;
+    // Left, but too late today: missed rather than still to do.
+    const missed = Math.min(own.missed || 0, own.left);
+    const todo = own.left - missed;
+    return `<span class="todo-line">${[todo ? `${todo} to do` : "", missed ? `${missed} missed` : ""].filter(Boolean).join(" · ")}</span>`;
   }
 
   // A card set to one family member shows only their page.
@@ -791,14 +795,15 @@ class FamilyPanel extends HTMLElement {
         own.done
           ? `<div class="tile going-tile won"><span class="emoji">🎉</span><span class="label">All done today!</span>${b.all_done ? `<span class="worth">+${pts(b.all_done)}</span>` : ""}</div>`
           : `<div class="tile going-tile"><span class="emoji">✅</span><span class="label">Today's chores</span>${this._bar(doneCount, own.total)}
-            <span class="sub">${doneCount} of ${own.total} done${b.all_done ? ` · finish them all for +${pts(b.all_done)}` : ""}</span></div>`,
+            <span class="sub">${doneCount} of ${own.total} done${own.missed ? ` · ${own.missed} missed` : b.all_done ? ` · finish them all for +${pts(b.all_done)}` : ""}</span></div>`,
       );
     }
     if (own.total || member.streak) {
       const n = member.streak || 0;
       const every = b.streak_days || 0;
       const next = every && b.streak ? (Math.floor(n / every) + 1) * every : 0;
-      const today = own.done ? "Today's done." : own.total ? `Finish today's chores to make it ${n + 1}.` : "No chores of your own today: it's safe.";
+      const missedAll = own.total && !own.done && own.missed >= own.left;
+      const today = own.done ? "Today's done." : missedAll ? "Missed today, so it starts over tomorrow." : own.total ? `Finish today's chores to make it ${n + 1}.` : "No chores of your own today: it's safe.";
       tiles.push(`<div class="tile going-tile"><span class="emoji">🔥</span><span class="label">${n ? `${n} ${n === 1 ? "day" : "days"} in a row` : "Start a streak"}</span>
         ${next ? this._bar(n, next) : ""}<span class="sub">${today}${next ? ` ${next} days in a row: +${pts(b.streak)}` : ""}</span></div>`);
     }

@@ -173,10 +173,12 @@ def test_streaks_and_bonuses():
         chore(4, review="rejected"),
     ]
     today = at(4).date()
+    # Before the new rule began, any chore done kept a streak going.
+    old = today + timedelta(days=1)
     # Nothing today yet: still a 3-day streak, counted to yesterday.
-    assert model.streak(entries, "a", today) == 3
-    assert model.streak([*entries, chore(4)], "a", today) == 4
-    assert model.streak(entries, "b", today) == 0
+    assert model.streak(entries, "a", today, since=old) == 3
+    assert model.streak([*entries, chore(4)], "a", today, since=old) == 4
+    assert model.streak(entries, "b", today, since=old) == 0
     assert len(model.chores_done_on(entries, at(3).date())) == 2
     assert model.chores_done_on(entries, today) == []
 
@@ -411,3 +413,70 @@ def test_event_days_within_the_next_few_days() -> None:
         "2030-01-07",
     ]
     assert model.event_days(date(2030, 1, 9), date(2030, 1, 9), today, 7) == []
+
+
+def test_a_streak_is_days_with_all_own_chores_done():
+    def all_done(day, member="a", review=None):
+        entry = {
+            "kind": "bonus",
+            "bonus": "all_done",
+            "member": member,
+            "at": at(day).isoformat(),
+        }
+        return {**entry, "review": review} if review else entry
+
+    def chore(day):
+        return {"kind": "chore", "member": "a", "at": at(day).isoformat()}
+
+    today = at(5).date()
+    every_day = lambda day: True  # noqa: E731
+    entries = [all_done(2), all_done(3), all_done(4)]
+    assert model.streak(entries, "a", today, every_day) == 3
+    assert model.streak(entries, "a", today, every_day, done_today=True) == 4
+    # A chore up for grabs alone doesn't keep it going.
+    assert (
+        model.streak([all_done(2), all_done(3), chore(4)], "a", today, every_day) == 0
+    )
+    # A day a parent said didn't happen breaks it.
+    assert (
+        model.streak(
+            [all_done(2), all_done(3), all_done(4, review="rejected")],
+            "a",
+            today,
+            every_day,
+        )
+        == 0
+    )
+    # A day with none of their own chores is a day off.
+    day_off = at(3).date()
+    assert (
+        model.streak(
+            [all_done(1), all_done(2), all_done(4)], "a", today, lambda d: d != day_off
+        )
+        == 3
+    )
+    # Before the rule began (day 3), any chore counted.
+    since = at(3).date()
+    assert (
+        model.streak(
+            [chore(1), chore(2), all_done(3), all_done(4)], "a", today, every_day, since
+        )
+        == 4
+    )
+    assert model.next_streak_bonus(3, 7) == 7
+    assert model.next_streak_bonus(7, 7) == 14
+    assert model.next_streak_bonus(3, 0) == 0
+
+
+def test_up_for_grabs():
+    assert model.is_grab({"members": []})
+    assert not model.is_grab({"members": ["a"]})
+    assert model.is_grab({"members": ["a", "b"], "grab": True})
+    assert not model.is_grab({"members": ["a", "b"], "grab": True, "turns": True})
+    chore = {"id": "c", "members": ["a", "b"], "grab": True, "repeat": "daily"}
+    # Only its people can grab it, and once someone has, it's done.
+    assert model.can_do("a", chore, set())
+    assert not model.can_do("c", chore, set())
+    assert not model.can_do("b", chore, {"a", "*"})
+    assert model.is_own({"members": ["a"]}, "a")
+    assert not model.is_own(chore, "a")

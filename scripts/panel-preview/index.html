@@ -27,14 +27,14 @@ let members = [
   { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0 },
 ];
 let allChores = [
-  { id: "bed", name: "Make your bed", emoji: "🛏️", points: 5, repeat: "daily", members: [], enabled: true },
+  { id: "bed", name: "Make your bed", emoji: "🛏️", points: 5, repeat: "daily", members: ["a", "b", "c"], enabled: true },
   { id: "dishes", name: "Empty the dishwasher", emoji: "🍽️", points: 10, repeat: "daily", members: ["a", "b"], enabled: true, turns: true, turn_every: "day", turn_first: "a" },
   { id: "teeth", name: "Brush your teeth", emoji: "🪥", points: 1, repeat: "daily", members: [], enabled: true, from_time: "06:00", until_time: "23:59" },
   { id: "trash", name: "Take out the trash", emoji: "🗑️", points: 4, repeat: "weekly", members: ["c"], enabled: true, days: [1] },
   { id: "room", name: "Tidy your room", emoji: "🧸", points: 15, repeat: "weekly", members: ["c"], enabled: true },
   { id: "plants", name: "Water the plants", emoji: "🪴", points: 3, repeat: "after_days", repeat_days: 3, todo_list: "todo.chores", members: [], enabled: true },
   { id: "table", name: "Set the table", emoji: "🍴", points: 2, repeat: "daily", members: [], enabled: true },
-  { id: "toys", name: "Pick up toys", emoji: "🧩", points: 2, repeat: "daily", members: [], enabled: true },
+  { id: "toys", name: "Pick up toys", emoji: "🧩", points: 2, repeat: "daily", members: ["a", "c"], grab: true, enabled: true },
   { id: "laundry", name: "Fold laundry", emoji: "👕", points: 5, repeat: "weekly", members: [], enabled: true },
 ];
 const todoChores = [{ id: "todo:todo.chores:1", name: "Feed the dog", points: 3, members: [], repeat: "once", enabled: true, source: "todo", list: "Chores" }];
@@ -45,7 +45,7 @@ let rewards = [
   { id: "music", name: "Music at bedtime", emoji: "🎵", points: 10, kind: "music_time", speaker: "kids", minutes: 20, speaker_name: "Kids Room" },
 ];
 let entries = [
-  { id: "e1", at: ago(30), kind: "chore", member: "a", title: "Make your bed", points: 5, review: "pending" },
+  { id: "e1", at: ago(30), kind: "chore", member: "a", chore_id: "bed", title: "Make your bed", points: 5, review: "pending" },
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
   { id: "e3a", at: ago(15), kind: "reward", member: "a", reward_id: "toy", title: "A new toy", points: -60, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
   { id: "e3c", at: ago(15), kind: "reward", member: "c", reward_id: "toy", title: "A new toy", points: -40, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
@@ -84,7 +84,20 @@ const today = (new Date().getDay() + 6) % 7;
 const chores = () => [...allChores, ...todoChores]
   .filter((c) => c.enabled && (!c.days?.length || c.days.includes(today)))
   .map((c) => (c.turns ? { ...c, rotation: c.members, members: [c.turn_first], turn: c.turn_first } : c))
-  .map((c) => ({ ...c, can: c.members.length ? c.members : members.map((m) => m.id) }));
+  .map((c) => ({ ...c, grab: !c.turns && (!c.members.length || !!c.grab) }))
+  // Like the real one: done today by them (theirs) or by anyone (up for grabs, turns).
+  .map((c) => {
+    const did = entries.filter((e) => e.kind === "chore" && e.chore_id === c.id && isToday(e.at) && e.review !== "rejected").map((e) => e.member);
+    const can = (c.members.length ? c.members : members.map((m) => m.id)).filter((id) => (c.grab || c.turns ? !did.length : !did.includes(id)));
+    return { ...c, can };
+  })
+  .filter((c) => c.can.length);
+// Their own chores today (like manager._own_today), for "Going for".
+const ownToday = (id) => {
+  const own = [...allChores].filter((c) => c.enabled && (!c.days?.length || c.days.includes(today)) && !(c.turns ? c.turn_first !== id : !c.members.length || c.grab) && c.members.includes(id));
+  const left = own.filter((c) => !entries.some((e) => e.kind === "chore" && e.chore_id === c.id && e.member === id && isToday(e.at))).length;
+  return { total: own.length, left, done: own.length > 0 && left === 0 };
+};
 window.calls = [];
 let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_parent_phone"], notify_done: true, notify_rewards: true, weekly_summary: false, allowance_day: 6, allowance_hour: 8, point_value: 0.1, currency: "$", calendars: [{ entity_id: "calendar.family", member: null }, { entity_id: "calendar.alex_school", member: "a" }] };
 members[0].allowance = 10; members[1].allowance = 5;
@@ -119,7 +132,7 @@ function splitPoints(cost, balances) {
 }
 const isToday = (iso) => new Date(iso).toDateString() === new Date().toDateString();
 const state = () => ({
-  members, done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },

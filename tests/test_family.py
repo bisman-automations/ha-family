@@ -611,7 +611,8 @@ async def test_chores_checked_automatically(
 
     # Turned on: done right after a day.
     assert (await client.ok("settings", auto_check="day"))["settings"] == {
-        "auto_check": "day"
+        "auto_check": "day",
+        "streak_rule_from": dt_util.now().date().isoformat(),
     }
     await hass.async_block_till_done()
     state = await client.ok("state")
@@ -765,10 +766,12 @@ async def test_streak_bonus(hass: HomeAssistant, client):
     await client.ok("settings", streak_days=3, streak_bonus=10)
     chore = (
         await client.ok(
-            "save", collection="chores", item={"name": "Make your bed", "points": 1}
+            "save",
+            collection="chores",
+            item={"name": "Make your bed", "points": 1, "members": [alex]},
         )
     )["item"]
-    # Done the two days before today.
+    # Done the two days before today, under the old rule (any chore).
     for days in (2, 1):
         manager.entries.append(
             {
@@ -784,7 +787,11 @@ async def test_streak_bonus(hass: HomeAssistant, client):
         )
     assert (await client.ok("state"))["members"][0]["streak"] == 2
     done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
-    assert [b["title"] for b in done["entry"]["bonuses"]] == ["3 days in a row!"]
+    # Finishing their own chores marks the day, even with no all-done bonus.
+    assert [(b["title"], b["points"]) for b in done["entry"]["bonuses"]] == [
+        ("All done today!", 0),
+        ("3 days in a row!", 10),
+    ]
     assert done["points"] == 3 + 10
     assert (await client.ok("state"))["members"][0]["streak"] == 3
 

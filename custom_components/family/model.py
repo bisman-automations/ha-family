@@ -7,7 +7,7 @@ what a member's balance is.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, time, timedelta
 import re
 from typing import Any
@@ -148,10 +148,33 @@ def done_by(
         if start is not None and datetime.fromisoformat(entry["at"]) < start:
             continue
         done.add(entry["member"])
-    # Anyone's chore, or one taken in turns: one person does it each time.
-    if done and (not chore.get("members") or chore.get("turns")):
+    # Up for grabs, or taken in turns: one person does it each time.
+    if done and (is_grab(chore) or chore.get("turns")):
         done.add("*")
     return done
+
+
+def is_grab(chore: dict[str, Any]) -> bool:
+    """Up for grabs: whoever's first does it, for extra points.
+
+    Not one of anyone's own chores, so it doesn't count toward the all-done
+    bonus or a streak. A chore for nobody in particular always is; one with
+    people picked is when it says so (``grab``); one taken in turns never is.
+    """
+    if chore.get("turns"):
+        return False
+    if not chore.get("members"):
+        return True
+    return bool(chore.get("grab"))
+
+
+def is_own(chore: dict[str, Any], member_id: str) -> bool:
+    """One of this member's own chores: theirs to do, not up for grabs."""
+    return (
+        chore.get("enabled", True)
+        and not is_grab(chore)
+        and member_id in (chore.get("members") or [])
+    )
 
 
 def can_do(member_id: str, chore: dict[str, Any], done: set[str]) -> bool:
@@ -161,7 +184,7 @@ def can_do(member_id: str, chore: dict[str, Any], done: set[str]) -> bool:
     members = chore.get("members") or []
     if members and member_id not in members:
         return False
-    if not members or chore.get("turns"):
+    if is_grab(chore) or chore.get("turns"):
         return "*" not in done
     return member_id not in done
 
@@ -467,25 +490,78 @@ def chores_done_on(
     ]
 
 
-def streak(entries: Iterable[dict[str, Any]], member_id: str, today: date) -> int:
-    """Days in a row with at least one chore done, up to today.
+def all_done_days(entries: Iterable[dict[str, Any]], member_id: str) -> set[date]:
+    """Days this member did all of their own chores (the all-done bonus,
+    even one of 0 points, marks them; one a parent rejected doesn't count)."""
+    return {
+        entry_day(e)
+        for e in entries
+        if e.get("kind") == KIND_BONUS
+        and e.get("bonus") == BONUS_ALL_DONE
+        and e.get("member") == member_id
+        and e.get("review") != REVIEW_REJECTED
+    }
 
-    A streak isn't broken yet if today has nothing so far: it counts back
-    from yesterday then.
+
+def streak(
+    entries: Iterable[dict[str, Any]],
+    member_id: str,
+    today: date,
+    has_own: Callable[[date], bool] | None = None,
+    since: date | None = None,
+    done_today: bool = False,
+) -> int:
+    """Days in a row this member did all of their own chores, up to today.
+
+    A day with none of their own chores (``has_own`` says) doesn't break it
+    and doesn't add to it. It isn't broken yet if today isn't done so far:
+    it counts back from yesterday then. ``done_today``: today is done (the
+    chore just finished it, before its bonus is saved).
+
+    Before ``since`` (the day this rule began), a day with any chore done
+    counts, as it used to, so a streak going on then carries over.
     """
-    days = {
+    entries = list(entries)
+    done = all_done_days(entries, member_id)
+    if done_today:
+        done.add(today)
+    any_chore = {
         entry_day(e)
         for e in entries
         if e.get("kind") == KIND_CHORE
         and e.get("member") == member_id
         and e.get("review") != REVIEW_REJECTED
     }
-    day = today if today in days else today - timedelta(days=1)
+    first = min(done | any_chore, default=today)
+    since = since or first
+
+    def kept(day: date) -> bool | None:
+        """True: counts; False: breaks it; None: a day off."""
+        if day < since:
+            return day in any_chore
+        if day in done:
+            return True
+        if has_own is not None and not has_own(day):
+            return None
+        return False
+
+    day = today if kept(today) else today - timedelta(days=1)
     count = 0
-    while day in days:
-        count += 1
+    while day >= first:
+        result = kept(day)
+        if result is False:
+            break
+        if result:
+            count += 1
         day -= timedelta(days=1)
     return count
+
+
+def next_streak_bonus(days_in_a_row: int, every: int) -> int:
+    """The streak's length when it earns its next bonus (7, 14… for 7)."""
+    if every <= 0:
+        return 0
+    return (days_in_a_row // every + 1) * every
 
 
 def bonus_given(

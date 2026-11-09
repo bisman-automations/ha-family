@@ -221,6 +221,10 @@ const STYLES = `
   .bar > span { display: block; height: 100%; background: var(--primary-color); border-radius: 4px; }
   .tile:disabled .bar { opacity: 1; }
   .streak { font-size: 15px; font-weight: 600; }
+  .todo-line { font-size: 14px; color: var(--fam-muted); }
+  .todo-line.done { color: var(--success-color, #2e7d32); font-weight: 500; }
+  .going-tile { gap: 6px; }
+  .going-tile.won { justify-content: center; }
   .goal-mini { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 14px; }
   .goal-card {
     display: flex; align-items: center; gap: 16px; width: 100%; margin: 8px 0 4px; padding: 14px 18px;
@@ -558,6 +562,13 @@ class FamilyPanel extends HTMLElement {
     return `<span class="avatar${small ? " small" : ""}" style="--c:${esc(m.color)}">${inner}</span>`;
   }
 
+  // On the people strip: how many of their own chores are left today.
+  _todoLine(m) {
+    const own = m.own_today || {};
+    if (!own.total) return "";
+    return own.done || !own.left ? `<span class="todo-line done">✓ All done</span>` : `<span class="todo-line">${own.left} to do</span>`;
+  }
+
   // A card set to one family member shows only their page.
   _pinnedMember() {
     return this._pinned ? this._memberById(this._pinned) : null;
@@ -568,7 +579,7 @@ class FamilyPanel extends HTMLElement {
       .map((m) => `<button class="person" style="--c:${esc(m.color)}" ${attr}="${esc(m.id)}" aria-pressed="${Array.isArray(selected) ? selected.includes(m.id) : m.id === selected}">
           ${this._avatar(m)}<span class="name">${esc(m.name)}</span>
           <span class="points"><b>${m.points}</b> ${m.points === 1 ? "point" : "points"}${this._data?.money ? `<small class="money"> · ${esc(money(m.points, this._data.money))}</small>` : ""}</span>
-          ${m.streak >= 2 ? `<span class="streak" title="${m.streak} days in a row">🔥 ${m.streak}</span>` : ""}${this._goalBar(m)}</button>`)
+          ${m.streak >= 2 ? `<span class="streak" title="${m.streak} days in a row">🔥 ${m.streak}</span>` : ""}${attr === "data-member" ? this._todoLine(m) : ""}${this._goalBar(m)}</button>`)
       .join("")}</div>`;
   }
 
@@ -594,6 +605,8 @@ class FamilyPanel extends HTMLElement {
   }
 
   _feed(entries, review = false) {
+    // An all-done day with no bonus points only marks the streak.
+    entries = entries.filter((e) => !(e.kind === "bonus" && !e.points));
     if (!entries.length) return `<p class="empty">Nothing yet. Finished chores and spent points show up here.</p>`;
     return `<ul class="feed">${entries
       .map((e) => {
@@ -659,9 +672,12 @@ class FamilyPanel extends HTMLElement {
       return `<p class="empty">No family members yet. A parent adds them on the <b>Parents</b> dashboard.</p>`;
     }
     const member = this._memberById(this._member);
-    const chores = d.chores.filter((c) => !member || c.can.includes(member.id));
-    const choreTiles = chores.length
-      ? `<div class="tiles" data-fit="chores">${chores
+    // On someone's page: their own chores, then ones up for grabs for them.
+    // On everyone's: only those up for grabs; each person's are on their page.
+    const mine = member ? d.chores.filter((c) => !c.grab && c.can.includes(member.id)) : [];
+    const grabs = d.chores.filter((c) => c.grab && (!member || c.can.includes(member.id)));
+    const choreTiles = (chores, fit) =>
+      `<div class="tiles" data-fit="${fit}">${chores
           .map((c) => {
             // On someone's own page, their name and picture on every tile
             // say nothing new; shared chores keep their list's name.
@@ -673,8 +689,12 @@ class FamilyPanel extends HTMLElement {
               ${c.list && !own ? `<span class="sub">${esc(c.list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               <span class="worth">+${pts(c.points)}</span></button>`;
           })
-          .join("")}</div>`
-      : `<p class="empty">${member ? `All done, ${esc(member.name)}! No chores left right now.` : "No chores right now."}</p>`;
+          .join("")}</div>`;
+    const own = member?.own_today || {};
+    const mineBody = mine.length
+      ? choreTiles(mine, "chores")
+      : `<p class="empty">${own.done ? `All done, ${esc(member.name)}! 🎉` : "Nothing of your own right now."}</p>`;
+    const grabBody = grabs.length ? choreTiles(grabs, "grabs") : `<p class="empty">Nothing up for grabs right now.</p>`;
     const rewardTiles = d.rewards.length
       ? `<div class="tiles" data-fit="rewards">${d.rewards
           .map((r) => {
@@ -706,15 +726,7 @@ class FamilyPanel extends HTMLElement {
           <span class="worth">+${pts(e.points)}</span></div>`;
       })
       .join("")}</div>`;
-    const streak = member?.streak >= 2 ? ` <span class="streak-line">🔥 ${member.streak} days in a row</span>` : "";
-    const goal = this._goal(member);
-    const goalCard = goal
-      ? `<button class="goal-card" data-reward="${esc(goal.id)}">
-          <span class="emoji">${esc(goal.emoji || "🎯")}</span>
-          <span class="goal-text"><span class="label">Saving for ${esc(goal.name)}</span>
-          ${this._bar(member.points, goal.points)}
-          <span class="sub">${member.points >= goal.points ? "You have enough! Tap to get it." : `${member.points} of ${goal.points} · ${goal.points - member.points} more to go`}</span></span></button>`
-      : "";
+    const goingFor = member ? this._goingFor(member) : [];
     const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
     // "Add a note" comes first, so it's never folded away with the rest.
     const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
@@ -731,16 +743,50 @@ class FamilyPanel extends HTMLElement {
       })
       .join("")}</div>`;
     const cash = member && d.money ? ` <span class="streak-line">${esc(money(member.points, d.money))}</span>` : "";
-    return `<h2>${member ? `Hi ${esc(member.name)}!${streak}${cash}` : "Who's here?"}</h2>
-      ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}${goalCard}
+    return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>
+      ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}
+      ${goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : ""}
+      ${member && (mine.length || own.total) ? this._section("chores", "My chores", mineBody, mine.length) : ""}
+      ${grabs.length || !member ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : ""}
       ${this._section("notes", "Notes", noteTiles, notes.length)}
       ${d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : ""}
       ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
-      ${this._section("chores", "Chores", choreTiles, chores.length)}
       ${done.length ? this._section("done", "Done today", doneTiles, done.length) : ""}
       ${this._section("rewards", "Rewards", rewardTiles, d.rewards.length)}
       ${home}
       ${this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`)}`;
+  }
+
+  // What someone's working toward: today's own chores, their streak, and
+  // the reward they're saving for.
+  _goingFor(member) {
+    const b = this._data.bonus || {};
+    const own = member.own_today || {};
+    const tiles = [];
+    if (own.total) {
+      const doneCount = own.total - own.left;
+      tiles.push(
+        own.done
+          ? `<div class="tile going-tile won"><span class="emoji">🎉</span><span class="label">All done today!</span>${b.all_done ? `<span class="worth">+${pts(b.all_done)}</span>` : ""}</div>`
+          : `<div class="tile going-tile"><span class="emoji">✅</span><span class="label">Today's chores</span>${this._bar(doneCount, own.total)}
+            <span class="sub">${doneCount} of ${own.total} done${b.all_done ? ` · finish them all for +${pts(b.all_done)}` : ""}</span></div>`,
+      );
+    }
+    if (own.total || member.streak) {
+      const n = member.streak || 0;
+      const every = b.streak_days || 0;
+      const next = every && b.streak ? (Math.floor(n / every) + 1) * every : 0;
+      const today = own.done ? "Today's done." : own.total ? `Finish today's chores to make it ${n + 1}.` : "No chores of your own today: it's safe.";
+      tiles.push(`<div class="tile going-tile"><span class="emoji">🔥</span><span class="label">${n ? `${n} ${n === 1 ? "day" : "days"} in a row` : "Start a streak"}</span>
+        ${next ? this._bar(n, next) : ""}<span class="sub">${today}${next ? ` ${next} days in a row: +${pts(b.streak)}` : ""}</span></div>`);
+    }
+    const goal = this._goal(member);
+    if (goal) {
+      tiles.push(`<button class="tile going-tile" data-reward="${esc(goal.id)}"><span class="emoji">${esc(goal.emoji || "🎯")}</span>
+        <span class="label">Saving for ${esc(goal.name)}</span>${this._bar(member.points, goal.points)}
+        <span class="sub">${member.points >= goal.points ? "You have enough! Tap to get it." : `${member.points} of ${goal.points} · ${goal.points - member.points} more to go`}</span></button>`);
+    }
+    return tiles;
   }
 
   _noteTile(n) {
@@ -756,7 +802,8 @@ class FamilyPanel extends HTMLElement {
   // Sections: the first row by default (as many as fit across the screen),
   // all of them, or closed. Remembered on this screen.
   _sectionMode(key) {
-    return this._sections[key] || "first";
+    // Going for is short and the point of someone's page: all of it.
+    return this._sections[key] || (key === "going" ? "all" : "first");
   }
 
   _setSection(key, mode) {
@@ -1141,7 +1188,7 @@ class FamilyPanel extends HTMLElement {
     const chores = d.all_chores.length
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${esc(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
-              <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : this._whoText(c.members))}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
+              <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -1151,7 +1198,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.todo_lists
           .map((t) => {
             const own = (t.items || []).filter((i) => i.rated).length;
-            return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(this._whoText(t.members))}</small></span>
+            return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(t.grab || !t.members?.length ? `Up for grabs: ${this._whoText(t.members)}` : `Their own: ${this._whoText(t.members)}`)}</small></span>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Points for items</button>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Edit</button>
               <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>`;
@@ -1187,6 +1234,7 @@ class FamilyPanel extends HTMLElement {
         <small style="align-self:end">Empty: all day. For a morning or bedtime chore, such as 6:00 AM to 9:00 AM.</small>
       </div>
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
+      ${this._grabField(c.grab)}
       <label class="check"><input type="checkbox" name="turns" data-turns ${c.turns ? "checked" : ""}> They take turns (tick two or more people above)</label>
       <div class="inline" data-turn-fields ${c.turns ? "" : "hidden"}>
         <label class="field"><span>The turn moves on</span><select name="turn_every">${TURN_EVERY.map((t) => `<option value="${t.id}" ${(c.turn_every || "time") === t.id ? "selected" : ""}>${t.label}</option>`).join("")}</select></label>
@@ -1195,6 +1243,14 @@ class FamilyPanel extends HTMLElement {
       <label class="check"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Show it on the Family dashboard</label>
       <div class="form-actions"><button class="btn primary" type="submit">Save chore</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
+  }
+
+  // Their own chore, or up for grabs among the people ticked.
+  _grabField(grab) {
+    return `<label class="field"><span>How it's done</span><select name="grab">
+      <option value="" ${grab ? "" : "selected"}>Their own chore: each one ticked does it</option>
+      <option value="1" ${grab ? "selected" : ""}>Up for grabs: whoever's first, for extra points</option></select>
+      <small>Their own chores count for the all-done bonus and streaks; up for grabs is extra. Nobody ticked: up for grabs for everyone. Taking turns is always their own chore.</small></label>`;
   }
 
   // Whose turn a chore is now, from the Family dashboard's view of it.
@@ -1217,6 +1273,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Penalty if one didn't happen</span><input type="number" name="penalty" min="0" max="10000" value="${esc(t.penalty ?? "")}" placeholder="Family's (${esc(this._data.settings?.penalty ?? 0)})"></label>
       </div>
       <div class="field"><span>Who can do them</span>${this._whoChecks(t.members)}</div>
+      ${this._grabField(t.grab)}
       ${item ? this._itemPoints(t) : ""}
       <div class="form-actions"><button class="btn primary" type="submit">Save list</button><button class="btn" type="button" data-cancel>Cancel</button></div>
       ${item ? `<input type="hidden" name="entity_id_keep" value="${esc(t.entity_id)}">` : ""}
@@ -1253,11 +1310,11 @@ class FamilyPanel extends HTMLElement {
         <form class="edit" data-bonus>
           <label class="field"><span>All of their own chores done for the day</span>
             <span><input type="number" name="bonus_all_done" min="0" max="10000" value="${esc(b.all_done || 0)}" style="width:100px"> extra points</span>
-            <small>Chores anyone can do don't count, only chores picked for that person.</small></label>
-          <div class="field"><span>A streak of days with a chore done</span>
+            <small>Only their own chores count, not ones up for grabs. Set 0 for no points: the day still counts for their streak.</small></label>
+          <div class="field"><span>A streak: days in a row with all of their own chores done</span>
             <span class="inline">Every <input type="number" name="streak_days" min="0" max="365" value="${esc(b.streak_days || 0)}" aria-label="Days in a row" style="width:80px"> days in a row:
             <input type="number" name="streak_bonus" min="0" max="10000" value="${esc(b.streak || 0)}" aria-label="Streak bonus points" style="width:100px"> extra points</span>
-            <small>For example every 7 days. The Family dashboard shows each streak with 🔥.</small></div>
+            <small>For example every 7 days. Chores up for grabs don't count, and a day with none of their own chores doesn't break it. The Family dashboard shows each streak with 🔥.</small></div>
           <small class="muted">0 turns a bonus off. A bonus goes away when its chore is undone or marked <b>Didn't happen</b>.</small>
           <div class="form-actions"><button class="btn primary" type="submit">Save bonuses</button></div>
         </form></div>`;
@@ -1736,7 +1793,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
     } else if (collection === "controls") {
@@ -1744,7 +1801,7 @@ class FamilyPanel extends HTMLElement {
     } else if (collection === "members") {
       item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)) };
     } else {
-      item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [] };
+      item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [], grab: !!v.grab };
       const itemPoints = {};
       for (const input of form.querySelectorAll("[data-item-name]")) {
         const value = input.value.trim();
@@ -1845,7 +1902,7 @@ class FamilyPanel extends HTMLElement {
       if (s.type === "chore") {
         const chore = this._data.chores.find((c) => c.id === s.id);
         const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id });
-        const bonus = (res.entry?.bonuses || []).map((b) => ` ${b.title} +${pts(b.points)}`).join("");
+        const bonus = (res.entry?.bonuses || []).map((b) => (b.points ? ` ${b.title} +${pts(b.points)}` : ` ${b.title}`)).join("");
         this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
       } else {
         const reward = this._data.rewards.find((r) => r.id === s.id);

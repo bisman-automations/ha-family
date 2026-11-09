@@ -11,7 +11,7 @@ a parent then hands out.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import date, timedelta
 import logging
 from typing import Any
 from uuid import uuid4
@@ -115,6 +115,11 @@ class FamilyManager:
             if isinstance(v, dict)
         }
         self.notes = [n for n in data.get("notes") or [] if isinstance(n, dict)]
+        # Streaks count days with all of one's own chores done from this day;
+        # before it, any chore, as they used to.
+        if "streak_rule_from" not in self.settings:
+            self.settings["streak_rule_from"] = dt_util.now().date().isoformat()
+            self.save()
         self._prune()
         self._prune_board()
         self.async_auto_check()
@@ -377,6 +382,7 @@ class FamilyManager:
                         "name": name,
                         "points": points,
                         "members": list(todo.get("members") or []),
+                        "grab": model.is_grab(todo),
                         # A to-do item is done once; the list decides if it comes back.
                         "repeat": model.REPEAT_ONCE,
                         "enabled": True,
@@ -394,10 +400,11 @@ class FamilyManager:
         whoever's turn it is (``turn``), and keeps its people as ``rotation``."""
         turn = model.turn_member(chore, self.entries, now)
         if turn is None:
-            return dict(chore, source="family")
+            return dict(chore, source="family", grab=model.is_grab(chore))
         return dict(
             chore,
             source="family",
+            grab=False,
             rotation=list(chore.get("members") or []),
             members=[turn],
             turn=turn,
@@ -497,39 +504,27 @@ class FamilyManager:
         today = dt_util.now().date()
         found: list[tuple[str, str, int]] = []
         all_done = int(self.settings.get("bonus_all_done") or 0)
-        if all_done and not model.bonus_given(
-            self.entries, member_id, model.BONUS_ALL_DONE, today
-        ):
-            # Only their own chores count (not ones anyone can do), and they
+        finished = False
+        if not model.bonus_given(self.entries, member_id, model.BONUS_ALL_DONE, today):
+            # Only their own chores count (not ones up for grabs), and they
             # need to have some.
-            # Today's, whatever their hours: a bedtime chore still to do
-            # means not all done yet.
-            now = dt_util.now()
-            own = [
-                c
-                for c in self.all_chores()
-                if c.get("enabled", True)
-                and member_id in (c.get("members") or [])
-                and model.on_day(c, today)
-            ]
-            left = [
-                c
-                for c in own
-                if c["id"] != entry["chore_id"]
-                and model.can_do(member_id, c, self._done(c, now))
-            ]
-            if own and not left:
+            total, left = self._own_today(member_id, entry["chore_id"])
+            if total and not left:
+                finished = True
+                # Even with no points: it marks the day for their streak.
                 found.append((model.BONUS_ALL_DONE, "All done today!", all_done))
         every = int(self.settings.get("streak_days") or 0)
         streak_points = int(self.settings.get("streak_bonus") or 0)
+        # A streak grows only by finishing a day's own chores.
         if (
-            every
+            finished
+            and every
             and streak_points
             and not model.bonus_given(
                 self.entries, member_id, model.BONUS_STREAK, today
             )
         ):
-            days = model.streak(self.entries, member_id, today)
+            days = self.streak(member_id, done_today=True)
             if model.streak_bonus_due(days, every):
                 found.append(
                     (model.BONUS_STREAK, f"{days} days in a row!", streak_points)
@@ -549,6 +544,54 @@ class FamilyManager:
         ]
         self.entries.extend(bonuses)
         return bonuses
+
+    def _own_today(
+        self, member_id: str, just_done: str | None = None
+    ) -> tuple[int, int]:
+        """How many of their own chores today, and how many are left.
+
+        Today's, whatever their hours: a bedtime chore still to do means not
+        all done yet. ``just_done``: a chore being done right now.
+        """
+        now = dt_util.now()
+        today = now.date()
+        own = [
+            c
+            for c in self.all_chores()
+            if model.is_own(c, member_id) and model.on_day(c, today)
+        ]
+        left = [
+            c
+            for c in own
+            if c["id"] != just_done and model.can_do(member_id, c, self._done(c, now))
+        ]
+        return len(own), len(left)
+
+    def _has_own(self, member_id: str) -> Callable[[date], bool]:
+        """Whether a day had any of this member's own dashboard chores (one
+        taken in turns isn't counted: whose turn it was isn't kept)."""
+
+        def has_own(day: date) -> bool:
+            return any(
+                model.is_own(c, member_id)
+                and not c.get("turns")
+                and model.on_day(c, day)
+                for c in self.chores
+            )
+
+        return has_own
+
+    def streak(self, member_id: str, done_today: bool = False) -> int:
+        """Days in a row this member did all of their own chores."""
+        since = self.settings.get("streak_rule_from")
+        return model.streak(
+            self.entries,
+            member_id,
+            dt_util.now().date(),
+            self._has_own(member_id),
+            date.fromisoformat(since) if since else None,
+            done_today,
+        )
 
     async def async_review(
         self, entry_id: str, approved: bool, penalty: int | None = None
@@ -1123,6 +1166,9 @@ class FamilyManager:
             "name": model.clean_name(raw.get("name"), "The chore's name"),
             "points": model.clean_points(raw.get("points", 0)),
             "members": members,
+            # With people picked: up for grabs for them (whoever's first),
+            # instead of each one's own chore. Nobody picked: always.
+            "grab": bool(raw.get("grab")) and not turns,
             "repeat": repeat,
             # For "after_days": back this many days after it was done.
             "repeat_days": max(1, min(int(raw.get("repeat_days") or 1), 365))
@@ -1206,6 +1252,8 @@ class FamilyManager:
             "entity_id": entity_id,
             "points": model.clean_points(raw.get("points", 0)),
             "members": self._known_members(raw.get("members")),
+            # Its items are up for grabs for its people, not their own chores.
+            "grab": bool(raw.get("grab")),
             "item_points": rated,
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
         }
@@ -1396,7 +1444,15 @@ class FamilyManager:
             {
                 **m,
                 "points": self.points(m["id"]),
-                "streak": model.streak(self.entries, m["id"], today),
+                "streak": self.streak(m["id"]),
+                # Their own chores today (not ones up for grabs): how many,
+                # how many are left, and whether they finished them all.
+                "own_today": dict(
+                    zip(("total", "left"), self._own_today(m["id"]), strict=True),
+                    done=model.bonus_given(
+                        self.entries, m["id"], model.BONUS_ALL_DONE, today
+                    ),
+                ),
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
                 "to_check": sum(

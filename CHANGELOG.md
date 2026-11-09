@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-11-09
+
+### Added
+
+- **My chores and Up for grabs.** On someone's page, **My chores** are theirs to do and **Up for grabs** are extra: whoever does one first gets the points. Everyone's page shows only what's up for grabs, and each person's picture says how many of their own chores are left today, or **All done**.
+- **Up for grabs for some people.** A chore or to-do list with people ticked can now be **Up for grabs** for just them (whoever's first) instead of each one's own chore. Pick it under **How it's done**. A chore with nobody ticked is up for grabs for everyone, as before.
+- **Going for.** Each person's page starts with what they're working toward: how many of today's own chores are done and the bonus for finishing, their streak and the next streak bonus, and the reward they're saving for.
+
+### Changed
+
+- **A streak now means days in a row with all of their own chores done.** Doing a chore up for grabs no longer keeps it going, and a day with none of their own chores doesn't break it. Streaks going on now carry over. With the all-done bonus at 0 points, finishing the day still counts for the streak.
+- **Chores come first on each page**, right under **Going for**.
+
 ## [1.9.0] - 2026-11-08
 
 ### Added
@@ -116,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.10.0]: https://github.com/bisman-automations/ha-family/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/bisman-automations/ha-family/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/bisman-automations/ha-family/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/bisman-automations/ha-family/compare/v1.6.0...v1.7.0

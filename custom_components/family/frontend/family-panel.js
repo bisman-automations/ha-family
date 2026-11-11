@@ -389,8 +389,31 @@ const STYLES = `
     font: inherit; font-size: 15px; padding: 8px 10px; min-height: 40px; box-sizing: border-box;
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
-  /* Who can get a reward: a multi-select, not a single-line dropdown. */
-  select[multiple] { max-width: 420px; min-width: 220px; height: auto; padding: 4px; }
+  /* Who can get a reward: a dropdown of the family. No Everyone row. */
+  .eligible { display: grid; gap: 4px; max-width: 420px; }
+  .eligible-btn {
+    font: inherit; font-size: 15px; line-height: 1.3; min-height: 40px; padding: 8px 36px 8px 10px;
+    box-sizing: border-box; width: 100%; text-align: left; cursor: pointer; white-space: normal;
+    border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit;
+    position: relative;
+  }
+  .eligible-btn::after {
+    content: ""; position: absolute; right: 14px; top: 50%; width: 8px; height: 8px; margin-top: -6px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg);
+  }
+  .eligible-btn[aria-expanded="true"]::after { margin-top: -2px; transform: rotate(225deg); }
+  .eligible-menu {
+    display: grid; padding: 4px; border-radius: 8px; border: 1px solid var(--fam-divider);
+    background: var(--fam-card); box-shadow: 0 8px 24px rgba(0,0,0,.16);
+  }
+  .eligible-menu[hidden] { display: none !important; }
+  .eligible-option {
+    display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 10px;
+    border-radius: 8px; cursor: pointer; font-size: 16px;
+  }
+  .eligible-option:hover, .eligible-option:focus-within { background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
+  .eligible-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--primary-color); }
+  .field small.eligible-warn { color: var(--fam-bad); font-weight: 600; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 980px; }
   .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); flex-wrap: wrap; }
@@ -550,6 +573,9 @@ class FamilyPanel extends HTMLElement {
     this.shadowRoot.addEventListener("submit", (ev) => this._onSubmit(ev));
     this.shadowRoot.addEventListener("change", (ev) => this._onChange(ev));
     this.shadowRoot.addEventListener("input", (ev) => this._onInput(ev));
+    this.shadowRoot.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") this._closeEligible();
+    });
     this.shadowRoot.addEventListener("pointerdown", () => (this._lastTouch = Date.now()), true);
     this._watchIdle();
     // How many tiles fit in a row changes with the screen's width.
@@ -679,23 +705,67 @@ class FamilyPanel extends HTMLElement {
     return bits.join(" · ");
   }
 
-  // Who can get a reward. Everyone is the default (members null). Untick it
-  // and choose people. Choose nobody and the reward is unavailable: it does
-  // not go back to everyone.
+  // Who can get a reward. One dropdown of the family: no Everyone checkbox
+  // and no Everyone / All row. A new reward, and a reward stored as everyone
+  // (members null), starts with every person ticked. Ticking all of them is
+  // saved as everyone, so a person added later is included. A shorter list
+  // is only those people. Ticking nobody leaves the reward unavailable.
   _rewardWho(members) {
-    const everyone = members == null;
-    const selected = new Set(Array.isArray(members) ? members : []);
-    const people = this._data.members;
+    const people = this._data.members || [];
     if (!people.length) {
-      return `<label class="check"><input type="checkbox" name="everyone" checked> Everyone</label>
-        <small>Add family members under Family. Until then, everyone can get it.</small>`;
+      return `<small>Add family members under Family. Until then, anyone can get it.</small>`;
     }
+    const selected = members == null ? new Set(people.map((m) => m.id)) : new Set(Array.isArray(members) ? members : []);
+    const chosen = people.filter((m) => selected.has(m.id));
+    const label = chosen.length ? chosen.map((m) => m.name).join(", ") : "Nobody";
     const options = people
-      .map((m) => `<option value="${esc(m.id)}" ${selected.has(m.id) ? "selected" : ""}>${esc(m.name)}</option>`)
+      .map((m) => {
+        const on = selected.has(m.id);
+        return `<label class="eligible-option" role="option" aria-selected="${on}"><input type="checkbox" name="members" value="${esc(m.id)}" data-name="${esc(m.name)}" ${on ? "checked" : ""}> ${esc(m.name)}</label>`;
+      })
       .join("");
-    return `<label class="check"><input type="checkbox" name="everyone" ${everyone ? "checked" : ""}> Everyone</label>
-      <select name="members" multiple size="${Math.min(8, Math.max(3, people.length))}" aria-label="Who can get it" ${everyone ? "disabled" : ""}>${options}</select>
-      <small>Everyone is the default: any family member can get it. Untick Everyone and choose people to limit it. Choose nobody, and nobody can get it. It does not go back to everyone.</small>`;
+    return `<div class="eligible" data-eligible>
+      <button type="button" class="eligible-btn" data-eligible-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="who-can-get-it"><span data-eligible-label>${esc(label)}</span></button>
+      <div class="eligible-menu" id="who-can-get-it" data-eligible-menu role="listbox" aria-multiselectable="true" aria-label="Who can get it" hidden>${options}</div>
+      <small>All of the family starts selected. Leave them all selected and anyone can get it, including people you add later: Family saves that as everyone. Untick people to limit it to whoever is still selected. Untick all of them and nobody can get it.</small>
+      <small class="eligible-warn" data-eligible-warn ${chosen.length ? "hidden" : ""}>Nobody is selected. Nobody can get this reward until you select someone.</small>
+    </div>`;
+  }
+
+  // null: everyone (all ticked, or no family yet). A list: only those people.
+  // []: nobody. The closed label lists names; it never offers an Everyone choice.
+  _rewardMembers(values) {
+    const people = this._data?.members || [];
+    if (!people.length) return null;
+    const picked = new Set(values.members || []);
+    if (people.every((m) => picked.has(m.id))) return null;
+    return people.filter((m) => picked.has(m.id)).map((m) => m.id);
+  }
+
+  _toggleEligible(button) {
+    const menu = button.parentElement.querySelector("[data-eligible-menu]");
+    const open = menu.hidden;
+    menu.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+  }
+
+  _closeEligible() {
+    const menu = this.shadowRoot?.querySelector("[data-eligible-menu]");
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    menu.parentElement.querySelector("[data-eligible-toggle]")?.setAttribute("aria-expanded", "false");
+  }
+
+  // The closed label and the nobody warning follow the ticks, without
+  // redrawing the form (a redraw would close the list).
+  _syncEligible(root) {
+    const boxes = [...root.querySelectorAll('input[name="members"]')];
+    const names = boxes.filter((el) => el.checked).map((el) => el.dataset.name || "");
+    const label = root.querySelector("[data-eligible-label]");
+    if (label) label.textContent = names.length ? names.join(", ") : "Nobody";
+    const warn = root.querySelector("[data-eligible-warn]");
+    if (warn) warn.hidden = names.length > 0;
+    for (const el of boxes) el.closest('[role="option"]')?.setAttribute("aria-selected", el.checked ? "true" : "false");
   }
 
   _feed(entries, review = false) {
@@ -1756,6 +1826,14 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onClick(ev) {
+    const toggle = ev.target.closest("[data-eligible-toggle]");
+    if (toggle) {
+      ev.preventDefault();
+      this._toggleEligible(toggle);
+      return;
+    }
+    // A tap outside the people list closes it. Ticks inside stay open.
+    if (!ev.target.closest("[data-eligible]")) this._closeEligible();
     const el = ev.target.closest("button, .sheet-bg");
     if (!el) return;
     const ds = el.dataset;
@@ -1847,6 +1925,10 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.name === "members" && ev.target.closest("[data-eligible]")) {
+      this._syncEligible(ev.target.closest("[data-eligible]"));
+      return;
+    }
     if (ev.target.dataset.turns !== undefined) {
       const fields = ev.target.closest("form").querySelector("[data-turn-fields]");
       if (fields) fields.hidden = !ev.target.checked;
@@ -1868,13 +1950,6 @@ class FamilyPanel extends HTMLElement {
       this._call({ type: `${DOMAIN}/settings`, auto_check: ev.target.value || null }, "Saved.");
       return;
     }
-    if (ev.target.name === "everyone" && ev.target.form?.dataset.form === "rewards") {
-      // Everyone ignores the multi-select. Unticking it keeps any names
-      // already chosen, because the select stays in the form.
-      const select = ev.target.form.querySelector('select[name="members"]');
-      if (select) select.disabled = ev.target.checked;
-      return;
-    }
     if (ev.target.dataset.rewardKind !== undefined) {
       // Show the TV fields for TV time, keeping what's typed so far,
       // including who the reward is for.
@@ -1886,13 +1961,13 @@ class FamilyPanel extends HTMLElement {
     }
   }
 
-  // The reward form, as it will be saved: Everyone means members null.
+  // The reward form, as it will be saved. Every person ticked is everyone
+  // (members null). A shorter list is only those people. Nobody ticked is [].
   _rewardDraft(form) {
     const v = this._formValues(form);
     const item = { ...(this._edit?.item || {}), ...v };
-    item.members = v.everyone ? null : (v.members || []);
+    item.members = this._rewardMembers(v);
     item.whole_home = !!v.whole_home;
-    delete item.everyone;
     return item;
   }
 
@@ -1965,9 +2040,9 @@ class FamilyPanel extends HTMLElement {
     if (collection === "chores") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
-      // Everyone ticked: any family member. Otherwise only the people chosen
-      // in the multi-select. Nobody chosen: the reward is unavailable.
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home, members: v.everyone ? null : (v.members || []) };
+      // All ticked: anyone, including people added later. A shorter list:
+      // only those people. Nobody ticked: the reward is unavailable.
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home, members: this._rewardMembers(v) };
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {

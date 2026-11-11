@@ -63,7 +63,9 @@ class FamilyStore(Store[dict[str, Any]]):
     ``members`` key and were for everyone, so the migration writes None.
     An empty list is never written here: that means nobody can get the
     reward, which only happens later, when the last person it was for is
-    removed or a parent clears the list.
+    removed or a parent clears the list. A list that already names every
+    current member is not rewritten on load. Saving the reward with all of
+    them selected stores None, so people added later are included.
     """
 
     async def _async_migrate_func(
@@ -1125,7 +1127,18 @@ class FamilyManager:
     async def _async_grant_tv_time(
         self, tv: str, minutes: int, whole_home: bool, reason: str
     ) -> None:
-        """Give (or take back) TV time in TV Mgmt, with why in its Activity."""
+        """Give (or take back) minutes with ``tv_mgmt.grant_extension``.
+
+        TV Mgmt 1.20.0 and newer takes ``profile_id`` (the TV's config
+        entry) and ``minutes`` (extra time for today on that TV; negative
+        takes it back; reset at midnight). ``whole_home`` adds the same
+        minutes to the whole home's extra time for today. TV Mgmt itself
+        counts every grant from this week toward the weekly limit. There is
+        no day, week, or carry-over field. ``reason`` (Activity text, at
+        most 100 characters) needs 1.21.0; older TV Mgmt is called again
+        without it. A field the service doesn't know is rejected, so unused
+        minutes the next day are left for TV Mgmt to keep available.
+        """
         if not self.hass.services.has_service(TV_MGMT_DOMAIN, TV_MGMT_GRANT):
             raise FamilyError("TV time needs TV Mgmt, which isn't set up")
         data = {"profile_id": tv, "minutes": minutes, "whole_home": whole_home}
@@ -1327,9 +1340,13 @@ class FamilyManager:
     ) -> list[str] | None:
         """Who the saved reward is for.
 
-        None: everyone. A list: only those members, after unknown ids are
-        dropped. An empty list: nobody, so the reward is unavailable. Leaving
-        the key out keeps what was saved (everyone, for a new reward).
+        None: everyone, including people added later. That is a new reward,
+        an explicit null, or a list that names every current member. A
+        shorter list: only those members, after unknown ids are dropped. An
+        empty list: nobody, so the reward is unavailable. Leaving the key
+        out keeps what was saved (everyone, for a new reward). A list saved
+        earlier that happens to name every member stays as it is until this
+        reward is saved again.
         """
         if "members" not in raw:
             if existing is None or existing.get("members") is None:
@@ -1339,7 +1356,8 @@ class FamilyManager:
             return None
         if not isinstance(raw["members"], list):
             raise FamilyError("Pick who can get it")
-        return self._known_members(raw["members"])
+        picked = self._known_members(raw["members"])
+        return model.reward_selection(picked, [m["id"] for m in self.members])
 
     def _clear_ineligible_goals(self, reward: dict[str, Any]) -> None:
         """Stop anyone saving for a reward they can no longer get."""

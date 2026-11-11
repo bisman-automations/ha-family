@@ -519,6 +519,17 @@ def test_who_can_get_a_reward():
     assert model.reward_visible(nobody, None) is False
 
 
+def test_ticking_every_member_is_stored_as_everyone():
+    # All of the family: people added later are included.
+    assert model.reward_selection(["alex", "sam"], ["alex", "sam"]) is None
+    assert model.reward_selection(["sam", "alex"], ["alex", "sam"]) is None
+    # A shorter list stays a list. Nobody ticked stays nobody.
+    assert model.reward_selection(["alex"], ["alex", "sam"]) == ["alex"]
+    assert model.reward_selection([], ["alex", "sam"]) == []
+    # An empty family is not "all of them".
+    assert model.reward_selection([], []) == []
+
+
 def test_old_rewards_become_everyone_and_an_empty_list_stays_empty():
     old = {"id": "tv", "name": "15 minutes of TV", "points": 5}
     assert model.normalize_reward(old) == {**old, "members": None}

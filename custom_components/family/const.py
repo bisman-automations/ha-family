@@ -7,9 +7,12 @@ NAME = "Family"
 
 STORAGE_KEY = f"{DOMAIN}.data"
 # 2: each reward stores who can get it (``members``). None is everyone, which
-# is what rewards saved before this become. A list is only those people. An
-# empty list is nobody: the reward is unavailable, and removing the last
-# person it was for leaves it that way instead of making it everyone's.
+# is what rewards saved before this become, and what a save stores when every
+# current member is selected (so people added later are included). A list is
+# only those people. An empty list is nobody: the reward is unavailable, and
+# removing the last person it was for leaves it that way instead of making it
+# everyone's. 1.15.0 does not bump this. A list that already names every
+# member is left as stored until that reward is saved again.
 STORAGE_VERSION = 2
 
 SIGNAL_CHANGED = f"{DOMAIN}_changed"

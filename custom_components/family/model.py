@@ -331,11 +331,13 @@ def reward_used_by(
 def reward_members(reward: dict[str, Any]) -> list[str] | None:
     """Who can get this reward.
 
-    None means everyone. That is the default, and what a reward saved before
-    this was recorded becomes (it has no ``members`` key). A list of member
-    ids means only those people. An empty list means nobody: the reward is
-    unavailable. Removing the last person a reward was for leaves the list
-    empty on purpose, so it does not quietly become everyone's.
+    None means everyone. That is the default, what a reward saved before
+    this was recorded becomes (it has no ``members`` key), and what a save
+    stores when every current member is selected, so a person added later
+    is included. A list of member ids means only those people. An empty
+    list means nobody: the reward is unavailable. Removing the last person
+    a reward was for leaves the list empty on purpose, so it does not
+    quietly become everyone's.
     """
     if "members" not in reward or reward.get("members") is None:
         return None
@@ -370,6 +372,20 @@ def reward_visible(reward: dict[str, Any], member_id: str | None) -> bool:
 def rewards_for(rewards: Iterable[dict[str, Any]], member_id: str | None) -> list:
     """The rewards ``reward_visible`` keeps for this page."""
     return [reward for reward in rewards if reward_visible(reward, member_id)]
+
+
+def reward_selection(picked: list[str], family_ids: list[str]) -> list[str] | None:
+    """What to store for the people a parent ticked.
+
+    Every current member ticked is everyone (``None``), so a person added
+    later is included. A shorter list is only those people. An empty list
+    is nobody, and stays empty: it does not become everyone. An empty
+    family is not "all of them", so an empty pick stays empty. A new reward
+    that leaves the key out is still everyone; that is the caller's job.
+    """
+    if family_ids and set(picked) == set(family_ids):
+        return None
+    return list(picked)
 
 
 def normalize_reward(reward: dict[str, Any]) -> dict[str, Any]:

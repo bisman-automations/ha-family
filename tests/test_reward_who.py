@@ -35,32 +35,48 @@ async def test_new_reward_is_for_everyone_until_people_are_picked(
     )
     assert explicit["members"] is None
 
-    picked = await _reward(
+    # Ticking both people is everyone: an unknown id is dropped first, and
+    # what's left is the whole family, so a person added later is included.
+    both = await _reward(
         client,
         name="15 minutes of TV",
         points=5,
         kind="custom",
         members=[alex, sam, "not-a-person"],
     )
-    assert picked["members"] == [alex, sam]
+    assert both["members"] is None
+    riley = (await client.ok("save", collection="members", item={"name": "Riley"}))[
+        "item"
+    ]["id"]
     state = await client.ok("state")
-    row = next(r for r in state["rewards"] if r["id"] == picked["id"])
-    assert row["members"] == [alex, sam]
+    row = next(r for r in state["rewards"] if r["id"] == both["id"])
+    assert row["members"] is None
+    assert model.reward_for(row, riley)
 
-    # Back to everyone, then nobody. An empty list is not everyone.
+    # A shorter list is only those people.
+    picked = await _reward(
+        client,
+        name="Board game night",
+        points=5,
+        kind="custom",
+        members=[alex, "not-a-person"],
+    )
+    assert picked["members"] == [alex]
+
+    # Ticking all three is everyone again. An empty list is not everyone.
     everyone = await _reward(
         client,
         id=picked["id"],
-        name="15 minutes of TV",
+        name="Board game night",
         points=5,
         kind="custom",
-        members=None,
+        members=[sam, riley, alex],
     )
     assert everyone["members"] is None
     nobody = await _reward(
         client,
         id=picked["id"],
-        name="15 minutes of TV",
+        name="Board game night",
         points=5,
         kind="custom",
         members=[],
@@ -69,7 +85,7 @@ async def test_new_reward_is_for_everyone_until_people_are_picked(
 
     # An edit that doesn't say who keeps the people already saved.
     kept = await _reward(
-        client, id=picked["id"], name="15 minutes of TV", points=8, kind="custom"
+        client, id=picked["id"], name="Board game night", points=8, kind="custom"
     )
     assert kept["members"] == []
     assert kept["points"] == 8
@@ -220,6 +236,8 @@ async def test_points_sensor_lists_rewards_they_can_get(
     hass: HomeAssistant, client: Client
 ):
     alex, sam = await _family(client)
+    # A third person, so ticking Alex and Sam is a limit, not everyone.
+    await client.ok("save", collection="members", item={"name": "Riley"})
     await _reward(client, name="Movie", points=10, kind="custom")
     await _reward(
         client, name="15 minutes of TV", points=5, kind="custom", members=[alex, sam]
@@ -331,6 +349,54 @@ async def test_version_2_keeps_nobody_and_fills_a_missing_key(
     refused = await client("redeem", member_id="sam", reward_id="ice")
     assert not refused["success"]
     assert refused["error"]["code"] == "invalid"
+
+
+async def test_a_list_of_every_member_is_kept_until_the_reward_is_saved(
+    hass: HomeAssistant, hass_storage: dict[str, Any], hass_ws_client
+):
+    """Saved before ticking everyone meant 'everyone': the list stays on load."""
+    hass_storage[STORAGE_KEY] = {
+        "version": 2,
+        "minor_version": 1,
+        "key": STORAGE_KEY,
+        "data": {
+            "members": [
+                {"id": "alex", "name": "Alex", "color": "#3F51B5", "allowance": 0},
+                {"id": "sam", "name": "Sam", "color": "#E91E63", "allowance": 0},
+            ],
+            "rewards": [
+                {
+                    "id": "tv",
+                    "name": "TV",
+                    "points": 5,
+                    "kind": "custom",
+                    "members": ["alex", "sam"],
+                }
+            ],
+            "settings": {"streak_rule_from": "2026-11-01"},
+        },
+    }
+    entry = await _setup(hass)
+    assert entry.runtime_data.rewards[0]["members"] == ["alex", "sam"]
+
+    client = Client(await hass_ws_client(hass))
+    # Saving with both of them ticked stores everyone.
+    saved = await _reward(
+        client,
+        id="tv",
+        name="TV",
+        points=5,
+        kind="custom",
+        members=["sam", "alex"],
+    )
+    assert saved["members"] is None
+    # A person added later can get it.
+    riley = (await client.ok("save", collection="members", item={"name": "Riley"}))[
+        "item"
+    ]["id"]
+    await client.ok("adjust", member_id=riley, points=10)
+    done = await client.ok("redeem", member_id=riley, reward_id="tv")
+    assert done["points"] == 5
 
 
 async def test_state_lists_every_reward_for_the_parents_screen(

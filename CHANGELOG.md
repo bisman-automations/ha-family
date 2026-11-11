@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-11-11
+
+### Changed
+
+- **Who can get a reward is the list of people.** On the Parents dashboard, under **Rewards**, there is no Everyone checkbox and no Everyone row. The list is the family, and a new reward starts with all of them selected. Leave them all selected and the reward is for anyone, including people you add later. Untick people to limit it to those still selected. Untick all of them and nobody can get it. Rewards you already saved stay as they are until you save them again.
+
 ## [1.14.0] - 2026-11-11
 
 ### Added
@@ -178,6 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.15.0]: https://github.com/bisman-automations/ha-family/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/bisman-automations/ha-family/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/bisman-automations/ha-family/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/bisman-automations/ha-family/compare/v1.12.0...v1.13.0

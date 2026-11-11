@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -9,7 +11,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import FamilyConfigEntry
+from . import FamilyConfigEntry, model
 from .const import DOMAIN, NAME, SIGNAL_CHANGED
 from .manager import FamilyManager
 
@@ -84,10 +86,21 @@ class MemberPointsSensor(SensorEntity):
         return self.manager.points(self.member_id) if self.available else None
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         if not self.available:
             return {}
         member = self.manager.member(self.member_id)
+        # Rewards this person can get, and who else each one is for
+        # ("everyone", or the names). One they can't get is left out.
+        rewards = [
+            {
+                "name": reward["name"],
+                "points": int(reward.get("points") or 0),
+                "eligible": self.manager.reward_eligible(reward),
+            }
+            for reward in self.manager.rewards
+            if model.reward_for(reward, self.member_id)
+        ]
         return {
             "member": member["name"],
             "chores_to_check": sum(
@@ -95,4 +108,5 @@ class MemberPointsSensor(SensorEntity):
                 for e in self.manager.entries
                 if e["member"] == self.member_id and e.get("review") == "pending"
             ),
+            "rewards": rewards,
         }

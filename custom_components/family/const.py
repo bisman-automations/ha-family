@@ -6,7 +6,11 @@ DOMAIN = "family"
 NAME = "Family"
 
 STORAGE_KEY = f"{DOMAIN}.data"
-STORAGE_VERSION = 1
+# 2: each reward stores who can get it (``members``). None is everyone, which
+# is what rewards saved before this become. A list is only those people. An
+# empty list is nobody: the reward is unavailable, and removing the last
+# person it was for leaves it that way instead of making it everyone's.
+STORAGE_VERSION = 2
 
 SIGNAL_CHANGED = f"{DOMAIN}_changed"
 

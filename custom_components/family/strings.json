@@ -37,5 +37,13 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "reward_not_for_member": {
+      "message": "{name} can't get {reward}. A parent hasn't included them."
+    },
+    "reward_unavailable": {
+      "message": "{name} can't get {reward}. Nobody can get it until a parent chooses who it's for."
+    }
   }
 }

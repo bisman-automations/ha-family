@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-11-11
+
+### Added
+
+- **Pick who can get each reward.** On the Parents dashboard, under **Rewards**, each reward is for everyone unless you choose people. The Family dashboard and the Family card only show a reward to someone it is for, and getting it is refused for anyone else, from the dashboard or anywhere else. Rewards you already have stay for everyone. If the last person a reward was for is removed, nobody can get it until you choose someone; it does not go back to everyone. The points sensor lists the rewards that person can get, and `family_reward_redeemed` says who the reward is for.
+
+### Changed
+
+- The README describes the whole of Family, and the install steps lead with the Marketplace (Home Assistant 2026.11 and newer), then HACS (2026.10 and older), then adding the repository yourself, then installing by hand.
+- Test tools: ruff 0.17.4.
+
 ## [1.13.1] - 2026-11-09
 
 ### Fixed
@@ -167,6 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.14.0]: https://github.com/bisman-automations/ha-family/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/bisman-automations/ha-family/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/bisman-automations/ha-family/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/bisman-automations/ha-family/compare/v1.11.1...v1.12.0

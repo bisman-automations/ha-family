@@ -11,7 +11,7 @@
 [![Validate](https://github.com/bisman-automations/ha-family/actions/workflows/validate.yml/badge.svg)](https://github.com/bisman-automations/ha-family/actions/workflows/validate.yml)
 [![License](https://img.shields.io/github/license/bisman-automations/ha-family)](LICENSE)
 
-**Chores and rewards for the whole family, in Home Assistant.** Kids mark chores done on a shared screen and earn points straight away. They spend the points on rewards, such as TV time with [TV Mgmt](https://github.com/bisman-automations/ha-tv-mgmt) or anything you add. Parents check the chores later and take the points back if one didn't happen.
+**Chores and rewards for the whole family, in Home Assistant.** Kids mark chores done on a shared screen and earn points straight away. They spend the points on rewards, such as TV time with [TV Mgmt](https://github.com/bisman-automations/ha-tv-mgmt) or anything you add, and you choose who can get each reward. Parents check the chores later and take the points back if one didn't happen.
 
 Chores and rewards are the first part of Family; more family tools will join them.
 
@@ -25,24 +25,12 @@ Chores and rewards are the first part of Family; more family tools will join the
 
 ## Installation
 
-### HACS (Home Assistant 2026.10 and older)
-
-[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bisman-automations&repository=ha-family&category=integration)
-
-1. In HACS, search for **Family**, or select the button above.
-2. Download **Family** and restart Home Assistant.
-
-If the search doesn't list it, add the repository yourself: in HACS open the
-menu, choose **Custom repositories**, and add
-`https://github.com/bisman-automations/ha-family` as an **Integration**.
-
-### Marketplace (Home Assistant 2026.11 and newer)
+### Marketplace (Home Assistant 2026.11 and newer, recommended)
 
 [![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=bisman-automations&repository=ha-family&category=integration)
 
-1. Go to **Settings > Marketplace** and search for **Family**, or select the
-   button above.
-2. Install **Family**. If a repair asks you to restart Home Assistant, restart it.
+1. Open the Marketplace and search for **Family**, or select the button above to open this repository in the Marketplace.
+2. Download **Family** and restart Home Assistant.
 
 New versions show up under **Settings > Updates**. Already installed Family
 with HACS? There's nothing to do: Home Assistant moves it into the Marketplace
@@ -52,6 +40,20 @@ If the search doesn't list it, choose **Add from link**, enter
 `bisman-automations/ha-family` under **GitHub link**, and select **Add**.
 Adding a repository from a link needs a GitHub connection; the Marketplace asks
 you to connect one if you haven't.
+
+### HACS (Home Assistant 2026.10 and older)
+
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bisman-automations&repository=ha-family&category=integration)
+
+1. Open HACS and search for **Family**, or select the button above to open this repository in HACS.
+2. Download **Family** and restart Home Assistant.
+
+### Custom repository
+
+If **Family** does not appear in search:
+
+1. In HACS open the menu, choose **Custom repositories**, and add `https://github.com/bisman-automations/ha-family` as an **Integration**.
+2. Download **Family** and restart Home Assistant.
 
 ### Manual
 
@@ -73,7 +75,7 @@ On the **Parents** dashboard:
 
 1. Under **Family**, add each family member. Pick an emoji and a color, and link them to their Home Assistant person if they have one: its picture is used, and if they log in to Home Assistant, the Family dashboard opens on their own page.
 2. Under **Chores**, add chores, and add any to-do lists whose items are chores.
-3. Under **Rewards**, add what points can buy.
+3. Under **Rewards**, add what points can buy, and who can get each one. Everyone is the default.
 4. Under **Home**, add anything the family should be able to use or see from their dashboard, such as a movie-night scene, the playroom lights or the outside temperature.
 
 ## The Family dashboard
@@ -84,19 +86,16 @@ On the **Parents** dashboard:
 - **Today.** Today's events from the calendars a parent picked, all-day ones first. On someone's own page, their calendar and the family's. Events that are already over stay, faded and marked **Over**. Tap **Next few days** for today, tomorrow and the five days after, in a pop-up.
 - **Meals.** Today's and tomorrow's breakfast, lunch and dinner, as planned on the Parents dashboard.
 - **My chores** and **Up for grabs.** On your own page, **My chores** are yours to do: finishing them all earns the all-done bonus and keeps your streak going. **Up for grabs** are extra: whoever does one first gets the points. Everyone's page shows only what's up for grabs for everyone; a chore up for grabs for some people shows on their own pages. Tap a chore, say who did it, and the points are added straight away.
-- **Rewards.** Tap one and confirm. TV time is given on that TV in TV Mgmt at once, and music time on that speaker in Media Mgmt; anything else waits for a parent to hand it out. Rewards you can't afford yet say how many more points you need, and one that can only be had once a day or once a week says when it's back.
+- **Rewards.** Only rewards for you, or for everyone. On everyone's page, only rewards for everyone; a reward for certain people shows on their pages. Tap one and confirm. TV time is given on that TV in TV Mgmt at once, and music time on that speaker in Media Mgmt; anything else waits for a parent to hand it out. Rewards you can't afford yet say how many more points you need, and one that can only be had once a day or once a week says when it's back. A reward for nobody doesn't show, and it can't be got until a parent chooses who it's for.
 - **Undo.** Tapped the wrong name or chore? Tap **Undo** on the message that pops up. It works for a minute, for a chore not checked yet and a reward not handed out yet; TV time is taken back off the TV.
 - **Home.** The scenes, lights and other things a parent added. Tap one to use it: a scene or script starts, a light or switch turns on or off, blinds open or close, a lock locks or unlocks, and a speaker plays or pauses. Anything that asks first shows "Are you sure?". Sensors, thermostats and the weather are only shown. Each tile shows what it's doing now.
-- **Getting a reward together.** Tap a reward, then **Get it together**, and pick who's putting in points. The points are shared as evenly as everyone's points allow: someone with fewer puts in what they have and the others cover the rest. Tap **Ask a parent**: the points are held (taken off everyone's points) until a parent says yes. If a parent says no, everyone gets their points back.
+- **Getting a reward together.** Tap a reward, then **Get it together**, and pick who's putting in points. Only people the reward is for can join. The points are shared as evenly as everyone's points allow: someone with fewer puts in what they have and the others cover the rest. Tap **Ask a parent**: the points are held (taken off everyone's points) until a parent says yes. If a parent says no, everyone gets their points back.
 - **Saving up.** On your own page, tap a reward you can't afford yet and pick **Save for this**. Your page shows how far you are, and your picture on **Who's here?** has a little bar. Once you get it, you're done saving; tap it again and pick **Stop saving for it** to change your mind.
 - **Turns.** A chore the kids take in turns says whose turn it is, and only they can do it.
 - **Lately.** What was done and spent recently.
+- **Done today.** What's finished today, ticked off, under its own section.
 
-- **Done today.** What's finished today, ticked off.
-- **Streaks.** 🔥 and the number of days in a row someone has done at least one chore.
-- A reward someone can't afford yet shows how far they are ("15 of 25").
-
-After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page.
+After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page. A screen that shows one person's page (their tab, or a card with their member id) stays on that page.
 
 Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open.
 
@@ -133,7 +132,7 @@ member: <member id>
 
   **Also keep it on a to-do list** puts the chore on a Home Assistant to-do list too. Family adds it while it can be done, ticks it off when it's done, and opens it again when it comes back. Renaming the chore renames the item, and removing the chore (or picking no list) removes it. Ticking or editing the item on the list yourself doesn't change the chore. If that list is also a chore list, the item isn't counted as a second chore.
 - **Chores from to-do lists.** Every open item on these lists is a chore, worth the list's points. Put the points at the end of an item to change them: `Feed the dog [5]`, `Feed the dog (5 points)` or `Feed the dog - 5 pts`. When it's marked done, the item is ticked off its list, so a repeating reminder comes back when its list brings it back. To give single items their own points without changing their text, tap **Points for items** next to the list: each open item has its own box, and an empty box uses the list's points (or the points written in the item). Set **When items show** to **Only when due today or overdue** to keep items with a later due date off the Family dashboard until their day; an item with a due time shows once that time comes, and items with no due date always show. Next to each item you can also tick who it's for; with nobody ticked, it's for the people ticked for the whole list. Points and people are kept by the item's name, so a repeating item keeps them when it comes back.
-- **Rewards.** Add what points can buy: **TV time** (pick the TV and the minutes, and optionally give the whole home the same time), **Music time** (pick the speaker and the minutes, given in Media Mgmt, and optionally give the whole home the same time) or **Something else** for a parent to hand out. **How often** limits each person to once a day or once a week, so all the points don't go on TV in one afternoon.
+- **Rewards.** Add what points can buy: **TV time** (pick the TV and the minutes, and optionally give the whole home the same time), **Music time** (pick the speaker and the minutes, given in Media Mgmt, and optionally give the whole home the same time) or **Something else** for a parent to hand out. **How often** limits each person to once a day or once a week, so all the points don't go on TV in one afternoon. **Who can get it** is **Everyone** unless you untick that and choose people in the list. The row under the name says who it's for, for example "5 points · 15 min on Family Room TV · For: Alex, Sam", or "For: Everyone". Choose nobody and the row says "For: nobody": the reward stays, but nobody can get it until you choose someone. It does not go back to everyone. Removing a family member drops them from every reward; if they were the last person a reward was for, that reward becomes nobody's. Rewards you already had when this was added stay for everyone.
 - **Home.** Pick what shows under **Home** on the Family dashboard, and in what order. Search for a scene, script, button, light, switch, fan, blind, valve, lock, speaker or TV, or for a sensor, thermostat or weather to show. Give it a different name or an emoji if you like, choose who sees it (nobody ticked means everyone), and tick **Ask "Are you sure?" first** for locks and doors. Anyone at the Family dashboard can use what's here, so only add what the kids may use.
 - **Bonus points** (under **Rewards**). Extra points when someone finishes all of their own chores for the day (chores up for grabs don't count), and every so many days in a row, for example 10 points every 7 days. A streak is days in a row with all of their own chores done; up for grabs doesn't keep it going, and a day with none of their own chores is a day off that doesn't break it. With 0 all-done points, finishing still counts for the streak. A bonus goes away if its chore is undone or marked **Didn't happen**.
 - **Penalties.** **Didn't happen** always takes a chore's points back. To take more, set **When a chore didn't happen, also take away** under **To check** for the whole family, or a **Penalty if it didn't happen** on a chore or to-do list. The box next to **Didn't happen** shows the penalty that will be taken; type a number to change it just this time. Marking it **Done right** later gives everything back.
@@ -149,7 +148,7 @@ member: <member id>
 
 | Entity | What it shows |
 | --- | --- |
-| **{Member} points** (sensor) | The member's points. Attributes: `member`, `chores_to_check`. |
+| **{Member} points** (sensor) | The member's points. Attributes: `member`, `chores_to_check`, and `rewards`: the rewards that person can get, each with `name`, `points`, and `eligible` (`everyone`, or the names of the people it's for). A reward they can't get is left out. |
 
 ## Actions
 
@@ -174,10 +173,14 @@ For automations, for example to send a message or play a sound:
 | `family_chore_done` | A chore is marked done. | `member`, `member_id`, `chore`, `points`, `balance` |
 | `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `penalty` (extra points taken), `balance` |
 | `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
-| `family_reward_redeemed` | Points were spent on a reward. For a reward bought together, once per person when a parent says yes, with their share. | `member`, `member_id`, `reward`, `points`, `balance`, and `together` (everyone's names) for a reward bought together |
+| `family_reward_redeemed` | Points were spent on a reward. For a reward bought together, once per person when a parent says yes, with their share. | `member`, `member_id`, `reward`, `points`, `balance`, `eligible` (`everyone`, or the names of the people the reward is for), and `together` (everyone's names) for a reward bought together |
 
 ## Troubleshooting
 
+- **Diagnostics:** on the integration's page, open the menu and choose **Download diagnostics**. Attach the file to an issue (check it first for anything you'd rather not share).
+- **Debug logs:** on the integration's page choose **Enable debug logging**, reproduce the problem, then **Disable debug logging** to download the log.
+- **A reward doesn't show for someone.** On the Parents dashboard, under **Rewards**, the row says who it's for. **Everyone** shows on every page. People you chose see it on their own pages, not on everyone's. **For: nobody** means it is unavailable: edit it and choose who can get it. Removing the last person a reward was for does this on purpose.
+- **Someone can't get a reward the screen still offered.** Getting it is also refused by Home Assistant, with a message that says the reward isn't for them, or that nobody can get it until a parent chooses who it's for. Their points are not taken.
 - **A music time reward says Media Mgmt isn't set up.** Install Media Mgmt and set up the speaker, then pick the speaker again in the reward.
 - **No phones to pick under Phones.** Install the Home Assistant app on the phone and log in to your Home Assistant; it adds the phone's notify action.
 - **Tapping Done right on a phone does nothing.** Only phones logged in as an admin can check chores. The chore may also have been checked or undone already.
@@ -188,11 +191,22 @@ For automations, for example to send a message or play a sound:
 
 ## Development
 
-Run the shared checks in [CLAUDE.md](CLAUDE.md). To look at the dashboards
-without Home Assistant, serve the repo root over HTTP and open
-`scripts/panel-preview/index.html?mode=family` or `?mode=parents`
+```
+python3.14 -m venv .venv && . .venv/bin/activate
+pip install -r requirements_test.txt
+ruff check . && ruff format --check .
+pytest
+```
+
+CI also tests the oldest supported Home Assistant (`requirements_test_min.txt`)
+and runs hassfest and the HACS checks. Releases are drafted automatically from
+`CHANGELOG.md` on every push to `main` and published by hand. See
+[CLAUDE.md](CLAUDE.md) and [CONTRIBUTING](https://github.com/bisman-automations/.github/blob/main/CONTRIBUTING.md).
+
+To look at the dashboards without Home Assistant, serve the repo root over HTTP
+and open `scripts/panel-preview/index.html?mode=family` or `?mode=parents`
 (add `&theme=dark` for the dark theme).
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+[MIT](LICENSE)

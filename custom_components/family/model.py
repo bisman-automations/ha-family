@@ -328,6 +328,62 @@ def reward_used_by(
     }
 
 
+def reward_members(reward: dict[str, Any]) -> list[str] | None:
+    """Who can get this reward.
+
+    None means everyone. That is the default, and what a reward saved before
+    this was recorded becomes (it has no ``members`` key). A list of member
+    ids means only those people. An empty list means nobody: the reward is
+    unavailable. Removing the last person a reward was for leaves the list
+    empty on purpose, so it does not quietly become everyone's.
+    """
+    if "members" not in reward or reward.get("members") is None:
+        return None
+    members = reward["members"]
+    if not isinstance(members, list):
+        # Something other than a list must not fall open to everyone.
+        return []
+    return [str(member_id) for member_id in members]
+
+
+def reward_for(reward: dict[str, Any], member_id: str) -> bool:
+    """Whether this member may redeem the reward or save up for it."""
+    members = reward_members(reward)
+    return members is None or member_id in members
+
+
+def reward_visible(reward: dict[str, Any], member_id: str | None) -> bool:
+    """Whether a kid-facing page shows this reward.
+
+    On someone's page (``member_id`` set): rewards for everyone, and rewards
+    that list them. On everyone's page (``member_id`` is None): only rewards
+    for everyone. A reward for nobody is shown on neither.
+    """
+    members = reward_members(reward)
+    if members is None:
+        return True
+    if member_id is None:
+        return False
+    return member_id in members
+
+
+def rewards_for(rewards: Iterable[dict[str, Any]], member_id: str | None) -> list:
+    """The rewards ``reward_visible`` keeps for this page."""
+    return [reward for reward in rewards if reward_visible(reward, member_id)]
+
+
+def normalize_reward(reward: dict[str, Any]) -> dict[str, Any]:
+    """Fill in who a reward is for, for storage from version 2 on.
+
+    A reward with no ``members`` key was saved when every reward was for
+    everyone, so it becomes None. An empty list is kept: it means nobody,
+    not everyone.
+    """
+    if "members" in reward:
+        return reward
+    return {**reward, "members": None}
+
+
 # A tap on the shared screen can be undone for this long.
 UNDO_SECONDS = 60
 

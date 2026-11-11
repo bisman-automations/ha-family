@@ -39,11 +39,21 @@ let allChores = [
 ];
 const todoChores = [{ id: "todo:todo.chores:1", name: "Feed the dog", points: 3, members: [], repeat: "once", enabled: true, source: "todo", list: "Chores" }];
 let rewards = [
-  { id: "tv30", name: "30 minutes of TV", emoji: "📺", points: 20, kind: "tv_time", tv: "fam", minutes: 30, whole_home: true, tv_name: "Family Room TV" },
-  { id: "ice", name: "Ice cream", emoji: "🍦", points: 25, kind: "custom", limit: "daily" },
-  { id: "toy", name: "A new toy", emoji: "🎁", points: 100, kind: "custom" },
-  { id: "music", name: "Music at bedtime", emoji: "🎵", points: 10, kind: "music_time", speaker: "kids", minutes: 20, speaker_name: "Kids Room" },
+  // members null: everyone. A list: only those people. []: nobody (unavailable).
+  { id: "tv15", name: "15 minutes of TV", emoji: "📺", points: 5, kind: "tv_time", tv: "fam", minutes: 15, whole_home: false, tv_name: "Family Room TV", members: ["a", "b"] },
+  { id: "tv30", name: "30 minutes of TV", emoji: "📺", points: 20, kind: "tv_time", tv: "fam", minutes: 30, whole_home: true, tv_name: "Family Room TV", members: null },
+  { id: "ice", name: "Ice cream", emoji: "🍦", points: 25, kind: "custom", limit: "daily", members: null },
+  { id: "toy", name: "A new toy", emoji: "🎁", points: 100, kind: "custom", members: null },
+  { id: "music", name: "Music at bedtime", emoji: "🎵", points: 10, kind: "music_time", speaker: "kids", minutes: 20, speaker_name: "Kids Room", members: ["c"] },
+  { id: "old", name: "Board game", emoji: "🎲", points: 15, kind: "custom", members: [] },
 ];
+// Same rule as model.reward_for. Null members: everyone. []: nobody.
+const cantGet = (reward, member) => {
+  if (!reward) return "That reward isn't on the list any more";
+  if (reward.members == null || reward.members.includes(member.id)) return null;
+  if (!reward.members.length) return `${member.name} can't get ${reward.name}. Nobody can get it until a parent chooses who it's for`;
+  return `${member.name} can't get ${reward.name}. A parent hasn't included them`;
+};
 let entries = [
   { id: "e1", at: ago(30), kind: "chore", member: "a", chore_id: "bed", title: "Make your bed", points: 5, review: "pending" },
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
@@ -173,11 +183,12 @@ window.hass = {
       // Riley's only chore: the all-done bonus.
       if (c.id === "room") { const b = { id: "b" + entries.length, at: e.at, kind: "bonus", member: m.id, title: "All done today!", points: bonus.all_done, bonus: "all_done", for_entry: e.id }; entries.push(b); m.points += b.points; return { entry: { ...e, bonuses: [b] }, points: m.points }; }
       return { entry: e, points: m.points }; }
-    if (t === "goal") { if (msg.reward_id && !rewards.some((r) => r.id === msg.reward_id)) throw { message: "That reward isn't on the list any more" }; m.goal = msg.reward_id; return { member: m }; }
+    if (t === "goal") { const r = msg.reward_id ? rewards.find((x) => x.id === msg.reward_id) : null; if (msg.reward_id) { const why = cantGet(r, m); if (why) throw { message: why }; } m.goal = msg.reward_id; return { member: m }; }
     if (t === "redeem" && msg.together?.length) {
       const r = rewards.find((x) => x.id === msg.reward_id); const ids = [...new Set([msg.member_id, ...msg.together])];
       if (ids.length < 2) throw { message: "Pick who's sharing it" };
       const ms = ids.map((id) => members.find((x) => x.id === id));
+      for (const person of ms) { const why = cantGet(r, person); if (why) throw { message: why }; }
       const shares = splitPoints(r.points, ms.map((x) => [x.id, x.points]));
       if (!shares) throw { message: `Together they have ${ms.reduce((s, x) => s + x.points, 0)} of the ${r.points} points for ${r.name}` };
       const group = "g" + entries.length; const made = ms.map((x) => { x.points -= shares[x.id]; const e = { id: "n" + entries.length + x.id, at: new Date().toISOString(), kind: "reward", member: x.id, reward_id: r.id, title: r.name, points: -shares[x.id], given: "to_approve", group, together: ids, total: r.points }; entries.push(e); return e; });
@@ -189,7 +200,7 @@ window.hass = {
       if (!msg.approved) { for (const e of group) { members.find((x) => x.id === e.member).points -= e.points; entries.splice(entries.indexOf(e), 1); } return {}; }
       const r = rewards.find((x) => x.id === group[0].reward_id); for (const e of group) e.given = r && (r.kind === "tv_time" || r.kind === "music_time") ? "given" : "to_give"; return {};
     }
-    if (t === "redeem") { const r = rewards.find((x) => x.id === msg.reward_id); if (m.points < r.points) throw { message: `${m.name} needs ${r.points} points for ${r.name}` }; if (r.limit && entries.some((e) => e.reward_id === r.id && e.member === m.id)) throw { message: `${m.name} already had ${r.name} today` }; m.points -= r.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "reward", member: m.id, reward_id: r.id, title: r.name, points: -r.points, given: r.kind === "tv_time" || r.kind === "music_time" ? "given" : "to_give" }; entries.push(e); if (m.goal === r.id) m.goal = null; return { entry: e, points: m.points }; }
+    if (t === "redeem") { const r = rewards.find((x) => x.id === msg.reward_id); const why = cantGet(r, m); if (why) throw { message: why }; if (m.points < r.points) throw { message: `${m.name} needs ${r.points} points for ${r.name}` }; if (r.limit && entries.some((e) => e.reward_id === r.id && e.member === m.id)) throw { message: `${m.name} already had ${r.name} today` }; m.points -= r.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "reward", member: m.id, reward_id: r.id, title: r.name, points: -r.points, given: r.kind === "tv_time" || r.kind === "music_time" ? "given" : "to_give" }; entries.push(e); if (m.goal === r.id) m.goal = null; return { entry: e, points: m.points }; }
     if (t === "undo") { const e = entries.find((x) => x.id === msg.entry_id); if (!e) throw { message: "That can't be found any more" }; const mm = members.find((x) => x.id === e.member); mm.points -= e.points; entries = entries.filter((x) => x !== e); return {}; }
     if (t === "settings") {
       if ("auto_check" in msg) settings.auto_check = msg.auto_check || null;
@@ -211,8 +222,8 @@ window.hass = {
       return {};
     }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
-    if (t === "save") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); } return { item: msg.item }; }
-    if (t === "delete") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; const i = list ? list.findIndex((x) => x.id === msg.item_id) : -1; if (i >= 0) list.splice(i, 1); return {}; }
+    if (t === "save") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (msg.collection === "rewards" && !Object.hasOwn(msg.item, "members")) item.members = i >= 0 ? (list[i].members ?? null) : null; if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); if (msg.collection === "rewards") { for (const person of members) { if (person.goal === item.id && item.members != null && !item.members.includes(person.id)) person.goal = null; } } } return { item: msg.item }; }
+    if (t === "delete") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; const i = list ? list.findIndex((x) => x.id === msg.item_id) : -1; if (i >= 0) list.splice(i, 1); if (msg.collection === "members") { for (const reward of rewards) { if (Array.isArray(reward.members)) reward.members = reward.members.filter((id) => id !== msg.item_id); } for (const person of members) { const reward = rewards.find((r) => r.id === person.goal); if (person.goal && reward && reward.members != null && !reward.members.includes(person.id)) person.goal = null; } } if (msg.collection === "rewards") { for (const person of members) if (person.goal === msg.item_id) person.goal = null; } return {}; }
     if (t === "adjust") { m.points += msg.points; return { points: m.points }; }
     throw { message: "unknown " + msg.type };
   },

@@ -389,6 +389,8 @@ const STYLES = `
     font: inherit; font-size: 15px; padding: 8px 10px; min-height: 40px; box-sizing: border-box;
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
+  /* Who can get a reward: a multi-select, not a single-line dropdown. */
+  select[multiple] { max-width: 420px; min-width: 220px; height: auto; padding: 4px; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 980px; }
   .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); flex-wrap: wrap; }
@@ -608,9 +610,43 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
   }
 
-  // The reward someone's saving for, if it's still there.
+  // The reward someone's saving for, if it's still there and still for them.
   _goal(m) {
-    return m?.goal ? this._data?.rewards.find((r) => r.id === m.goal) : null;
+    const goal = m?.goal ? this._data?.rewards.find((r) => r.id === m.goal) : null;
+    if (!goal || !this._canGet(goal, m.id)) return null;
+    return goal;
+  }
+
+  // model.reward_for: no members (null) is everyone, [] is nobody.
+  _canGet(reward, memberId) {
+    if (!reward || !memberId) return false;
+    if (reward.members == null) return true;
+    return reward.members.includes(memberId);
+  }
+
+  // model.reward_visible: someone's page shows theirs and everyone's;
+  // everyone's page shows only rewards for everyone.
+  _visibleRewards(member) {
+    return (this._data?.rewards || []).filter((r) => {
+      if (r.members == null) return true;
+      if (!member) return false;
+      return r.members.includes(member.id);
+    });
+  }
+
+  // People a parent picked for this reward. Null members: the whole family.
+  _eligibleMembers(reward) {
+    const members = this._data?.members || [];
+    if (reward.members == null) return members;
+    const allowed = new Set(reward.members);
+    return members.filter((m) => allowed.has(m.id));
+  }
+
+  // "Everyone", "Alex, Sam", or "nobody" (the reward is unavailable).
+  _forLabel(members) {
+    if (members == null) return "Everyone";
+    const names = members.map((id) => this._memberById(id)?.name).filter(Boolean);
+    return names.length ? names.join(", ") : "nobody";
   }
 
   _bar(have, need) {
@@ -627,6 +663,39 @@ class FamilyPanel extends HTMLElement {
     if (r.kind === "tv_time") return `${r.minutes} min of TV${r.tv_name ? ` · ${r.tv_name}` : ""}`;
     if (r.kind === "music_time") return `${r.minutes} min of music${r.speaker_name ? ` · ${r.speaker_name}` : ""}`;
     return "";
+  }
+
+  // Parents list: "5 points · 15 min on Family Room TV · For: Alex, Sam".
+  _rewardLine(r) {
+    const bits = [pts(r.points)];
+    if (r.limit) {
+      const label = LIMITS.find((l) => l.id === r.limit)?.label;
+      if (label) bits.push(label.toLowerCase());
+    }
+    if (r.kind === "tv_time") bits.push(`${r.minutes} min on ${r.tv_name || "a TV that's gone"}${r.whole_home ? " and the whole home" : ""}`);
+    else if (r.kind === "music_time") bits.push(`${r.minutes} min of music on ${r.speaker_name || "a speaker that's gone"}${r.whole_home ? " and the whole home" : ""}`);
+    else bits.push("handed out by a parent");
+    bits.push(`For: ${this._forLabel(r.members)}`);
+    return bits.join(" · ");
+  }
+
+  // Who can get a reward. Everyone is the default (members null). Untick it
+  // and choose people. Choose nobody and the reward is unavailable: it does
+  // not go back to everyone.
+  _rewardWho(members) {
+    const everyone = members == null;
+    const selected = new Set(Array.isArray(members) ? members : []);
+    const people = this._data.members;
+    if (!people.length) {
+      return `<label class="check"><input type="checkbox" name="everyone" checked> Everyone</label>
+        <small>Add family members under Family. Until then, everyone can get it.</small>`;
+    }
+    const options = people
+      .map((m) => `<option value="${esc(m.id)}" ${selected.has(m.id) ? "selected" : ""}>${esc(m.name)}</option>`)
+      .join("");
+    return `<label class="check"><input type="checkbox" name="everyone" ${everyone ? "checked" : ""}> Everyone</label>
+      <select name="members" multiple size="${Math.min(8, Math.max(3, people.length))}" aria-label="Who can get it" ${everyone ? "disabled" : ""}>${options}</select>
+      <small>Everyone is the default: any family member can get it. Untick Everyone and choose people to limit it. Choose nobody, and nobody can get it. It does not go back to everyone.</small>`;
   }
 
   _feed(entries, review = false) {
@@ -721,8 +790,9 @@ class FamilyPanel extends HTMLElement {
       ? choreTiles(mine, "chores")
       : `<p class="empty">${own.done ? `All done, ${esc(member.name)}! 🎉` : "Nothing of your own right now."}</p>`;
     const grabBody = grabs.length ? choreTiles(grabs, "grabs") : `<p class="empty">Nothing up for grabs right now.</p>`;
-    const rewardTiles = d.rewards.length
-      ? `<div class="tiles" data-fit="rewards">${d.rewards
+    const visibleRewards = this._visibleRewards(member);
+    const rewardTiles = visibleRewards.length
+      ? `<div class="tiles" data-fit="rewards">${visibleRewards
           .map((r) => {
             const short = member && member.points < r.points;
             const used = member && (r.used_by || []).includes(member.id);
@@ -739,7 +809,7 @@ class FamilyPanel extends HTMLElement {
               ${bar}${note ? `<span class="sub">${esc(note)}</span>` : ""}</button>`;
           })
           .join("")}</div>`
-      : `<p class="empty">No rewards yet. A parent adds them on the <b>Parents</b> dashboard.</p>`;
+      : `<p class="empty">${d.rewards.length ? (member ? `No rewards for ${esc(member.name)} right now.` : "No rewards for everyone right now.") : "No rewards yet. A parent adds them on the <b>Parents</b> dashboard."}</p>`;
     const feed = member ? d.recent.filter((e) => e.member === member.id) : d.recent;
     const controls = this._visibleControls();
     const home = controls.length ? this._section("home", "Home", `<div class="tiles home" data-fit="home">${this._controlTiles()}</div>`, controls.length) : "";
@@ -778,7 +848,7 @@ class FamilyPanel extends HTMLElement {
       ${d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : ""}
       ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
       ${done.length ? this._section("done", "Done today", doneTiles, done.length) : ""}
-      ${this._section("rewards", "Rewards", rewardTiles, d.rewards.length)}
+      ${this._section("rewards", "Rewards", rewardTiles, visibleRewards.length)}
       ${home}
       ${this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`)}`;
   }
@@ -1039,7 +1109,7 @@ class FamilyPanel extends HTMLElement {
     if (!reward) return "";
     const member = this._memberById(s.member);
     if (!member) {
-      const can = d.members.filter((m) => m.points >= reward.points && !(reward.used_by || []).includes(m.id));
+      const can = this._eligibleMembers(reward).filter((m) => m.points >= reward.points && !(reward.used_by || []).includes(m.id));
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who's it for?">
         <h3>Who's ${esc(reward.name)} for?</h3><p>${pts(reward.points)}</p>
         ${can.length ? this._people(can, "data-sheet-member", null) : `<p>Nobody has enough points on their own yet.</p>`}
@@ -1063,9 +1133,10 @@ class FamilyPanel extends HTMLElement {
       <button class="big primary" data-confirm ${this._busy ? "disabled" : ""}>Yes, please!</button></div></div></div>`;
   }
 
-  // Others who could put points in with whoever's getting it.
+  // Others who could put points in with whoever's getting it. Only people
+  // the reward is for: getting it together can't include anyone else.
   _shareable(reward) {
-    return this._data.members.filter((m) => !(reward.used_by || []).includes(m.id));
+    return this._eligibleMembers(reward).filter((m) => !(reward.used_by || []).includes(m.id));
   }
 
   _canShare(reward) {
@@ -1378,7 +1449,7 @@ class FamilyPanel extends HTMLElement {
     const rows = d.rewards.length
       ? `<ul class="rows">${d.rewards
           .map((r) => `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
-              <small>${pts(r.points)}${r.limit ? ` · ${esc(LIMITS.find((l) => l.id === r.limit)?.label.toLowerCase() || "")}` : ""}${r.kind === "tv_time" ? ` · ${r.minutes} min on ${esc(r.tv_name || "a TV that's gone")}${r.whole_home ? " and the whole home" : ""}` : r.kind === "music_time" ? ` · ${r.minutes} min of music on ${esc(r.speaker_name || "a speaker that's gone")}${r.whole_home ? " and the whole home" : ""}` : " · handed out by a parent"}</small></span>
+              <small>${this._rewardLine(r)}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
               <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -1436,6 +1507,7 @@ class FamilyPanel extends HTMLElement {
           <option value="custom" ${kind === "custom" ? "selected" : ""}>Something else</option></select></label>
       </div>
       ${tvFields}
+      <div class="field"><span>Who can get it</span>${this._rewardWho(r.members)}</div>
       <div class="form-actions"><button class="btn primary" type="submit">Save reward</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
   }
@@ -1796,14 +1868,32 @@ class FamilyPanel extends HTMLElement {
       this._call({ type: `${DOMAIN}/settings`, auto_check: ev.target.value || null }, "Saved.");
       return;
     }
+    if (ev.target.name === "everyone" && ev.target.form?.dataset.form === "rewards") {
+      // Everyone ignores the multi-select. Unticking it keeps any names
+      // already chosen, because the select stays in the form.
+      const select = ev.target.form.querySelector('select[name="members"]');
+      if (select) select.disabled = ev.target.checked;
+      return;
+    }
     if (ev.target.dataset.rewardKind !== undefined) {
-      // Show the TV fields for TV time, keeping what's typed so far.
+      // Show the TV fields for TV time, keeping what's typed so far,
+      // including who the reward is for.
       const form = ev.target.closest("form");
-      const item = { ...(this._edit.item || {}), ...this._formValues(form) };
+      const item = this._rewardDraft(form);
       this._rewardKind = ev.target.value;
       this._edit = { ...this._edit, item };
       this._render();
     }
+  }
+
+  // The reward form, as it will be saved: Everyone means members null.
+  _rewardDraft(form) {
+    const v = this._formValues(form);
+    const item = { ...(this._edit?.item || {}), ...v };
+    item.members = v.everyone ? null : (v.members || []);
+    item.whole_home = !!v.whole_home;
+    delete item.everyone;
+    return item;
   }
 
   _onInput(ev) {
@@ -1875,7 +1965,9 @@ class FamilyPanel extends HTMLElement {
     if (collection === "chores") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home };
+      // Everyone ticked: any family member. Otherwise only the people chosen
+      // in the multi-select. Nobody chosen: the reward is unavailable.
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), kind: v.kind, limit: v.limit || null, tv: v.tv, speaker: v.speaker, minutes: Number(v.minutes || 0), whole_home: !!v.whole_home, members: v.everyone ? null : (v.members || []) };
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {

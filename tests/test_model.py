@@ -490,3 +490,42 @@ def test_todo_due():
     assert not model.todo_due(date(2030, 1, 11), now)
     assert model.todo_due(datetime(2030, 1, 10, 9, 0), now)
     assert not model.todo_due(datetime(2030, 1, 10, 18, 0), now)
+
+
+def test_who_can_get_a_reward():
+    everyone = {"id": "tv", "name": "TV"}
+    alex_sam = {"id": "ice", "members": ["alex", "sam"]}
+    nobody = {"id": "old", "members": []}
+    # Missing, None, and an explicit everyone are the same. A bad value
+    # does not fall open to everyone.
+    assert model.reward_members(everyone) is None
+    assert model.reward_members({"members": None}) is None
+    assert model.reward_members(alex_sam) == ["alex", "sam"]
+    assert model.reward_members(nobody) == []
+    assert model.reward_members({"members": "alex"}) == []
+
+    assert model.reward_for(everyone, "alex")
+    assert model.reward_for({"members": None}, "sam")
+    assert model.reward_for(alex_sam, "alex")
+    assert not model.reward_for(alex_sam, "riley")
+    assert not model.reward_for(nobody, "alex")
+
+    rewards = [everyone, alex_sam, nobody]
+    # Someone's page: theirs and everyone's. Everyone's page: only everyone's.
+    assert [r["id"] for r in model.rewards_for(rewards, "alex")] == ["tv", "ice"]
+    assert [r["id"] for r in model.rewards_for(rewards, "riley")] == ["tv"]
+    assert [r["id"] for r in model.rewards_for(rewards, None)] == ["tv"]
+    assert model.reward_visible(nobody, "alex") is False
+    assert model.reward_visible(nobody, None) is False
+
+
+def test_old_rewards_become_everyone_and_an_empty_list_stays_empty():
+    old = {"id": "tv", "name": "15 minutes of TV", "points": 5}
+    assert model.normalize_reward(old) == {**old, "members": None}
+    # The original is left as it was stored.
+    assert "members" not in old
+    kept = {"id": "ice", "members": ["alex"]}
+    assert model.normalize_reward(kept) is kept
+    empty = {"id": "old", "members": []}
+    assert model.normalize_reward(empty)["members"] == []
+    assert model.normalize_reward({"members": None})["members"] is None

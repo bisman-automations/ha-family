@@ -56,6 +56,33 @@ class FamilyError(HomeAssistantError):
     """Something the person asked for can't be done; the message says why."""
 
 
+class FamilyStore(Store[dict[str, Any]]):
+    """The family's store.
+
+    Version 2 records who each reward is for. Rewards from version 1 have no
+    ``members`` key and were for everyone, so the migration writes None.
+    An empty list is never written here: that means nobody can get the
+    reward, which only happens later, when the last person it was for is
+    removed or a parent clears the list.
+    """
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bring stored data up to the current version."""
+        data = dict(old_data or {})
+        if old_major_version < 2:
+            data["rewards"] = [
+                model.normalize_reward(dict(reward))
+                for reward in data.get("rewards") or []
+                if isinstance(reward, dict)
+            ]
+        return data
+
+
 def _id() -> str:
     return uuid4().hex[:12]
 
@@ -70,7 +97,7 @@ class FamilyManager:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
-        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._store = FamilyStore(hass, STORAGE_VERSION, STORAGE_KEY)
         self.members: list[dict[str, Any]] = []
         self.chores: list[dict[str, Any]] = []
         self.rewards: list[dict[str, Any]] = []
@@ -102,7 +129,14 @@ class FamilyManager:
         data = await self._store.async_load() or {}
         self.members = list(data.get("members") or [])
         self.chores = list(data.get("chores") or [])
-        self.rewards = list(data.get("rewards") or [])
+        # Version 2 always stores ``members``. A file that is already version
+        # 2 but missing the key (hand-edited, or saved by something older)
+        # is filled in the same way as the migration: missing means everyone,
+        # and an empty list stays empty.
+        raw_rewards = [r for r in data.get("rewards") or [] if isinstance(r, dict)]
+        self.rewards = [model.normalize_reward(dict(r)) for r in raw_rewards]
+        if self.rewards != raw_rewards:
+            self.save()
         self.todo_lists = list(data.get("todo_lists") or [])
         self.controls = list(data.get("controls") or [])
         self.settings = dict(data.get("settings") or {})
@@ -830,18 +864,73 @@ class FamilyManager:
                 return reward
         raise FamilyError("That reward isn't on the list any more")
 
+    def reward_eligible(self, reward: dict[str, Any]) -> str | list[str]:
+        """Who can get this reward, for events and the points sensor.
+
+        ``"everyone"``, or the names of the people a parent picked. An empty
+        list means nobody can get it.
+        """
+        members = model.reward_members(reward)
+        if members is None:
+            return "everyone"
+        return [self._member_name(member_id) for member_id in members]
+
+    def _require_eligible(self, member: dict[str, Any], reward: dict[str, Any]) -> None:
+        """Refuse a redeem or a goal when this reward isn't for them."""
+        if model.reward_for(reward, member["id"]):
+            return
+        # The sentence comes from strings.json, so it can be translated.
+        # Home Assistant drops the final period when it builds the message.
+        key = (
+            "reward_unavailable"
+            if model.reward_members(reward) == []
+            else "reward_not_for_member"
+        )
+        raise FamilyError(
+            translation_domain=DOMAIN,
+            translation_key=key,
+            translation_placeholders={
+                "name": str(member["name"]),
+                "reward": str(reward["name"]),
+            },
+        )
+
+    def _redeemed_event(
+        self,
+        member_name: str,
+        member_id: str,
+        reward: dict[str, Any],
+        points: int,
+        balance: int,
+        together: str | None = None,
+    ) -> dict[str, Any]:
+        """Event data for a reward that was redeemed."""
+        data: dict[str, Any] = {
+            "member": member_name,
+            "member_id": member_id,
+            "reward": reward["name"],
+            "points": points,
+            "balance": balance,
+            "eligible": self.reward_eligible(reward),
+        }
+        if together is not None:
+            data["together"] = together
+        return data
+
     async def async_redeem(
         self, member_id: str, reward_id: str, together: list[str] | None = None
     ) -> dict[str, Any]:
         """Spend points on a reward. TV time is given straight away.
 
         With ``together``, the others share the points, and a parent says yes
-        first (``async_approve``).
+        first (``async_approve``). Anyone the reward isn't for is refused,
+        here and in the shared redeem, before any points are taken.
         """
         if together:
             return self._redeem_together(member_id, reward_id, together)
         member = self.member(member_id)
         reward = self.reward(reward_id)
+        self._require_eligible(member, reward)
         cost = int(reward.get("points", 0))
         if self.points(member_id) < cost:
             raise FamilyError(
@@ -886,13 +975,9 @@ class FamilyManager:
             self.notices.reward_to_give(entry, member)
         self.hass.bus.async_fire(
             EVENT_REWARD_REDEEMED,
-            {
-                "member": member["name"],
-                "member_id": member_id,
-                "reward": reward["name"],
-                "points": cost,
-                "balance": self.points(member_id),
-            },
+            self._redeemed_event(
+                member["name"], member_id, reward, cost, self.points(member_id)
+            ),
         )
         return entry
 
@@ -906,6 +991,8 @@ class FamilyManager:
             raise FamilyError("Pick who's sharing it")
         members = [self.member(i) for i in ids]
         reward = self.reward(reward_id)
+        for member in members:
+            self._require_eligible(member, reward)
         cost = int(reward.get("points", 0))
         used = model.reward_used_by(reward, self.entries, dt_util.now())
         for member in members:
@@ -1004,14 +1091,14 @@ class FamilyManager:
         for entry in entries:
             self.hass.bus.async_fire(
                 EVENT_REWARD_REDEEMED,
-                {
-                    "member": self._member_name(entry["member"]),
-                    "member_id": entry["member"],
-                    "reward": reward["name"],
-                    "points": -int(entry["points"]),
-                    "balance": self.points(entry["member"]),
-                    "together": names,
-                },
+                self._redeemed_event(
+                    self._member_name(entry["member"]),
+                    entry["member"],
+                    reward,
+                    -int(entry["points"]),
+                    self.points(entry["member"]),
+                    names,
+                ),
             )
 
     def _member_name(self, member_id: str) -> str:
@@ -1111,10 +1198,14 @@ class FamilyManager:
 
     @callback
     def set_goal(self, member_id: str, reward_id: str | None) -> dict[str, Any]:
-        """The reward a member is saving for, or None to stop."""
+        """The reward a member is saving for, or None to stop.
+
+        They can only save for a reward they are allowed to get.
+        """
         member = self.member(member_id)
         if reward_id is not None:
-            self.reward(reward_id)
+            reward = self.reward(reward_id)
+            self._require_eligible(member, reward)
         member["goal"] = reward_id
         self._changed()
         return member
@@ -1231,13 +1322,42 @@ class FamilyManager:
         self._changed()
         return chore
 
+    def _reward_members(
+        self, raw: dict[str, Any], existing: dict[str, Any] | None
+    ) -> list[str] | None:
+        """Who the saved reward is for.
+
+        None: everyone. A list: only those members, after unknown ids are
+        dropped. An empty list: nobody, so the reward is unavailable. Leaving
+        the key out keeps what was saved (everyone, for a new reward).
+        """
+        if "members" not in raw:
+            if existing is None or existing.get("members") is None:
+                return None
+            return self._known_members(existing.get("members"))
+        if raw["members"] is None:
+            return None
+        if not isinstance(raw["members"], list):
+            raise FamilyError("Pick who can get it")
+        return self._known_members(raw["members"])
+
+    def _clear_ineligible_goals(self, reward: dict[str, Any]) -> None:
+        """Stop anyone saving for a reward they can no longer get."""
+        for member in self.members:
+            if member.get("goal") == reward["id"] and not model.reward_for(
+                reward, member["id"]
+            ):
+                member["goal"] = None
+
     @callback
     def save_reward(self, raw: dict[str, Any]) -> dict[str, Any]:
         kind = raw.get("kind") or model.REWARD_CUSTOM
         if kind not in model.REWARD_KINDS:
             raise FamilyError("Pick what kind of reward it is")
+        reward_id = raw.get("id") or _id()
+        existing = next((r for r in self.rewards if r["id"] == reward_id), None)
         reward: dict[str, Any] = {
-            "id": raw.get("id") or _id(),
+            "id": reward_id,
             "name": model.clean_name(raw.get("name"), "The reward's name"),
             "points": model.clean_points(raw.get("points", 0), "Its cost"),
             "kind": kind,
@@ -1246,6 +1366,8 @@ class FamilyManager:
             "limit": raw.get("limit")
             if raw.get("limit") in model.REWARD_LIMITS
             else None,
+            # None: everyone. A list: only those people. []: nobody.
+            "members": self._reward_members(raw, existing),
         }
         if kind == model.REWARD_MUSIC_TIME:
             if not raw.get("speaker"):
@@ -1266,6 +1388,7 @@ class FamilyManager:
                 whole_home=bool(raw.get("whole_home")),
             )
         self._upsert(self.rewards, reward)
+        self._clear_ineligible_goals(reward)
         self._changed()
         return reward
 
@@ -1386,9 +1509,27 @@ class FamilyManager:
         if collection == "members":
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
+            # Drop them from rewards they were picked for. An empty list stays
+            # empty: the reward is unavailable, it does not become everyone's.
+            # A reward for everyone (None) is left as it is.
+            for reward in self.rewards:
+                picked = reward.get("members")
+                if picked:
+                    reward["members"] = [m for m in picked if m != item_id]
             for row in [*(self.settings.get("calendars") or []), *self.notes]:
                 if row.get("member") == item_id:
                     row["member"] = None
+            for member in self.members:
+                goal = member.get("goal")
+                if not goal:
+                    continue
+                try:
+                    reward = self.reward(goal)
+                except FamilyError:
+                    member["goal"] = None
+                else:
+                    if not model.reward_for(reward, member["id"]):
+                        member["goal"] = None
         if collection == "rewards":
             for member in self.members:
                 if member.get("goal") == item_id:

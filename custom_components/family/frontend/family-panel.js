@@ -221,8 +221,16 @@ const STYLES = `
   .bar > span { display: block; height: 100%; background: var(--primary-color); border-radius: 4px; }
   .tile:disabled .bar { opacity: 1; }
   .streak { font-size: 15px; font-weight: 600; }
-  .todo-line { font-size: 14px; color: var(--fam-muted); }
-  .todo-line.done { color: var(--success-color, #2e7d32); font-weight: 500; }
+  .pills { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .pill { font-size: 14px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--c, var(--primary-color)) 16%, transparent); color: var(--primary-text-color); }
+  .pill.done { background: color-mix(in srgb, var(--success-color, #2e7d32) 22%, transparent); }
+  .pill.missed { background: color-mix(in srgb, var(--error-color, #c62828) 14%, transparent); font-weight: 500; }
+  .celebrate { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .45); overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .celebrate .cheer { position: relative; color: #fff; font-size: clamp(26px, 4vw, 44px); font-weight: 600; text-align: center; padding: 0 24px; text-shadow: 0 2px 8px rgba(0, 0, 0, .4); animation: cheer .5s ease-out; }
+  .celebrate .confetti { position: absolute; top: -60px; animation: fall 3.2s ease-in forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(540deg); } }
+  @keyframes cheer { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .celebrate .confetti { display: none; } .celebrate .cheer { animation: none; } }
   .going-tile { gap: 6px; }
   .going-tile.won { justify-content: center; }
   .goal-mini { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 14px; }
@@ -611,15 +619,35 @@ class FamilyPanel extends HTMLElement {
     return `<span class="avatar${small ? " small" : ""}" style="--c:${esc(m.color)}">${inner}</span>`;
   }
 
+  // All of someone's own chores done: confetti and a cheer for a few seconds.
+  _celebrate(member) {
+    const old = this.shadowRoot.querySelector(".celebrate");
+    if (old) old.remove();
+    const bits = ["🎉", "🥳", "⭐", "🎊", "✨"];
+    const pieces = Array.from({ length: 28 }, (_, i) => {
+      const left = (i * 37) % 100;
+      const delay = ((i * 13) % 10) / 10;
+      const size = 28 + ((i * 7) % 20);
+      return `<span class="confetti" style="left:${left}%;animation-delay:${delay}s;font-size:${size}px">${bits[i % bits.length]}</span>`;
+    }).join("");
+    const el = document.createElement("div");
+    el.className = "celebrate";
+    el.setAttribute("role", "status");
+    el.innerHTML = `${pieces}<div class="cheer">Yay, ${esc(member.name)}! You did all your chores today.</div>`;
+    el.addEventListener("click", () => el.remove());
+    this.shadowRoot.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
   // On the people strip: how many of their own chores are left today.
   _todoLine(m) {
     const own = m.own_today || {};
     if (!own.total) return "";
-    if (own.done || !own.left) return `<span class="todo-line done">✓ All done</span>`;
+    const doneCount = own.total - own.left;
+    const all = own.done || !own.left;
     // Left, but too late today: missed rather than still to do.
-    const missed = Math.min(own.missed || 0, own.left);
-    const todo = own.left - missed;
-    return `<span class="todo-line">${[todo ? `${todo} to do` : "", missed ? `${missed} missed` : ""].filter(Boolean).join(" · ")}</span>`;
+    const missed = all ? 0 : Math.min(own.missed || 0, own.left);
+    return `<span class="pills"><span class="pill${all ? " done" : ""}" title="${all ? "All done today" : `${own.left} to do`}">✓ ${all ? own.total : doneCount}/${own.total}</span>${missed ? `<span class="pill missed">${missed} missed</span>` : ""}</span>`;
   }
 
   // A card set to one family member shows only their page.
@@ -1159,6 +1187,8 @@ class FamilyPanel extends HTMLElement {
         <div class="actions"><button class="big" data-close>No</button>
         <button class="big primary" data-confirm ${this._busy ? "disabled" : ""}>Yes</button></div></div></div>`;
     }
+    // Ticked off with one tap: no sheet while it's saved.
+    if (s.quick) return "";
     if (s.type === "chore") {
       const chore = d.chores.find((c) => c.id === s.id);
       if (!chore) return "";
@@ -1867,8 +1897,14 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.move) {
       this._call({ type: `${DOMAIN}/move`, collection: ds.move, item_id: ds.id, offset: Number(ds.offset) }, "Moved.");
     } else if (ds.chore) {
-      this._sheet = { type: "chore", id: ds.chore, member: this._member };
-      this._renderOverlay();
+      // On someone's page, or a chore only one person can do: tick it off
+      // straight away (the toast can undo it). Otherwise ask who did it.
+      const chore = this._data.chores.find((c) => c.id === ds.chore);
+      const only = chore?.can?.length === 1 ? chore.can[0] : null;
+      const who = this._member && chore?.can?.includes(this._member) ? this._member : only;
+      this._sheet = { type: "chore", id: ds.chore, member: who, quick: !!who };
+      if (who) this._confirm();
+      else this._renderOverlay();
     } else if (ds.reward) {
       this._sheet = { type: "reward", id: ds.reward, member: this._member };
       this._renderOverlay();
@@ -2156,6 +2192,7 @@ class FamilyPanel extends HTMLElement {
         const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id });
         const bonus = (res.entry?.bonuses || []).map((b) => (b.points ? ` ${b.title} +${pts(b.points)}` : ` ${b.title}`)).join("");
         this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
+        if ((res.entry?.bonuses || []).some((b) => b.bonus === "all_done")) this._celebrate(member);
       } else {
         const reward = this._data.rewards.find((r) => r.id === s.id);
         const res = await this._ws({ type: `${DOMAIN}/redeem`, member_id: s.member, reward_id: s.id });

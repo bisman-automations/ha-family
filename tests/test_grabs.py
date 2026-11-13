@@ -199,3 +199,26 @@ async def test_done_today_stays_done_and_late_ones_are_missed(
         "done": False,
         "missed": 1,
     }
+
+
+async def test_a_parents_chores_need_no_checking(
+    hass: HomeAssistant, client, hass_admin_user, hass_read_only_user
+):
+    hass.states.async_set("person.dad", "home", {"user_id": hass_admin_user.id})
+    hass.states.async_set("person.kid", "home", {"user_id": hass_read_only_user.id})
+    dad = (
+        await client.ok(
+            "save", collection="members", item={"name": "Dad", "person": "person.dad"}
+        )
+    )["item"]["id"]
+    kid = (
+        await client.ok(
+            "save", collection="members", item={"name": "Kid", "person": "person.kid"}
+        )
+    )["item"]["id"]
+    vitamins = await _chore(client, name="Vitamins", members=[dad, kid])
+    done = await client.ok("complete", member_id=dad, chore_id=vitamins["id"])
+    assert done["entry"]["review"] == "approved"
+    await client.ok("complete", member_id=kid, chore_id=vitamins["id"])
+    to_check = (await client.ok("state"))["to_check"]
+    assert [e["member"] for e in to_check] == [kid]

@@ -506,12 +506,19 @@ class FamilyManager:
             # The chore's own penalty if it has one; None: the family's.
             "penalty": chore.get("penalty"),
         }
+        parent = await self._is_parent(member)
+        if parent:
+            # A parent's own chore: nobody needs to check it.
+            entry["review"] = model.REVIEW_APPROVED
+            entry["reviewed_at"] = entry["at"]
+            entry["parent"] = True
         self.entries.append(entry)
         if chore.get("source") == "todo":
             await self._async_set_todo(chore["todo_entity"], chore["todo_uid"], True)
         bonuses = self._earn_bonuses(member, entry)
         self._changed()
-        self.notices.chore_done(entry, member)
+        if not parent:
+            self.notices.chore_done(entry, member)
         self.hass.bus.async_fire(
             EVENT_CHORE_DONE,
             {
@@ -537,6 +544,17 @@ class FamilyManager:
         if bonuses:
             entry = {**entry, "bonuses": bonuses}
         return entry
+
+    async def _is_parent(self, member: dict[str, Any]) -> bool:
+        """Whether this member's person is a Home Assistant administrator:
+        someone who can open the Parents dashboard."""
+        person = member.get("person")
+        state = self.hass.states.get(person) if person else None
+        user_id = state.attributes.get("user_id") if state else None
+        if not user_id:
+            return False
+        user = await self.hass.auth.async_get_user(user_id)
+        return bool(user and user.is_admin)
 
     def _earn_bonuses(
         self, member: dict[str, Any], entry: dict[str, Any]

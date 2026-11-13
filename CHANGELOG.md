@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-11-13
+
+### Added
+
+- **One tap to tick a chore off.** On someone's own page, tapping a chore ticks it off for them straight away, with **Undo** in the message at the bottom. A chore only one person can do is ticked off for them from any page. Only a chore several people could have done asks who did it.
+- **A cheer when someone's done.** Finishing all of their own chores for the day plays a short confetti cheer. Tap it to close it.
+- **Progress on each picture.** Each person shows how many of their own chores are done today (✓ 2/3), green once they're all done.
+
+### Changed
+
+- **A parent's chores don't need checking.** Chores done by someone linked to a Home Assistant administrator (anyone who can open the Parents dashboard) count as done right straight away, and don't send a notification.
+
 ## [1.15.0] - 2026-11-11
 
 ### Changed
@@ -184,6 +196,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.16.0]: https://github.com/bisman-automations/ha-family/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/bisman-automations/ha-family/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/bisman-automations/ha-family/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/bisman-automations/ha-family/compare/v1.13.0...v1.13.1

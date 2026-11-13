@@ -237,7 +237,7 @@ window.hass = {
           settings.family_goal = { name: g.name.trim(), emoji: g.emoji || null, target: g.target, since: old && !msg.restart_goal ? old.since : new Date().toISOString() };
         }
       }
-      for (const key of ["section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
+      for (const key of ["section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "live_activity", "live_per_child", "live_from", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
       if ("point_value" in msg) { if (msg.point_value !== null && !(msg.point_value > 0 && msg.point_value <= 100)) throw { message: "What a point is worth must be above 0 and at most 100" }; settings.point_value = msg.point_value; }
       if ("bonus_all_done" in msg) bonus = { all_done: msg.bonus_all_done, streak_days: msg.streak_days, streak: msg.streak_bonus };
       return { settings };

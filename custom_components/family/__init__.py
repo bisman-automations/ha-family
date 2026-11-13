@@ -79,6 +79,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     entry.async_on_unload(
         async_track_time_change(hass, _sync_todo, hour=0, minute=0, second=5)
     )
+
+    # The parents' Live Activity: a fresh one each day.
+    @callback
+    def _new_day(_now: Any = None) -> None:
+        manager.live.new_day()
+
+    entry.async_on_unload(
+        async_track_time_change(hass, _new_day, hour=0, minute=0, second=10)
+    )
     entry.async_on_unload(
         async_track_time_interval(hass, _sync_todo, timedelta(hours=1))
     )

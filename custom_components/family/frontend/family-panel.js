@@ -394,6 +394,8 @@ const STYLES = `
   .items li.skipped .item-name { opacity: 0.5; text-decoration: line-through; }
   .chip.leave-out { color: var(--error-color, #db4437); }
   [hidden] { display: none !important; }
+  .history-filter { margin-bottom: 8px; }
+  .history-filter input[type="search"] { width: 100%; box-sizing: border-box; }
   .routine-tile { text-align: left; }
   .routine-people { display: flex; flex-wrap: wrap; gap: 4px; }
   .routine-people .pill { font-size: 0.8em; padding: 2px 8px; border-radius: 999px; background: var(--secondary-background-color, #eee); }
@@ -439,7 +441,7 @@ const STYLES = `
   .field small { color: var(--fam-muted); }
   .inline { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
   .check { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
-  input[type="text"], input[type="number"], input[type="time"], select {
+  input[type="text"], input[type="search"], input[type="number"], input[type="time"], select {
     font: inherit; font-size: 15px; padding: 8px 10px; min-height: 40px; box-sizing: border-box;
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
@@ -849,6 +851,27 @@ class FamilyPanel extends HTMLElement {
     for (const el of boxes) el.closest('[role="option"]')?.setAttribute("aria-selected", el.checked ? "true" : "false");
   }
 
+  // History, narrowed to one person and/or what was done. The list redraws
+  // on its own as a parent types, so the search box keeps its focus.
+  _renderHistory() {
+    const f = (this._historyFilter ||= { member: "", text: "" });
+    const people = this._data.members.map((m) => `<option value="${esc(m.id)}" ${f.member === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("");
+    return `<div class="card"><div class="history-filter inline">
+        <label class="field"><span>Who</span><select data-history-member aria-label="Who"><option value="">Everyone</option>${people}</select></label>
+        <label class="field grow"><span>Search</span><input type="search" data-history-text value="${esc(f.text)}" placeholder="A chore, reward or bonus" aria-label="Search history"></label>
+      </div><div data-history-list>${this._historyList()}</div></div>`;
+  }
+
+  _historyList() {
+    const f = this._historyFilter || { member: "", text: "" };
+    const words = f.text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const all = this._data.history || [];
+    const shown = all.filter((e) => (!f.member || e.member === f.member) && words.every((w) => (e.title || "").toLowerCase().includes(w)));
+    if (all.length && !shown.length) return `<p class="empty">Nothing matches. Try another name or fewer words.</p>`;
+    const count = f.member || words.length ? `<p class="muted">${shown.length} of ${all.length}</p>` : "";
+    return count + this._feed(shown, true);
+  }
+
   _feed(entries, review = false) {
     // An all-done day with no bonus points only marks the streak.
     entries = entries.filter((e) => !(e.kind === "bonus" && !e.points));
@@ -881,6 +904,15 @@ class FamilyPanel extends HTMLElement {
 
   _render() {
     if (!this._built) return;
+    // Someone is typing in the History search: refresh just the list.
+    const typing = this.shadowRoot.activeElement;
+    if (this._data && this._mode === "parents" && this._tab === "history" && typing?.dataset?.historyText !== undefined) {
+      const list = this.shadowRoot.querySelector("[data-history-list]");
+      if (list) {
+        list.innerHTML = this._historyList();
+        return;
+      }
+    }
     const title = this.shadowRoot.querySelector(".title");
     if (title) title.textContent = this._mode === "parents" ? "Parents" : "Family";
     const main = this.shadowRoot.querySelector("main");
@@ -1444,7 +1476,7 @@ class FamilyPanel extends HTMLElement {
       meals: () => this._renderMeals(),
       notes: () => this._renderNotes(),
       family: () => this._renderMembers(),
-      history: () => `<div class="card">${this._feed(d.history || [], true)}</div>`,
+      history: () => this._renderHistory(),
     }[this._tab]();
     return bar + body;
   }
@@ -1545,6 +1577,11 @@ class FamilyPanel extends HTMLElement {
         <label class="check"><input type="checkbox" name="notify_done" ${st.notify_done ? "checked" : ""}> When a chore is marked done</label>
         <label class="check"><input type="checkbox" name="notify_rewards" ${st.notify_rewards ? "checked" : ""}> When a reward needs handing out</label>
         <label class="check"><input type="checkbox" name="weekly_summary" ${st.weekly_summary ? "checked" : ""}> A summary of the week, on Sunday at 6:00 PM</label>
+        <div class="field"><span>Live Activities of today's chores</span>
+          <label class="check"><input type="checkbox" name="live_activity" ${st.live_activity ? "checked" : ""}> One for the family: how far each child is, on one line</label>
+          <label class="check"><input type="checkbox" name="live_per_child" ${st.live_per_child ? "checked" : ""}> One for each child: their own progress, gone once they're all done</label>
+          <label class="field"><span>Show from</span><input type="time" name="live_from" value="${esc(st.live_from || "")}" style="max-width:160px"></label>
+          <small>Only children with chores of their own today, not parents. Empty: from midnight. On iPhone a Live Activity ends after 8 hours, so start it when the kids get up, such as 6:30 AM.</small></div>
         <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
       </form></div>`;
   }
@@ -2349,6 +2386,12 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.historyMember !== undefined) {
+      this._historyFilter = { ...(this._historyFilter || { text: "" }), member: ev.target.value };
+      const list = this.shadowRoot.querySelector("[data-history-list]");
+      if (list) list.innerHTML = this._historyList();
+      return;
+    }
     if (ev.target.dataset.itemSkip !== undefined) {
       ev.target.closest("li")?.classList.toggle("skipped", ev.target.checked);
       return;
@@ -2404,6 +2447,12 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onInput(ev) {
+    if (ev.target.dataset.historyText !== undefined) {
+      this._historyFilter = { ...(this._historyFilter || { member: "" }), text: ev.target.value };
+      const list = this.shadowRoot.querySelector("[data-history-list]");
+      if (list) list.innerHTML = this._historyList();
+      return;
+    }
     if (ev.target.dataset.filter === undefined) return;
     // Narrow the entity list as a parent types, keeping what's picked.
     const select = ev.target.closest("form").querySelector('select[name="entity_id"]');
@@ -2429,7 +2478,7 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.dataset.phones !== undefined) {
       const v = this._formValues(form);
-      return this._call({ type: `${DOMAIN}/settings`, notify_targets: v.notify_targets || [], notify_done: !!v.notify_done, notify_rewards: !!v.notify_rewards, weekly_summary: !!v.weekly_summary }, "Saved.");
+      return this._call({ type: `${DOMAIN}/settings`, notify_targets: v.notify_targets || [], notify_done: !!v.notify_done, notify_rewards: !!v.notify_rewards, weekly_summary: !!v.weekly_summary, live_activity: !!v.live_activity, live_per_child: !!v.live_per_child, live_from: v.live_from || null }, "Saved.");
     }
     if (form.dataset.goalForm !== undefined) {
       const v = this._formValues(form);

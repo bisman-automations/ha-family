@@ -45,6 +45,7 @@ from .const import (
     TV_MGMT_DOMAIN,
     TV_MGMT_GRANT,
 )
+from .live_activity import ChoreActivity
 from .parents_notify import ParentNotices
 from .reminders import ChoreReminders
 from .routines import Routines
@@ -127,6 +128,7 @@ class FamilyManager:
         self.calendar = CalendarToday(self)
         self.reminders = ChoreReminders(self)
         self.routines = Routines(self)
+        self.live = ChoreActivity(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
@@ -194,6 +196,7 @@ class FamilyManager:
         async_dispatcher_send(self.hass, SIGNAL_CHANGED)
         # A chore done, back, renamed or removed: its to-do item follows.
         self.todo_sync.schedule()
+        self.live.schedule()
         if members:
             for listener in list(self._member_listeners):
                 listener()
@@ -205,6 +208,9 @@ class FamilyManager:
 
     def known_members(self, raw: Any) -> list[str]:
         return self._known_members(raw)
+
+    def own_today(self, member_id: str) -> tuple[int, int]:
+        return self._own_today(member_id)
 
     async def is_parent(self, member: dict[str, Any]) -> bool:
         return await self._is_parent(member)
@@ -284,6 +290,7 @@ class FamilyManager:
         whose time it is."""
         if self.reminders.wanted:
             self.reminders.check(dt_util.now())
+        self.live.tick(dt_util.now())
         if not any(
             c.get("days") or c.get("from_time") or c.get("until_time") or c.get("turns")
             for c in self.chores
@@ -294,6 +301,7 @@ class FamilyManager:
             self._seen_chores = seen
             async_dispatcher_send(self.hass, SIGNAL_CHANGED)
             self.todo_sync.schedule()
+            self.live.schedule()
 
     def linked_uids(self, entity_id: str) -> set[str]:
         """Items Family put on this list for its own chores."""
@@ -310,6 +318,7 @@ class FamilyManager:
 
     async def async_unload(self) -> None:
         self.calendar.stop()
+        self.live.stop()
         if self._unsub_todo:
             self._unsub_todo()
             self._unsub_todo = None
@@ -925,6 +934,8 @@ class FamilyManager:
             if tts is not None and not str(tts).startswith("tts."):
                 raise FamilyError("Pick a text-to-speech voice")
             self.settings["reminder_tts"] = tts
+        if "live_from" in raw:
+            self.settings["live_from"] = model.clean_time(raw["live_from"], "Show from")
         if "quick_points" in raw:
             self.settings["quick_points"] = model.quick_points(raw["quick_points"])
         if "hide_empty_sections" in raw:
@@ -939,7 +950,13 @@ class FamilyManager:
             if unknown:
                 raise FamilyError(f"There's no notify action called {unknown[0]}")
             self.settings["notify_targets"] = list(dict.fromkeys(targets))
-        for key in ("notify_done", "notify_rewards", "weekly_summary"):
+        for key in (
+            "notify_done",
+            "notify_rewards",
+            "weekly_summary",
+            "live_activity",
+            "live_per_child",
+        ):
             if key in raw:
                 self.settings[key] = bool(raw.get(key))
         if "allowance_day" in raw:
@@ -1929,6 +1946,9 @@ class FamilyManager:
                 "notify_done": bool(self.settings.get("notify_done")),
                 "notify_rewards": bool(self.settings.get("notify_rewards")),
                 "weekly_summary": bool(self.settings.get("weekly_summary")),
+                "live_activity": bool(self.settings.get("live_activity")),
+                "live_per_child": bool(self.settings.get("live_per_child")),
+                "live_from": self.settings.get("live_from"),
                 "allowance_day": int(
                     self.settings.get("allowance_day", model.DEFAULT_ALLOWANCE_DAY)
                 ),

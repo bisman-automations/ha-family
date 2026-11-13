@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-11-13
+
+### Added
+
+- **Live Activities of today's chores.** Under **To check** → **Phones**, pick one or both:
+  - **One for the family**: each child's progress on one line, such as "Alex 3/5 · Sam ✓". It says **All done today!** once everyone's finished.
+  - **One for each child**: their own progress bar, "2 of 4 done · 2 to go". It says **All done!** for a couple of minutes once they finish, then goes away. Tapping it opens the Family dashboard.
+
+  Set **Show from** to when the kids get up, such as 6:30 AM, so iPhone's 8-hour limit covers the day. They update as chores are done, count only children's own chores, and start fresh each day.
+- **Filter History.** On the Parents **History** tab, pick someone under **Who**, or search for a chore, reward or bonus.
+
+### Changed
+
+- **Smoother updates.** The points sensors now tell Home Assistant how many updates they can take at once, as Home Assistant recommends. Nothing changes in how they look or work.
+
 ## [1.21.0] - 2026-11-13
 
 ### Added
@@ -251,6 +266,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.22.0]: https://github.com/bisman-automations/ha-family/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/bisman-automations/ha-family/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/bisman-automations/ha-family/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/bisman-automations/ha-family/compare/v1.18.0...v1.19.0

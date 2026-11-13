@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-11-13
+
+### Added
+
+- **Hide empty sections.** On the Parents dashboard, under **Family** → **Family dashboard sections**, tick **Hide sections with nothing in them** to leave out sections that are empty, such as **Up for grabs** when nothing is up for grabs. **Notes** always shows, so a note can still be added.
+- **A chore kept on a to-do list shows the list's name** on its tile, like a chore from a to-do list does.
+
+### Fixed
+
+- **Each chore shows once.** A to-do item with the same name as a chore, or as another item on a list, no longer shows as a second tile. The Family dashboard shows chores first, then each to-do item once.
+- **Folded cards stay folded.** A folded card on the Parents dashboard (such as **Allowance and money** or **Today's calendar**) no longer opens again after a save. It stays folded until you tap its title.
+
 ## [1.17.0] - 2026-11-13
 
 ### Added
@@ -215,6 +227,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.18.0]: https://github.com/bisman-automations/ha-family/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/bisman-automations/ha-family/compare/v1.16.1...v1.17.0
 [1.16.1]: https://github.com/bisman-automations/ha-family/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/bisman-automations/ha-family/compare/v1.15.0...v1.16.0

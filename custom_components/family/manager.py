@@ -408,6 +408,20 @@ class FamilyManager:
                 _local_due((self.todo_links.get(c["id"]) or {}).get("due")), now
             )
         ]
+        # A dashboard chore kept on a to-do list shows that list, like a
+        # to-do chore does.
+        for chore in chores:
+            if chore.get("todo_list"):
+                state = self.hass.states.get(chore["todo_list"])
+                chore["on_list"] = state.name if state else chore["todo_list"]
+        # One tile per chore: a to-do item named like a dashboard chore, or
+        # like an item already listed, isn't shown again. Dashboard chores
+        # come first, then to-do items.
+        seen = {
+            model.item_key(c.get("name", ""))
+            for c in self.chores
+            if c.get("enabled", True)
+        }
         for todo in self.todo_lists:
             entity_id = todo["entity_id"]
             state = self.hass.states.get(entity_id)
@@ -426,6 +440,9 @@ class FamilyManager:
                     int(todo.get("points", 0)),
                     todo.get("item_points"),
                 )
+                if model.item_key(name) in seen:
+                    continue
+                seen.add(model.item_key(name))
                 chores.append(
                     {
                         "id": f"{TODO_PREFIX}{entity_id}:{item['uid']}",
@@ -814,6 +831,8 @@ class FamilyManager:
         if "streak_days" in raw:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
+        if "hide_empty_sections" in raw:
+            self.settings["hide_empty_sections"] = bool(raw["hide_empty_sections"])
         if "section_order" in raw:
             self.settings["section_order"] = model.section_order(raw["section_order"])
         if "notify_targets" in raw:
@@ -1783,6 +1802,7 @@ class FamilyManager:
             "undo_seconds": model.UNDO_SECONDS,
             # The Family dashboard's sections, in the order a parent set.
             "section_order": model.section_order(self.settings.get("section_order")),
+            "hide_empty_sections": bool(self.settings.get("hide_empty_sections")),
         }
         if is_admin:
             result["settings"] = {

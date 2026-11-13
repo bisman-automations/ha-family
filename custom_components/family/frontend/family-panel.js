@@ -916,7 +916,7 @@ class FamilyPanel extends HTMLElement {
             return `<div class="tile chore">
               ${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}
               <span class="label">${esc(c.name)}</span>
-              ${c.list && !own ? `<span class="sub">${esc(c.list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
+              ${(c.list || c.on_list) && !own ? `<span class="sub">${esc(c.list || c.on_list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               <span class="worth">+${pts(c.points)}</span>
               <button class="check" data-chore="${esc(c.id)}" aria-label="${esc(c.name)} is done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>`;
           })
@@ -976,17 +976,20 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
     const cash = member && d.money ? ` <span class="streak-line">${esc(money(member.points, d.money))}</span>` : "";
     // Each section by key, shown in the order a parent set.
+    // A parent can leave out sections with nothing in them. Notes stays: it
+    // holds the Add a note button.
+    const hide = !!d.hide_empty_sections;
     const sections = {
       going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
-      chores: member && (mine.length || own.total) ? this._section("chores", "My chores", mineBody, mine.length) : "",
-      grabs: grabs.length || !member ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
+      chores: member && (mine.length || (own.total && !hide)) ? this._section("chores", "My chores", mineBody, mine.length) : "",
+      grabs: grabs.length || (!member && !hide) ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
       notes: this._section("notes", "Notes", noteTiles, notes.length),
-      today: d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
+      today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
       meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
       done: done.length ? this._section("done", "Done today", doneTiles, done.length) : "",
-      rewards: this._section("rewards", "Rewards", rewardTiles, visibleRewards.length),
+      rewards: visibleRewards.length || !hide ? this._section("rewards", "Rewards", rewardTiles, visibleRewards.length) : "",
       home,
-      lately: this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`),
+      lately: feed.length || !hide ? this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`) : "",
     };
     return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>
       ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}
@@ -1822,15 +1825,24 @@ class FamilyPanel extends HTMLElement {
         <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button></div>`;
   }
 
-  // Every Parents card folds by its heading; which are folded is kept per
-  // screen (localStorage), by heading.
-  _foldCards() {
-    let closed = [];
-    try {
-      closed = JSON.parse(localStorage.getItem("family-parents-closed") || "[]");
-    } catch (err) {
-      closed = [];
+  // Every Parents card folds by its heading. Which are folded is kept per
+  // screen (localStorage, with a copy in memory for when that isn't
+  // available), and a folded card stays folded through every redraw until
+  // its heading is tapped.
+  _closedCards() {
+    if (!this._closed) {
+      try {
+        this._closed = JSON.parse(localStorage.getItem("family-parents-closed") || "[]");
+      } catch (err) {
+        this._closed = [];
+      }
+      if (!Array.isArray(this._closed)) this._closed = [];
     }
+    return this._closed;
+  }
+
+  _foldCards() {
+    const closed = this._closedCards();
     for (const card of this.shadowRoot.querySelectorAll("main .card")) {
       const head = card.querySelector(":scope > h2");
       if (!head) continue;
@@ -1838,24 +1850,22 @@ class FamilyPanel extends HTMLElement {
       head.dataset.fold = key;
       head.setAttribute("role", "button");
       head.setAttribute("tabindex", "0");
-      const isClosed = closed.includes(key) && !card.querySelector("form");
+      const isClosed = closed.includes(key);
       card.classList.toggle("folded", isClosed);
       head.setAttribute("aria-expanded", String(!isClosed));
     }
   }
 
-  _toggleFold(key) {
-    let closed = [];
-    try {
-      closed = JSON.parse(localStorage.getItem("family-parents-closed") || "[]");
-    } catch (err) {
-      closed = [];
-    }
-    closed = closed.includes(key) ? closed.filter((k) => k !== key) : [...closed, key];
+  _toggleFold(key, open = null) {
+    let closed = this._closedCards();
+    const isClosed = closed.includes(key);
+    if (open === true && !isClosed) return;
+    closed = isClosed ? closed.filter((k) => k !== key) : [...closed, key];
+    this._closed = closed;
     try {
       localStorage.setItem("family-parents-closed", JSON.stringify(closed));
     } catch (err) {
-      // Not kept on this screen: it still folds until the page is drawn again.
+      // Kept in memory: it stays folded until the page is opened again.
     }
     for (const head of this.shadowRoot.querySelectorAll("main .card > h2")) {
       if (head.dataset.fold !== key) continue;
@@ -1870,7 +1880,9 @@ class FamilyPanel extends HTMLElement {
     const order = sectionOrder(this._data.section_order);
     const names = Object.fromEntries(SECTIONS);
     return `<div class="card"><h2>Family dashboard sections</h2>
-      <p class="muted">The order the sections show in, on every screen. A section with nothing in it is left out.</p>
+      <p class="muted">The order the sections show in, on every screen.</p>
+      <label class="check"><input type="checkbox" data-hide-empty ${this._data.hide_empty_sections ? "checked" : ""} ${this._busy ? "disabled" : ""}> Hide sections with nothing in them</label>
+      <p class="muted">For example Up for grabs when there's nothing up for grabs, or Today on a day with no events. Notes always shows, so a note can be added.</p>
       <ul class="rows">${order
         .map((key, i) => `<li><span class="grow">${esc(names[key])}</span>
           <button class="btn" data-section-move="${key}" data-offset="-1" ${i === 0 || this._busy ? "disabled" : ""} aria-label="Move ${esc(names[key])} up">↑</button>
@@ -1973,6 +1985,9 @@ class FamilyPanel extends HTMLElement {
       this._toggleFold(fold.dataset.fold);
       return;
     }
+    // A button in a folded card's heading (Add, say) opens the card first,
+    // so what it shows can be seen.
+    if (fold && fold.parentElement?.classList.contains("folded")) this._toggleFold(fold.dataset.fold, true);
     const el = ev.target.closest("button, .sheet-bg");
     if (!el) return;
     const ds = el.dataset;
@@ -2096,6 +2111,10 @@ class FamilyPanel extends HTMLElement {
       const name = ev.target.closest("form").querySelector('input[name="name"]');
       const person = this._choices?.people.find((p) => p.entity_id === ev.target.value);
       if (name && !name.value.trim() && person) name.value = person.name.split(" ")[0];
+      return;
+    }
+    if (ev.target.dataset.hideEmpty !== undefined) {
+      this._call({ type: `${DOMAIN}/settings`, hide_empty_sections: ev.target.checked }, "Saved.");
       return;
     }
     if (ev.target.dataset.autoCheck !== undefined) {

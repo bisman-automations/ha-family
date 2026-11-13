@@ -290,3 +290,40 @@ async def test_section_order(hass: HomeAssistant, client):
         ]
     )
     assert (await client.ok("state"))["section_order"] == order
+
+
+async def test_one_tile_per_chore(hass: HomeAssistant, client):
+    from tests.test_family import FakeTodoList, _sync
+
+    alex, _sam = await _family(client)
+    todo = FakeTodoList(hass, "todo.house")
+    for uid, name in [
+        ("a", "Set table"),
+        ("b", "Wipe counters"),
+        ("c", "wipe  Counters"),
+        ("d", "Feed the dog"),
+    ]:
+        todo.items.append({"uid": uid, "summary": name, "status": "needs_action"})
+    await client.ok(
+        "save", collection="todo_lists", item={"entity_id": "todo.house", "points": 1}
+    )
+    await _chore(client, name="Set Table", members=[alex])
+    await _chore(client, name="Feed the cat", members=[alex], todo_list="todo.house")
+    await _sync(hass)
+    chores = (await client.ok("state"))["chores"]
+    names = [c["name"] for c in chores]
+    # The dashboard chore first; its namesake on the list and the list's
+    # repeated item aren't shown again.
+    assert names.index("Set Table") < names.index("Wipe counters")
+    assert "Set table" not in names
+    assert names.count("Wipe counters") + names.count("wipe  Counters") == 1
+    assert "Feed the dog" in names
+    # A dashboard chore kept on a list shows that list's name.
+    cat = next(c for c in chores if c["name"] == "Feed the cat")
+    assert cat["on_list"] == hass.states.get("todo.house").name
+
+
+async def test_hide_empty_sections(hass: HomeAssistant, client):
+    assert (await client.ok("state"))["hide_empty_sections"] is False
+    await client.ok("settings", hide_empty_sections=True)
+    assert (await client.ok("state"))["hide_empty_sections"] is True

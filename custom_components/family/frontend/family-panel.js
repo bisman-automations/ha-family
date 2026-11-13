@@ -208,6 +208,12 @@ const STYLES = `
     box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(0,0,0,.12));
   }
   .tile:disabled { opacity: .45; cursor: default; }
+  .tile.chore { position: relative; cursor: default; padding-right: 64px; }
+  .tile.chore .check { position: absolute; right: 12px; bottom: 12px; width: 46px; height: 46px; border-radius: 50%; border: 3px solid var(--primary-color); background: var(--card-background-color); cursor: pointer; display: grid; place-items: center; padding: 0; }
+  .tile.chore .check svg { width: 28px; height: 28px; fill: none; stroke: var(--primary-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: .25; }
+  .tile.chore .check:hover svg, .tile.chore .check:focus-visible svg { opacity: 1; }
+  .tile.chore .check:active { background: var(--primary-color); }
+  .tile.chore .check:active svg { stroke: var(--text-primary-color, #fff); opacity: 1; }
   .tile .emoji { font-size: 34px; line-height: 1; }
   .tile .label { font-size: 18px; font-weight: 500; }
   .tile .worth { font-size: 16px; font-weight: 600; color: var(--primary-color); margin-top: auto; }
@@ -876,11 +882,14 @@ class FamilyPanel extends HTMLElement {
             // say nothing new; shared chores keep their list's name.
             const own = member && c.members?.length === 1 && c.members[0] === member.id;
             const who = !member && c.members?.length ? `<span class="who">${c.members.map((id) => this._memberById(id)).filter(Boolean).map((m) => this._avatar(m, true)).join("")}</span>` : "";
-            return `<button class="tile" data-chore="${esc(c.id)}">
+            // Only the round check box ticks it off, so a stray tap on the
+            // tile does nothing.
+            return `<div class="tile chore">
               ${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}
               <span class="label">${esc(c.name)}</span>
               ${c.list && !own ? `<span class="sub">${esc(c.list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
-              <span class="worth">+${pts(c.points)}</span></button>`;
+              <span class="worth">+${pts(c.points)}</span>
+              <button class="check" data-chore="${esc(c.id)}" aria-label="${esc(c.name)} is done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>`;
           })
           .join("")}</div>`;
     const own = member?.own_today || {};

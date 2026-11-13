@@ -912,3 +912,53 @@ def section_order(order: Iterable[str] | None) -> list[str]:
     """A section order: known sections once each, any missing at the end."""
     seen = [key for key in dict.fromkeys(order or []) if key in SECTIONS]
     return seen + [key for key in SECTIONS if key not in seen]
+
+
+# ---- family goal --------------------------------------------------------------------
+# One target the whole family works toward together ("Pizza night at 200
+# points"). It counts points earned from chores and their bonuses since the
+# goal started; nothing is spent, so everyone keeps their own points.
+
+GOAL_KINDS = (KIND_CHORE, KIND_BONUS)
+
+
+def goal_progress(entries: list[dict[str, Any]], since: str | None) -> int:
+    """Points earned together since ``since`` (an ISO time)."""
+    if not since:
+        return 0
+    start = datetime.fromisoformat(since)
+    total = 0
+    for entry in entries:
+        if entry.get("kind") not in GOAL_KINDS:
+            continue
+        if entry.get("review") == REVIEW_REJECTED:
+            continue
+        if datetime.fromisoformat(entry["at"]) < start:
+            continue
+        total += max(0, int(entry.get("points", 0)))
+    return total
+
+
+def clean_goal(raw: Any) -> dict[str, Any] | None:
+    """A family goal as saved: a name and a target, or None for no goal."""
+    if not raw:
+        return None
+    name = clean_name(raw.get("name"), "The goal's name")
+    target = clean_points(raw.get("target") or 0, "The goal")
+    if target < 1:
+        raise ValueError("The goal must be at least 1 point")
+    return {
+        "name": name,
+        "emoji": str(raw.get("emoji") or "").strip()[:8] or None,
+        "target": target,
+    }
+
+
+# ---- speaker reminders --------------------------------------------------------------
+
+
+def reminder_text(chore: str, names: list[str]) -> str:
+    """What a speaker says for a chore still to do."""
+    if not names:
+        return f"Reminder: {chore}."
+    return f"Reminder for {names_text(names)}: {chore}."

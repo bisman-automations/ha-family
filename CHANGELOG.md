@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-11-13
+
+### Added
+
+- **Family goal.** Set something the whole family works toward together, such as Pizza night at 200 points, at the top of **Rewards** on the Parents dashboard. Points from everyone's chores count toward it, and nobody spends any. The Family dashboard shows how far everyone has got under **Going for**, on every page. When it's reached, the `family_goal_reached` event fires, for an automation if you like.
+- **Speaker reminders.** Pick a voice under **Family** → **Speaker reminders**. Then, on a chore, set a time and speakers under **Say it on a speaker**. At that time the speakers say who still has it to do, such as "Reminder for Alex and Sam: Set the table." Nothing is said once it's done.
+
+### Fixed
+
+- **Turn settings stay hidden** on the chore form until **They take turns** is ticked.
+
 ## [1.19.0] - 2026-11-13
 
 ### Added
@@ -234,6 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.20.0]: https://github.com/bisman-automations/ha-family/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/bisman-automations/ha-family/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/bisman-automations/ha-family/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/bisman-automations/ha-family/compare/v1.16.1...v1.17.0

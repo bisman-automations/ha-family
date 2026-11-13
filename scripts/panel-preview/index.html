@@ -109,7 +109,7 @@ const ownToday = (id) => {
   return { total: own.length, left, done: own.length > 0 && left === 0 };
 };
 window.calls = [];
-let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_parent_phone"], notify_done: true, notify_rewards: true, weekly_summary: false, allowance_day: 6, allowance_hour: 8, point_value: 0.1, currency: "$", quick_points: [{ label: "Kind to a sibling", emoji: "💛", points: 2 }, { label: "Helped without asking", emoji: "🙌", points: 3 }, { label: "Not listening", emoji: "🙉", points: -1 }], calendars: [{ entity_id: "calendar.family", member: null }, { entity_id: "calendar.alex_school", member: "a" }] };
+let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_parent_phone"], notify_done: true, notify_rewards: true, weekly_summary: false, allowance_day: 6, allowance_hour: 8, point_value: 0.1, currency: "$", family_goal: { name: "Pizza night", emoji: "🍕", target: 60, since: new Date(Date.now() - 2 * 86400000).toISOString() }, reminder_tts: "tts.piper", quick_points: [{ label: "Kind to a sibling", emoji: "💛", points: 2 }, { label: "Helped without asking", emoji: "🙌", points: 3 }, { label: "Not listening", emoji: "🙉", points: -1 }], calendars: [{ entity_id: "calendar.family", member: null }, { entity_id: "calendar.alex_school", member: "a" }] };
 members[0].allowance = 10; members[1].allowance = 5;
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const dayIso = (n) => iso(new Date(now + n * 86400000));
@@ -141,10 +141,17 @@ function splitPoints(cost, balances) {
   return shares;
 }
 const isToday = (iso) => new Date(iso).toDateString() === new Date().toDateString();
+// Like manager.family_goal: points from chores and bonuses since the goal began.
+const familyGoal = () => {
+  const g = settings.family_goal;
+  if (!g) return null;
+  const progress = entries.filter((e) => (e.kind === "chore" || e.kind === "bonus") && e.review !== "rejected" && e.at >= g.since).reduce((n, e) => n + Math.max(0, e.points || 0), 0);
+  return { name: g.name, emoji: g.emoji, target: g.target, progress: Math.min(progress, g.target), reached: progress >= g.target, since: g.since };
+};
 const SECTION_KEYS = ["going", "chores", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
 const sectionList = (order) => { const out = (order || []).filter((k, i, all) => SECTION_KEYS.includes(k) && all.indexOf(k) === i); return [...out, ...SECTION_KEYS.filter((k) => !out.includes(k))]; };
 const state = () => ({
-  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -168,7 +175,7 @@ window.hass = {
     if (msg.type === "lovelace/config") { if (!window.savedDashboard) throw { code: "config_not_found", message: "No config found." }; return structuredClone(window.savedDashboard.config); }
     const t = msg.type.replace("family/", "");
     if (t === "state") return state();
-    if (t === "choices") return { people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
+    if (t === "choices") return { voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
     if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: params.get("mode") === "parents", by: null }; notes.push(n); return { note: n }; }
     if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && params.get("mode") !== "parents") throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
     if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
@@ -207,6 +214,17 @@ window.hass = {
     if (t === "settings") {
       if ("auto_check" in msg) settings.auto_check = msg.auto_check || null;
       if ("penalty" in msg) settings.penalty = msg.penalty;
+      if ("reminder_tts" in msg) settings.reminder_tts = msg.reminder_tts || null;
+      if ("family_goal" in msg) {
+        const g = msg.family_goal;
+        if (!g) delete settings.family_goal;
+        else {
+          if (!g.name?.trim()) throw { message: "Give the goal's name" };
+          if (!(g.target >= 1)) throw { message: "The goal must be at least 1 point" };
+          const old = settings.family_goal;
+          settings.family_goal = { name: g.name.trim(), emoji: g.emoji || null, target: g.target, since: old && !msg.restart_goal ? old.since : new Date().toISOString() };
+        }
+      }
       for (const key of ["section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
       if ("point_value" in msg) { if (msg.point_value !== null && !(msg.point_value > 0 && msg.point_value <= 100)) throw { message: "What a point is worth must be above 0 and at most 100" }; settings.point_value = msg.point_value; }
       if ("bonus_all_done" in msg) bonus = { all_done: msg.bonus_all_done, streak_days: msg.streak_days, streak: msg.streak_bonus };

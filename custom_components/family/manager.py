@@ -33,6 +33,7 @@ from .const import (
     EVENT_BONUS,
     EVENT_CHORE_DONE,
     EVENT_CHORE_REVIEWED,
+    EVENT_GOAL_REACHED,
     EVENT_REWARD_REDEEMED,
     KEEP_HISTORY_DAYS,
     MEDIA_MGMT_DOMAIN,
@@ -45,6 +46,7 @@ from .const import (
     TV_MGMT_GRANT,
 )
 from .parents_notify import ParentNotices
+from .reminders import ChoreReminders
 from .todo_sync import TodoSync
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,6 +124,7 @@ class FamilyManager:
         self.meals: dict[str, dict[str, str]] = {}
         self.notes: list[dict[str, Any]] = []
         self.calendar = CalendarToday(self)
+        self.reminders = ChoreReminders(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
@@ -182,6 +185,7 @@ class FamilyManager:
 
     @callback
     def _changed(self, members: bool = False) -> None:
+        self._check_goal()
         self._store.async_delay_save(self._data, SAVE_DELAY)
         async_dispatcher_send(self.hass, SIGNAL_CHANGED)
         # A chore done, back, renamed or removed: its to-do item follows.
@@ -212,10 +216,59 @@ class FamilyManager:
             return "*" not in done
         return any(m not in done for m in members)
 
+    def still_to_do(self, chore: dict[str, Any], now) -> list[str] | None:
+        """Who still has a dashboard chore to do today, whatever its hours.
+
+        None when it's done (or not one of its days); an empty list when
+        anyone can do it and nobody has yet.
+        """
+        if not chore.get("enabled", True) or not model.on_day(chore, now.date()):
+            return None
+        chore = self._effective(chore, now)
+        done = self._done(chore, now)
+        can = [m["id"] for m in self.members if model.can_do(m["id"], chore, done)]
+        if not can:
+            return None
+        return can if chore.get("members") else []
+
+    # ---- family goal ----------------------------------------------------------
+
+    def family_goal(self) -> dict[str, Any] | None:
+        """The family goal with how far along it is, or None."""
+        goal = self.settings.get("family_goal")
+        if not goal:
+            return None
+        progress = model.goal_progress(self.entries, goal.get("since"))
+        return {
+            "name": goal["name"],
+            "emoji": goal.get("emoji"),
+            "target": goal["target"],
+            "progress": min(progress, goal["target"]),
+            "reached": bool(goal.get("reached_at")) or progress >= goal["target"],
+            "since": goal.get("since"),
+        }
+
+    @callback
+    def _check_goal(self) -> None:
+        """The family goal just reached: say so once (an event to automate on)."""
+        goal = self.settings.get("family_goal")
+        if not goal or goal.get("reached_at"):
+            return
+        if model.goal_progress(self.entries, goal.get("since")) < goal["target"]:
+            return
+        goal["reached_at"] = _now_iso()
+        self.hass.bus.async_fire(
+            EVENT_GOAL_REACHED,
+            {"name": goal["name"], "target": goal["target"]},
+        )
+
     @callback
     def async_tick(self, _now: Any = None) -> None:
         """Every minute: tell the dashboards when a chore's hours start or end,
-        or a new day or week brings someone else's turn."""
+        or a new day or week brings someone else's turn. Says chore reminders
+        whose time it is."""
+        if self.reminders.wanted:
+            self.reminders.check(dt_util.now())
         if not any(
             c.get("days") or c.get("from_time") or c.get("until_time") or c.get("turns")
             for c in self.chores
@@ -813,6 +866,23 @@ class FamilyManager:
         )
 
     @callback
+    def _save_goal(self, raw: Any, restart: bool) -> None:
+        """Set, change or remove the family goal. A new goal, or starting
+        over, counts from now; changing the name or target keeps going."""
+        goal = model.clean_goal(raw)
+        if goal is None:
+            self.settings.pop("family_goal", None)
+            return
+        old = self.settings.get("family_goal") or {}
+        if old and not restart:
+            goal["since"] = old.get("since") or _now_iso()
+            # A bigger target makes a reached goal open again.
+            if old.get("reached_at") and goal["target"] <= old["target"]:
+                goal["reached_at"] = old["reached_at"]
+        else:
+            goal["since"] = _now_iso()
+        self.settings["family_goal"] = goal
+
     def save_settings(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Change the settings that were sent; the rest stay."""
         if "auto_check" in raw:
@@ -833,6 +903,13 @@ class FamilyManager:
         if "streak_days" in raw:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
+        if "family_goal" in raw:
+            self._save_goal(raw["family_goal"], bool(raw.get("restart_goal")))
+        if "reminder_tts" in raw:
+            tts = raw.get("reminder_tts") or None
+            if tts is not None and not str(tts).startswith("tts."):
+                raise FamilyError("Pick a text-to-speech voice")
+            self.settings["reminder_tts"] = tts
         if "quick_points" in raw:
             self.settings["quick_points"] = model.quick_points(raw["quick_points"])
         if "hide_empty_sections" in raw:
@@ -1388,6 +1465,13 @@ class FamilyManager:
             "turn_every": turn_every if turns else None,
             "turn_first": turn_first if turns else None,
             "turn_from": _now_iso() if turns else None,
+            # Said on these speakers at this time while it's still to do.
+            "remind_time": model.clean_time(raw.get("remind_time"), "Remind at"),
+            "remind_speakers": [
+                str(e)
+                for e in raw.get("remind_speakers") or []
+                if str(e).startswith("media_player.")
+            ],
         }
         self._upsert(self.chores, chore)
         self._changed()
@@ -1817,6 +1901,7 @@ class FamilyManager:
             # The Family dashboard's sections, in the order a parent set.
             "section_order": model.section_order(self.settings.get("section_order")),
             "hide_empty_sections": bool(self.settings.get("hide_empty_sections")),
+            "family_goal": self.family_goal(),
         }
         if is_admin:
             result["settings"] = {
@@ -1836,6 +1921,7 @@ class FamilyManager:
                 "currency": self.settings.get("currency") or "",
                 "calendars": list(self.settings.get("calendars") or []),
                 "quick_points": list(self.settings.get("quick_points") or []),
+                "reminder_tts": self.settings.get("reminder_tts"),
             }
             result["all_chores"] = self.chores
             result["todo_lists"] = [

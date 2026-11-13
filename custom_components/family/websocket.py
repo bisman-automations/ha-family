@@ -362,6 +362,16 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("currency"): vol.Any(None, str),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
+        vol.Optional("family_goal"): vol.Any(
+            None,
+            {
+                vol.Required("name"): str,
+                vol.Optional("emoji"): vol.Any(None, str),
+                vol.Required("target"): vol.Coerce(int),
+            },
+        ),
+        vol.Optional("restart_goal"): bool,
+        vol.Optional("reminder_tts"): vol.Any(None, str),
         vol.Optional("quick_points"): [
             {
                 vol.Required("label"): str,
@@ -433,6 +443,14 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         {"entity_id": s.entity_id, "name": s.name}
         for s in sorted(hass.states.async_all("calendar"), key=lambda s: s.name)
     ]
+    voices = [
+        {"entity_id": s.entity_id, "name": s.name}
+        for s in sorted(hass.states.async_all("tts"), key=lambda s: s.name)
+    ]
+    players = [
+        {"entity_id": s.entity_id, "name": s.name}
+        for s in sorted(hass.states.async_all("media_player"), key=lambda s: s.name)
+    ]
     entities = [
         {"entity_id": s.entity_id, "name": s.name, "domain": s.domain}
         for s in sorted(
@@ -448,4 +466,6 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         "notify": notify,
         "entities": entities,
         "calendars": calendars,
+        "voices": voices,
+        "players": players,
     }

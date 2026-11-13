@@ -392,6 +392,8 @@ const STYLES = `
   .card.folded > :not(h2) { display: none; }
   .items li.skipped .item-name { opacity: 0.5; text-decoration: line-through; }
   .chip.leave-out { color: var(--error-color, #db4437); }
+  [hidden] { display: none !important; }
+  .goal-status .bar { display: block; margin: 6px 0 4px; }
   .quick-buttons { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   details.left-out { margin-top: 8px; }
   details.left-out > summary { cursor: pointer; color: var(--secondary-text-color); padding: 6px 0; }
@@ -963,7 +965,7 @@ class FamilyPanel extends HTMLElement {
           <span class="worth">+${pts(e.points)}</span></div>`;
       })
       .join("")}</div>`;
-    const goingFor = member ? this._goingFor(member) : [];
+    const goingFor = [this._familyGoalTile(), ...(member ? this._goingFor(member) : [])].filter(Boolean);
     const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
     // "Add a note" comes first, so it's never folded away with the rest.
     const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
@@ -1003,6 +1005,17 @@ class FamilyPanel extends HTMLElement {
 
   // What someone's working toward: today's own chores, their streak, and
   // the reward they're saving for.
+  // The goal the whole family works toward together.
+  _familyGoalTile() {
+    const g = this._data.family_goal;
+    if (!g) return "";
+    const left = Math.max(0, g.target - g.progress);
+    return `<div class="tile going-tile${g.reached ? " won" : ""}"><span class="emoji">${esc(g.emoji || (g.reached ? "🎉" : "🏆"))}</span>
+      <span class="label">${g.reached ? `We did it: ${esc(g.name)}!` : esc(g.name)}</span>
+      ${this._bar(g.progress, g.target)}
+      <span class="sub">${g.reached ? "Everyone's chores got us there." : `Together: ${g.progress} of ${g.target} points · ${left} to go`}</span></div>`;
+  }
+
   _goingFor(member) {
     const b = this._data.bonus || {};
     const own = member.own_today || {};
@@ -1563,6 +1576,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Until</span><input type="time" name="until_time" value="${esc(c.until_time || "")}"></label>
         <small style="align-self:end">Empty: all day. For a morning or bedtime chore, such as 6:00 AM to 9:00 AM.</small>
       </div>
+      ${this._remindField(c)}
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
       ${this._grabField(c.grab)}
       <label class="check"><input type="checkbox" name="turns" data-turns ${c.turns ? "checked" : ""}> They take turns (tick two or more people above)</label>
@@ -1614,6 +1628,20 @@ class FamilyPanel extends HTMLElement {
     </form>`;
   }
 
+  // Say a chore on speakers at a time while someone still has it to do.
+  _remindField(c) {
+    const players = this._choices?.players || [];
+    const voice = this._data.settings?.reminder_tts;
+    const picked = new Set(c.remind_speakers || []);
+    const boxes = players.length
+      ? `<div class="inline">${players.map((p) => `<label class="check"><input type="checkbox" name="remind_speakers" value="${esc(p.entity_id)}" ${picked.has(p.entity_id) ? "checked" : ""}> ${esc(p.name)}</label>`).join("")}</div>`
+      : `<small>No speakers in Home Assistant yet.</small>`;
+    return `<div class="field"><span>Say it on a speaker</span>
+      <label class="field"><span>At</span><input type="time" name="remind_time" value="${esc(c.remind_time || "")}" style="max-width:160px"></label>
+      ${boxes}
+      <small>${voice ? "At this time, on its days, the speakers say who still has it to do. Nothing is said once it's done." : "Pick a voice first under <b>Family</b> → <b>Speaker reminders</b>."}</small></div>`;
+  }
+
   _itemPoints(list) {
     const items = list.items || [];
     const row = (i) => `<li class="${i.skip ? "skipped" : ""}"><input class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
@@ -1632,6 +1660,28 @@ class FamilyPanel extends HTMLElement {
       <small>Give an item an emoji for the Family dashboard. Tick <b>Leave out</b> for an item that isn't a chore: it stays on the list but never shows on the Family dashboard. Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
   }
 
+  _familyGoalCard() {
+    const g = this._data.family_goal;
+    const editing = this._edit?.collection === "family_goal";
+    const status = g
+      ? `<div class="rows goal-status"><span class="grow">${esc(g.emoji || "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
+          <small>${g.reached ? "Reached! Hand it out, then start a new one." : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span></div>`
+      : `<p class="empty">No family goal right now.</p>`;
+    const form = editing
+      ? `<form class="edit" data-goal-form>
+          <div class="inline">
+            <label class="field"><span>Emoji</span><input name="emoji" maxlength="8" value="${esc(g?.emoji || "")}" placeholder="🍕" style="width:70px"></label>
+            <label class="field grow"><span>What it's for</span><input name="name" maxlength="60" required value="${esc(g?.name || "")}" placeholder="Pizza night"></label>
+            <label class="field"><span>Points together</span><input type="number" name="target" min="1" max="10000" required value="${esc(g?.target || "")}" placeholder="200" style="width:110px"></label>
+          </div>
+          ${g ? `<label class="check"><input type="checkbox" name="restart"> Start counting again from now</label>` : ""}
+          <div class="form-actions"><button class="btn primary" type="submit">Save goal</button><button class="btn" type="button" data-cancel>Cancel</button></div></form>`
+      : `<div class="form-actions"><button class="btn primary" data-new="family_goal">${g ? (g.reached ? "Start a new goal" : "Change the goal") : "Set a family goal"}</button>${g ? `<button class="btn bad" data-goal-remove>Remove</button>` : ""}</div>`;
+    return `<div class="card"><h2>Family goal</h2>
+      <p class="muted">Something the whole family works toward together. Points from everyone's chores count toward it; nobody spends any.</p>
+      ${status}${form}</div>`;
+  }
+
   _renderRewards() {
     const d = this._data;
     const edit = this._edit;
@@ -1645,7 +1695,7 @@ class FamilyPanel extends HTMLElement {
       : `<p class="empty">No rewards yet.</p>`;
     const form = edit?.collection === "rewards" ? this._rewardForm(edit.item) : `<button class="btn primary" data-new="rewards">Add a reward</button>`;
     const b = d.bonus || {};
-    return `<div class="card"><h2>Rewards</h2>${rows}${form}</div>
+    return `${this._familyGoalCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
       <div class="card"><h2>Bonus points</h2>
         <form class="edit" data-bonus>
           <label class="field"><span>All of their own chores done for the day</span>
@@ -1837,6 +1887,17 @@ class FamilyPanel extends HTMLElement {
         ${calendars.length ? `<div class="form-actions"><button class="btn primary" type="submit">Save</button></div>` : ""}</form></div>`;
   }
 
+  _voiceCard() {
+    const voices = this._choices?.voices || [];
+    const current = this._data.settings?.reminder_tts || "";
+    const body = voices.length
+      ? `<form class="edit" data-voice-form><div class="inline"><label class="field"><span>Voice</span><select name="reminder_tts"><option value="">Off</option>${voices.map((v) => `<option value="${esc(v.entity_id)}" ${current === v.entity_id ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select></label>
+          <button class="btn" type="submit" style="align-self:end">Save</button></div></form>`
+      : `<p class="empty">No text-to-speech in Home Assistant yet. Add one, such as Google Translate text-to-speech or Piper.</p>`;
+    return `<div class="card"><h2>Speaker reminders</h2>
+      <p class="muted">A chore can be said out loud on a speaker at a set time while someone still has it to do. Pick the voice here, then set the time and speakers on each chore.</p>${body}</div>`;
+  }
+
   _renderMembers() {
     const d = this._data;
     const edit = this._edit;
@@ -1858,6 +1919,7 @@ class FamilyPanel extends HTMLElement {
       ${rows}${form}</div>
       ${this._allowanceCard()}
       ${this._calendarCard()}
+      ${this._voiceCard()}
       ${this._sectionsCard()}
       <div class="card"><h2>Shared screen</h2>
         <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>.</p>
@@ -2103,6 +2165,8 @@ class FamilyPanel extends HTMLElement {
       this._tab = ds.tab;
       this._edit = null;
       this._render();
+    } else if ("goalRemove" in ds) {
+      this._call({ type: `${DOMAIN}/settings`, family_goal: null }, "Goal removed.");
     } else if (ds.quick !== undefined && ds.memberId) {
       const button = (this._data.settings?.quick_points || [])[Number(ds.quick)];
       const m = this._memberById(ds.memberId);
@@ -2203,7 +2267,7 @@ class FamilyPanel extends HTMLElement {
     const data = new FormData(form);
     const out = {};
     for (const [key, value] of data.entries()) {
-      if (key === "members" || key === "days" || key === "notify_targets") (out[key] ||= []).push(value);
+      if (key === "members" || key === "days" || key === "notify_targets" || key === "remind_speakers") (out[key] ||= []).push(value);
       else out[key] = value;
     }
     return out;
@@ -2219,6 +2283,20 @@ class FamilyPanel extends HTMLElement {
     if (form.dataset.phones !== undefined) {
       const v = this._formValues(form);
       return this._call({ type: `${DOMAIN}/settings`, notify_targets: v.notify_targets || [], notify_done: !!v.notify_done, notify_rewards: !!v.notify_rewards, weekly_summary: !!v.weekly_summary }, "Saved.");
+    }
+    if (form.dataset.goalForm !== undefined) {
+      const v = this._formValues(form);
+      const reached = this._data.family_goal?.reached;
+      const ok = await this._call({ type: `${DOMAIN}/settings`, family_goal: { name: v.name, emoji: v.emoji || null, target: Math.round(Number(v.target) || 0) }, restart_goal: !!v.restart || !!reached }, "Saved.");
+      if (ok) {
+        this._edit = null;
+        this._render();
+      }
+      return;
+    }
+    if (form.dataset.voiceForm !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/settings`, reminder_tts: v.reminder_tts || null }, "Saved.");
     }
     if (form.dataset.quickForm !== undefined) {
       const quick_points = [...form.querySelectorAll("li")]
@@ -2274,7 +2352,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
+      item = { remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
       // All ticked: anyone, including people added later. A shorter list:
       // only those people. Nobody ticked: the reward is unavailable.

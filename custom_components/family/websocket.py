@@ -360,6 +360,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("allowance_hour"): vol.All(int, vol.Range(min=0, max=23)),
         vol.Optional("point_value"): vol.Any(None, vol.Coerce(float)),
         vol.Optional("currency"): vol.Any(None, str),
+        vol.Optional("section_order"): [str],
         vol.Optional("calendars"): [
             {vol.Required("entity_id"): str, vol.Optional("member"): vol.Any(None, str)}
         ],

@@ -52,6 +52,19 @@ REWARD_CUSTOM = "custom"
 REWARD_KINDS = (REWARD_TV_TIME, REWARD_MUSIC_TIME, REWARD_CUSTOM)
 GIVEN_PENDING = "to_give"  # a custom reward a parent still has to hand out
 GIVEN_DONE = "given"
+# The Family dashboard's sections, in their usual order.
+SECTIONS = (
+    "going",
+    "chores",
+    "grabs",
+    "notes",
+    "today",
+    "meals",
+    "done",
+    "rewards",
+    "home",
+    "lately",
+)
 # A reward bought together: the points are held until a parent says yes.
 GIVEN_APPROVAL = "to_approve"
 
@@ -867,3 +880,9 @@ def todo_due(due: date | datetime | None, now: datetime) -> bool:
     if isinstance(due, datetime):
         return due <= now
     return due <= now.date()
+
+
+def section_order(order: Iterable[str] | None) -> list[str]:
+    """A section order: known sections once each, any missing at the end."""
+    seen = [key for key in dict.fromkeys(order or []) if key in SECTIONS]
+    return seen + [key for key in SECTIONS if key not in seen]

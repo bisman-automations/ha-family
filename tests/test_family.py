@@ -243,6 +243,7 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
         "rated": False,
         "unrated": 3,
         "members": [],
+        "emoji": None,
     }
     await client.ok(
         "save",
@@ -283,9 +284,14 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
             "points": 2,
             "members": [alex],
             "item_members": {"Take out the trash": [sam]},
+            "item_emojis": {"Feed the dog": "🐶"},
         },
     )
     state = await client.ok("state")
+    assert {c["name"]: c["emoji"] for c in state["chores"]} == {
+        "Feed the dog": "🐶",
+        "take out  the TRASH": None,
+    }
     who = {c["name"]: c["members"] for c in state["chores"]}
     assert who == {"Feed the dog": [alex], "take out  the TRASH": [sam]}
     rows = {i["name"]: i["members"] for i in state["todo_lists"][0]["items"]}

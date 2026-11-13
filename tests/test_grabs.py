@@ -222,3 +222,71 @@ async def test_a_parents_chores_need_no_checking(
     await client.ok("complete", member_id=kid, chore_id=vitamins["id"])
     to_check = (await client.ok("state"))["to_check"]
     assert [e["member"] for e in to_check] == [kid]
+
+
+async def test_a_chore_uses_the_item_already_on_its_list(hass: HomeAssistant, client):
+    from tests.test_family import FakeTodoList, _sync
+
+    alex, _sam = await _family(client)
+    todo = FakeTodoList(hass, "todo.house")
+    tomorrow = (dt_util.now().date() + timedelta(days=1)).isoformat()
+    todo.items.append(
+        {
+            "uid": "mine",
+            "summary": "Vacuum all carpet",
+            "status": "needs_action",
+            "due": tomorrow,
+        }
+    )
+    chore = await _chore(
+        client,
+        name="Vacuum All Carpet",
+        members=[alex],
+        todo_list="todo.house",
+        due_only=True,
+    )
+    await _sync(hass)
+    # The item that was there is used, not a second one.
+    assert len(todo.items) == 1
+    names = lambda state: [c["name"] for c in state["chores"]]  # noqa: E731
+    # Due tomorrow: not shown yet.
+    assert "Vacuum All Carpet" not in names(await client.ok("state"))
+
+    # Due today on the list: it shows once the list is read again.
+    todo.items[0]["due"] = dt_util.now().date().isoformat()
+    hass.config_entries.async_entries("family")[0].runtime_data.todo_sync.schedule()
+    await _sync(hass)
+    assert "Vacuum All Carpet" in names(await client.ok("state"))
+
+    await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await _sync(hass)
+    assert todo.items[0]["status"] == "completed"
+
+    # The chore goes: the item was there before, so it stays on the list.
+    await client.ok("delete", collection="chores", item_id=chore["id"])
+    await _sync(hass)
+    assert [i["uid"] for i in todo.items] == ["mine"]
+
+
+async def test_section_order(hass: HomeAssistant, client):
+    settings = await client.ok(
+        "settings", section_order=["lately", "notes", "lately", "nope"]
+    )
+    order = settings["settings"]["section_order"]
+    # Known sections once each, the rest after them in the usual order.
+    assert order[:2] == ["lately", "notes"]
+    assert sorted(order) == sorted(
+        [
+            "going",
+            "chores",
+            "grabs",
+            "notes",
+            "today",
+            "meals",
+            "done",
+            "rewards",
+            "home",
+            "lately",
+        ]
+    )
+    assert (await client.ok("state"))["section_order"] == order

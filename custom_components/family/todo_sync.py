@@ -12,7 +12,11 @@ The items Family made are remembered in ``FamilyManager.todo_links``
 - an item that was deleted on the list is added again the next time the
   chore comes back;
 - items Family made never count as chores from that list as well
-  (``FamilyManager.linked_uids``).
+  (``FamilyManager.linked_uids``);
+- an item already on the list with the chore's name is used instead of
+  adding another (``adopted``: it's left on the list when the chore stops
+  using it), and its due date is kept (``due``) for a chore that shows
+  only when due.
 """
 
 from __future__ import annotations
@@ -79,6 +83,14 @@ class TodoSync:
                 continue
             want_open = chore.get("enabled", True) and manager.chore_open(chore)
             link = links.get(chore["id"])
+            if chore.get("due_only") or link is None:
+                # Its item's due date can change on the list: read it again.
+                if target not in items_by_list:
+                    items_by_list[target] = await self._async_items(target)
+                item = items_by_list[target].get((link or {}).get("uid", ""))
+                if item is not None and (link or {}).get("due") != item.get("due"):
+                    link["due"] = item.get("due")
+                    changed = True
             if (
                 link is not None
                 and link["open"] == want_open
@@ -88,6 +100,22 @@ class TodoSync:
             if target not in items_by_list:
                 items_by_list[target] = await self._async_items(target)
             items = items_by_list[target]
+            if link is None or link["uid"] not in items:
+                # Already on the list under the same name: use that item.
+                taken = {
+                    other["uid"] for other in links.values() if other["list"] == target
+                }
+                found = _same_name(items, chore["name"], taken)
+                if found is not None:
+                    link = links[chore["id"]] = {
+                        "list": target,
+                        "uid": found["uid"],
+                        "open": found.get("status") != STATUS_DONE,
+                        "name": found.get("summary"),
+                        "adopted": True,
+                        "due": found.get("due"),
+                    }
+                    changed = True
             if link is not None and link["uid"] in items:
                 if await self._async_update(link, chore["name"], want_open):
                     link.update(open=want_open, name=chore["name"])
@@ -169,7 +197,8 @@ class TodoSync:
         return True
 
     async def _async_remove(self, link: dict[str, Any]) -> None:
-        if not self._available(link["list"]):
+        # An item that was on the list before Family used it stays there.
+        if link.get("adopted") or not self._available(link["list"]):
             return
         try:
             await self.hass.services.async_call(
@@ -181,3 +210,19 @@ class TodoSync:
         except HomeAssistantError as err:
             # Already deleted on the list: nothing to do.
             _LOGGER.debug("Family: couldn't remove from %s: %s", link["list"], err)
+
+
+def _same_name(
+    items: dict[str, dict[str, Any]], name: str, taken: set[str]
+) -> dict[str, Any] | None:
+    """An item with this name (letter case and spaces aside) no other chore
+    uses; an open one first."""
+    key = " ".join(name.split()).casefold()
+    matches = [
+        i
+        for uid, i in items.items()
+        if uid not in taken
+        and " ".join(str(i.get("summary", "")).split()).casefold() == key
+    ]
+    matches.sort(key=lambda i: i.get("status") == STATUS_DONE)
+    return matches[0] if matches else None

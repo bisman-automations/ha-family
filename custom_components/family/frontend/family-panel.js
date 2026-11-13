@@ -127,6 +127,25 @@ const money = (points, m) => {
   return `${m.currency || ""}${amount.toFixed(amount % 1 ? 2 : 0)}`;
 };
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
+// The Family dashboard's sections and their usual order (model.SECTIONS).
+const SECTIONS = [
+  ["going", "Going for"],
+  ["chores", "My chores"],
+  ["grabs", "Up for grabs"],
+  ["notes", "Notes"],
+  ["today", "Today"],
+  ["meals", "Meals"],
+  ["done", "Done today"],
+  ["rewards", "Rewards"],
+  ["home", "Home"],
+  ["lately", "Lately"],
+];
+// Like model.section_order: known sections once each, missing ones at the end.
+const sectionOrder = (order) => {
+  const keys = SECTIONS.map(([k]) => k);
+  const seen = [...new Set(order || [])].filter((k) => keys.includes(k));
+  return [...seen, ...keys.filter((k) => !seen.includes(k))];
+};
 // "Alex", "Alex and Sam", "Alex, Sam and Riley".
 const namesText = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 // A reward's points shared as evenly as each one's points allow, like
@@ -367,8 +386,10 @@ const STYLES = `
   .tab { border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; font: inherit; border-radius: 999px; padding: 8px 16px; cursor: pointer; white-space: nowrap; }
   .tab[aria-selected="true"] { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .card { background: var(--fam-card); border: 1px solid var(--fam-divider); border-radius: var(--fam-radius); padding: 16px; margin-bottom: 16px; }
-  .matrix summary { cursor: pointer; list-style-position: inside; }
-  .matrix summary h2 { display: inline; }
+  .card > h2[data-fold] { cursor: pointer; display: flex; align-items: center; gap: 10px; }
+  .card > h2[data-fold]::before { content: ""; width: 9px; height: 9px; border-right: 2.5px solid currentColor; border-bottom: 2.5px solid currentColor; transform: rotate(45deg); margin: 0 4px 4px 2px; transition: transform .15s; flex: none; }
+  .card.folded > h2[data-fold]::before { transform: rotate(-45deg); margin-bottom: 0; }
+  .card.folded > :not(h2) { display: none; }
   .matrix-wrap { overflow-x: auto; }
   .matrix table { border-collapse: collapse; }
   .matrix th, .matrix td { padding: 8px 6px; min-width: 64px; border-top: 1px solid var(--fam-divider); text-align: center; font-weight: 400; }
@@ -432,6 +453,7 @@ const STYLES = `
   .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 980px; }
   .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); flex-wrap: wrap; }
   .items .item-name { flex: 1 1 200px; }
+  .items .item-emoji { width: 3em; text-align: center; font-size: 20px; padding: 4px; }
   .items .item-who { display: flex; flex-wrap: wrap; gap: 4px 10px; }
   .items .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; white-space: nowrap; }
   .items .chip input { width: auto; margin: 0; }
@@ -589,6 +611,12 @@ class FamilyPanel extends HTMLElement {
     this.shadowRoot.addEventListener("input", (ev) => this._onInput(ev));
     this.shadowRoot.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") this._closeEligible();
+      // A folding heading opens and closes with Enter or Space too.
+      const head = ev.target?.closest?.("[data-fold]");
+      if (head && (ev.key === "Enter" || ev.key === " ")) {
+        ev.preventDefault();
+        this._toggleFold(head.dataset.fold);
+      }
     });
     this.shadowRoot.addEventListener("pointerdown", () => (this._lastTouch = Date.now()), true);
     this._watchIdle();
@@ -843,6 +871,7 @@ class FamilyPanel extends HTMLElement {
     }
     const error = this._error ? `<p class="error" role="alert">${esc(this._error)}</p>` : "";
     main.innerHTML = error + (this._mode === "parents" ? this._renderParents() : this._renderFamily());
+    if (this._mode === "parents") this._foldCards();
     this._fit();
     this._renderOverlay();
   }
@@ -946,18 +975,22 @@ class FamilyPanel extends HTMLElement {
       })
       .join("")}</div>`;
     const cash = member && d.money ? ` <span class="streak-line">${esc(money(member.points, d.money))}</span>` : "";
+    // Each section by key, shown in the order a parent set.
+    const sections = {
+      going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
+      chores: member && (mine.length || own.total) ? this._section("chores", "My chores", mineBody, mine.length) : "",
+      grabs: grabs.length || !member ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
+      notes: this._section("notes", "Notes", noteTiles, notes.length),
+      today: d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
+      meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
+      done: done.length ? this._section("done", "Done today", doneTiles, done.length) : "",
+      rewards: this._section("rewards", "Rewards", rewardTiles, visibleRewards.length),
+      home,
+      lately: this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`),
+    };
     return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>
       ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}
-      ${goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : ""}
-      ${member && (mine.length || own.total) ? this._section("chores", "My chores", mineBody, mine.length) : ""}
-      ${grabs.length || !member ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : ""}
-      ${this._section("notes", "Notes", noteTiles, notes.length)}
-      ${d.has_calendars || events.length ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : ""}
-      ${meals.length ? this._section("meals", "Meals", mealTiles) : ""}
-      ${done.length ? this._section("done", "Done today", doneTiles, done.length) : ""}
-      ${this._section("rewards", "Rewards", rewardTiles, visibleRewards.length)}
-      ${home}
-      ${this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`)}`;
+      ${sectionOrder(d.section_order).map((key) => sections[key] || "").join("")}`;
   }
 
   // What someone's working toward: today's own chores, their streak, and
@@ -1460,9 +1493,9 @@ class FamilyPanel extends HTMLElement {
         return `<td>${own.total ? `${own.total - own.left} of ${own.total}` : "–"}</td>`;
       })
       .join("")}</tr>`;
-    return `<div class="card"><details class="matrix" open><summary><h2>Who does what</h2></summary>
+    return `<div class="card matrix"><h2>Who does what</h2>
       <p class="muted">● their own &nbsp; ↻ taking turns &nbsp; ○ up for grabs. Only chores shown on the Family dashboard.</p>
-      ${body ? `<div class="matrix-wrap"><table>${head}${body}${totals}</table></div>` : `<p class="empty">No chores yet.</p>`}</details></div>`;
+      ${body ? `<div class="matrix-wrap"><table>${head}${body}${totals}</table></div>` : `<p class="empty">No chores yet.</p>`}</div>`;
   }
 
   _choreForm(item) {
@@ -1478,7 +1511,11 @@ class FamilyPanel extends HTMLElement {
       </div>
       <label class="field"><span>Also keep it on a to-do list</span><select name="todo_list">
         <option value="">No list</option>${(this._choices?.todo_lists || []).map((l) => `<option value="${esc(l.entity_id)}" ${l.entity_id === c.todo_list ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
-        <small>It's added to the list while it can be done, ticked off when it's done, and opened again when it comes back.</small></label>
+        <small>It's added to the list while it can be done, ticked off when it's done, and opened again when it comes back. If the list already has an item with the same name, that item is used instead of adding another.</small></label>
+      <label class="field"><span>When it shows</span><select name="due_only">
+        <option value="" ${c.due_only ? "" : "selected"}>Always, on its days and hours</option>
+        <option value="1" ${c.due_only ? "selected" : ""}>Only when its to-do item is due today or overdue</option></select>
+        <small>Needs a to-do list above. The due date set on the list decides; an item with no due date always shows.</small></label>
       <div class="field"><span>Which days</span><div class="inline">${DAYS.map((d, i) => `<label class="check"><input type="checkbox" name="days" value="${i}" ${(c.days || []).includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div>
         <small>None ticked: every day. Trash day? Tick just that day.</small></div>
       <div class="inline">
@@ -1541,15 +1578,15 @@ class FamilyPanel extends HTMLElement {
     const items = list.items || [];
     const rows = items.length
       ? `<ul class="items">${items
-          .map((i) => `<li><span class="item-name">${esc(i.name)}</span>
+          .map((i) => `<li><input class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
             <span class="item-who">${this._data.members
               .map((m) => `<label class="chip"><input type="checkbox" data-item-member="${esc(i.name)}" value="${esc(m.id)}" ${(i.members || []).includes(m.id) ? "checked" : ""}>${esc(m.name)}</label>`)
               .join("")}</span>
             <input type="number" min="0" max="10000" aria-label="Points for ${esc(i.name)}" data-item-name="${esc(i.name)}" data-rated="${i.rated ? 1 : ""}" data-unrated="${esc(i.unrated)}" value="${i.rated ? esc(i.points) : ""}" placeholder="${esc(i.unrated)}"></li>`)
           .join("")}</ul>`
       : `<p class="muted">Nothing open on this list right now.</p>`;
-    return `<div class="field"><span>Single items: who and points</span>
-      <small>Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
+    return `<div class="field"><span>Single items: emoji, who and points</span>
+      <small>Give an item an emoji for the Family dashboard. Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
   }
 
   _renderRewards() {
@@ -1778,10 +1815,67 @@ class FamilyPanel extends HTMLElement {
       ${rows}${form}</div>
       ${this._allowanceCard()}
       ${this._calendarCard()}
+      ${this._sectionsCard()}
       <div class="card"><h2>Shared screen</h2>
         <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>.</p>
         <p class="muted">It has a <b>Home</b> tab for everyone and a tab for each family member, and the tabs follow when you add, rename or remove someone here. You can add your own tabs and cards to it in Home Assistant; they're kept. You can also add the <b>Family</b> card to any dashboard yourself, for everyone or for one person.</p>
         <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button></div>`;
+  }
+
+  // Every Parents card folds by its heading; which are folded is kept per
+  // screen (localStorage), by heading.
+  _foldCards() {
+    let closed = [];
+    try {
+      closed = JSON.parse(localStorage.getItem("family-parents-closed") || "[]");
+    } catch (err) {
+      closed = [];
+    }
+    for (const card of this.shadowRoot.querySelectorAll("main .card")) {
+      const head = card.querySelector(":scope > h2");
+      if (!head) continue;
+      const key = head.textContent.replace(/\s+\d+$/, "").trim();
+      head.dataset.fold = key;
+      head.setAttribute("role", "button");
+      head.setAttribute("tabindex", "0");
+      const isClosed = closed.includes(key) && !card.querySelector("form");
+      card.classList.toggle("folded", isClosed);
+      head.setAttribute("aria-expanded", String(!isClosed));
+    }
+  }
+
+  _toggleFold(key) {
+    let closed = [];
+    try {
+      closed = JSON.parse(localStorage.getItem("family-parents-closed") || "[]");
+    } catch (err) {
+      closed = [];
+    }
+    closed = closed.includes(key) ? closed.filter((k) => k !== key) : [...closed, key];
+    try {
+      localStorage.setItem("family-parents-closed", JSON.stringify(closed));
+    } catch (err) {
+      // Not kept on this screen: it still folds until the page is drawn again.
+    }
+    for (const head of this.shadowRoot.querySelectorAll("main .card > h2")) {
+      if (head.dataset.fold !== key) continue;
+      const card = head.parentElement;
+      card.classList.toggle("folded", closed.includes(key));
+      head.setAttribute("aria-expanded", String(!closed.includes(key)));
+    }
+  }
+
+  // The order of the Family dashboard's sections, moved up and down here.
+  _sectionsCard() {
+    const order = sectionOrder(this._data.section_order);
+    const names = Object.fromEntries(SECTIONS);
+    return `<div class="card"><h2>Family dashboard sections</h2>
+      <p class="muted">The order the sections show in, on every screen. A section with nothing in it is left out.</p>
+      <ul class="rows">${order
+        .map((key, i) => `<li><span class="grow">${esc(names[key])}</span>
+          <button class="btn" data-section-move="${key}" data-offset="-1" ${i === 0 || this._busy ? "disabled" : ""} aria-label="Move ${esc(names[key])} up">↑</button>
+          <button class="btn" data-section-move="${key}" data-offset="1" ${i === order.length - 1 || this._busy ? "disabled" : ""} aria-label="Move ${esc(names[key])} down">↓</button></li>`)
+        .join("")}</ul></div>`;
   }
 
   async _makeDashboard() {
@@ -1873,6 +1967,12 @@ class FamilyPanel extends HTMLElement {
     }
     // A tap outside the people list closes it. Ticks inside stay open.
     if (!ev.target.closest("[data-eligible]")) this._closeEligible();
+    // A Parents card's heading folds it (buttons inside it don't).
+    const fold = ev.target.closest("[data-fold]");
+    if (fold && !ev.target.closest("button")) {
+      this._toggleFold(fold.dataset.fold);
+      return;
+    }
     const el = ev.target.closest("button, .sheet-bg");
     if (!el) return;
     const ds = el.dataset;
@@ -1917,6 +2017,13 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.reward) {
       this._sheet = { type: "reward", id: ds.reward, member: this._member };
       this._renderOverlay();
+    } else if (ds.sectionMove) {
+      const order = sectionOrder(this._data.section_order);
+      const from = order.indexOf(ds.sectionMove);
+      const to = from + Number(ds.offset);
+      if (to < 0 || to >= order.length) return;
+      [order[from], order[to]] = [order[to], order[from]];
+      this._call({ type: `${DOMAIN}/settings`, section_order: order }, "Moved.");
     } else if ("days" in ds) {
       this._sheet = { type: "days", member: this._member };
       this._renderOverlay();
@@ -2083,7 +2190,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
     } else if (collection === "rewards") {
       // All ticked: anyone, including people added later. A shorter list:
       // only those people. Nobody ticked: the reward is unavailable.
@@ -2109,6 +2216,9 @@ class FamilyPanel extends HTMLElement {
       for (const input of form.querySelectorAll("[data-item-name]")) itemMembers[input.dataset.itemName] = [];
       for (const box of form.querySelectorAll("[data-item-member]:checked")) itemMembers[box.dataset.itemMember].push(box.value);
       item.item_members = itemMembers;
+      const itemEmojis = {};
+      for (const input of form.querySelectorAll("[data-item-emoji]")) itemEmojis[input.dataset.itemEmoji] = input.value.trim();
+      item.item_emojis = itemEmojis;
     }
     if (form.dataset.id) item.id = form.dataset.id;
     const ok = await this._call({ type: `${DOMAIN}/save`, collection, item }, "Saved.");

@@ -398,7 +398,16 @@ class FamilyManager:
     def all_chores(self) -> list[dict[str, Any]]:
         """Dashboard chores and the open items of every chore to-do list."""
         now = dt_util.now()
-        chores = [self._effective(c, now) for c in self.chores]
+        chores = [
+            self._effective(c, now)
+            for c in self.chores
+            # Kept on a to-do list and set to show only when due: its item's
+            # due date decides (no date, or not linked yet: it shows).
+            if not c.get("due_only")
+            or model.todo_due(
+                _local_due((self.todo_links.get(c["id"]) or {}).get("due")), now
+            )
+        ]
         for todo in self.todo_lists:
             entity_id = todo["entity_id"]
             state = self.hass.states.get(entity_id)
@@ -423,6 +432,9 @@ class FamilyManager:
                         "name": name,
                         "points": points,
                         "members": _item_members(todo, name),
+                        "emoji": (todo.get("item_emojis") or {}).get(
+                            model.item_key(name)
+                        ),
                         "grab": model.is_grab(
                             {**todo, "members": _item_members(todo, name)}
                         ),
@@ -802,6 +814,8 @@ class FamilyManager:
         if "streak_days" in raw:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
+        if "section_order" in raw:
+            self.settings["section_order"] = model.section_order(raw["section_order"])
         if "notify_targets" in raw:
             targets = [str(t) for t in raw.get("notify_targets") or [] if t]
             unknown = [
@@ -1337,6 +1351,9 @@ class FamilyManager:
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
             # Also kept on this to-do list; None: not on any list.
             "todo_list": todo_list,
+            # With a to-do list: show only when its item is due today or
+            # overdue (by the item's due date on the list).
+            "due_only": bool(raw.get("due_only")) and bool(todo_list),
             # Extra points taken if it didn't happen; None: the family's.
             "penalty": model.optional_points(raw.get("penalty"), "The penalty"),
             # Only on these weekdays (Monday 0), and between these hours.
@@ -1453,6 +1470,15 @@ class FamilyManager:
                 assigned[key] = picked
             else:
                 assigned.pop(key, None)
+        # Emojis for single items, by name, kept the same way; empty removes.
+        emojis = dict(existing.get("item_emojis") or {})
+        for name, emoji in (raw.get("item_emojis") or {}).items():
+            if not (key := model.item_key(name)):
+                continue
+            if text := str(emoji or "").strip()[:8]:
+                emojis[key] = text
+            else:
+                emojis.pop(key, None)
         todo = {
             "id": entity_id,
             "entity_id": entity_id,
@@ -1462,6 +1488,7 @@ class FamilyManager:
             "grab": bool(raw.get("grab")),
             "item_points": rated,
             "item_members": assigned,
+            "item_emojis": emojis,
             # Only items due now or overdue show as chores; ones with no due
             # date always do.
             "due_only": bool(raw.get("due_only")),
@@ -1754,6 +1781,8 @@ class FamilyManager:
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
             "undo_seconds": model.UNDO_SECONDS,
+            # The Family dashboard's sections, in the order a parent set.
+            "section_order": model.section_order(self.settings.get("section_order")),
         }
         if is_admin:
             result["settings"] = {
@@ -1843,6 +1872,7 @@ class FamilyManager:
                     "members": list(
                         (todo.get("item_members") or {}).get(model.item_key(name), [])
                     ),
+                    "emoji": (todo.get("item_emojis") or {}).get(model.item_key(name)),
                 }
             )
         return rows

@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-13
+
+One Family page for everyone: the Parents sidebar page is now part of it. Nothing else changes: your family, chores, points, entities, actions and events stay as they are.
+
+### Changed
+
+- **Parents is a button on the Family page.** The sidebar has one **Family** entry for everyone. **Parents** at the top switches the page to the parent controls, and **Back to Family** switches back. The **Family** card on a dashboard has the same button, so the wall tablet works the same way.
+- **The old Parents link still works.** `/family-parents`, and the parents' notifications that open it, go to the Family page already switched to the parent controls.
+
+### Added
+
+- **Parent PIN for the shared screen.** Set a 4 to 8 digit PIN in the parent controls under **Family** → **Parent PIN** (from an administrator's login). On any login that isn't an administrator, such as the shared tablet, **Parents** asks for it. Administrators go straight in.
+- **The parent controls close on their own.** On the shared screen they stay open until **Back to Family**, or until nobody has tapped for two minutes.
+- **Wrong PINs lock the pad.** After five wrong PINs in a row the pad locks for five minutes and the parents' phones get a notification. Home Assistant only keeps a scrambled copy of the PIN.
+
+### Removed
+
+- **The Parents entry in the sidebar.** Use **Parents** on the Family page instead. Bookmarks and phone shortcuts to `/family-parents` keep working.
+
 ## [1.22.0] - 2026-11-13
 
 ### Added
@@ -266,6 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.0.0]: https://github.com/bisman-automations/ha-family/compare/v1.22.0...v2.0.0
 [1.22.0]: https://github.com/bisman-automations/ha-family/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/bisman-automations/ha-family/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/bisman-automations/ha-family/compare/v1.19.0...v1.20.0

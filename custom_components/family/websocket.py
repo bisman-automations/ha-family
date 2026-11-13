@@ -3,8 +3,10 @@
 Everyone (the shared screen included) can see chores and rewards, mark a
 chore done, spend points and use the home controls a parent put on the
 dashboard (only those): the Family dashboard runs on a shared display that
-kids tap. Checking chores, editing the lists and changing points are
-for admins (the Parents dashboard).
+kids tap. Checking chores, editing the lists and changing points are for
+parents: an admin login, or a login holding a pass from the parent PIN
+(``parent_pass.py``), sent as ``pass`` with each command. Setting the PIN
+itself is for admins only.
 """
 
 from __future__ import annotations
@@ -17,12 +19,16 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import model
 from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
 from .parents_notify import target_name
+
+# The parent pass, sent with any command (only parent commands use it).
+PASS = "pass"
 
 COLLECTIONS = ("members", "chores", "rewards", "todo_lists", "controls", "routines")
 
@@ -50,6 +56,9 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_move,
         ws_settings,
         ws_choices,
+        ws_unlock,
+        ws_lock,
+        ws_pin,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -86,17 +95,70 @@ def _user(connection) -> tuple[str | None, bool]:
     return (user.id if user else None, bool(user and user.is_admin))
 
 
+def _is_parent(hass: HomeAssistant, connection, msg: dict) -> bool:
+    """An admin login, or a live parent pass for this login."""
+    user = connection.user
+    if user and user.is_admin:
+        return True
+    manager = manager_of(hass)
+    return bool(
+        manager and manager.passes.valid(msg.get(PASS), user.id if user else None)
+    )
+
+
+def _require_parent(func):
+    """Like require_admin, but a parent pass from the PIN counts too."""
+
+    @wraps(func)
+    def wrapper(hass, connection, msg):
+        if not _is_parent(hass, connection, msg):
+            raise Unauthorized
+        return func(hass, connection, msg)
+
+    return wrapper
+
+
 # ---- everyone ------------------------------------------------------------------------
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/state"})
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/state", vol.Optional(PASS): str}
+)
 @websocket_api.async_response
 @_handler
 async def ws_state(hass, connection, msg, manager) -> dict[str, Any]:
-    return manager.snapshot(*_user(connection))
+    user_id, is_admin = _user(connection)
+    return manager.snapshot(user_id, is_admin, _is_parent(hass, connection, msg))
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/subscribe"})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/unlock",
+        vol.Optional(PASS): str,
+        vol.Required("pin"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_unlock(hass, connection, msg, manager) -> dict[str, Any]:
+    """Swap the parent PIN for a pass (open to everyone: it's the PIN pad)."""
+    return manager.passes.unlock(msg["pin"], _user(connection)[0])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/lock", vol.Optional(PASS): str}
+)
+@websocket_api.async_response
+@_handler
+async def ws_lock(hass, connection, msg, manager) -> dict[str, Any]:
+    """End a pass: Back to Family, or the screen went idle."""
+    manager.passes.lock(msg.get(PASS))
+    return {}
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/subscribe", vol.Optional(PASS): str}
+)
 @callback
 def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
     """Tell the dashboard when anything changes, so it reloads."""
@@ -116,6 +178,7 @@ def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/routine/step",
+        vol.Optional(PASS): str,
         vol.Required("routine_id"): str,
         vol.Required("member_id"): str,
         vol.Required("step"): int,
@@ -134,6 +197,7 @@ async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/complete",
+        vol.Optional(PASS): str,
         vol.Required("member_id"): str,
         vol.Required("chore_id"): str,
     }
@@ -148,6 +212,7 @@ async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/redeem",
+        vol.Optional(PASS): str,
         vol.Required("member_id"): str,
         vol.Required("reward_id"): str,
         # Others sharing the points; a parent says yes first.
@@ -166,6 +231,7 @@ async def ws_redeem(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/control",
+        vol.Optional(PASS): str,
         vol.Required("control_id"): str,
         vol.Required("action"): str,
     }
@@ -180,7 +246,11 @@ async def ws_control(hass, connection, msg, manager) -> dict[str, Any]:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/undo", vol.Required("entry_id"): str}
+    {
+        vol.Required("type"): f"{DOMAIN}/undo",
+        vol.Optional(PASS): str,
+        vol.Required("entry_id"): str,
+    }
 )
 @websocket_api.async_response
 @_handler
@@ -193,6 +263,7 @@ async def ws_undo(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/goal",
+        vol.Optional(PASS): str,
         vol.Required("member_id"): str,
         vol.Required("reward_id"): vol.Any(None, str),
     }
@@ -207,6 +278,7 @@ async def ws_goal(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/note/add",
+        vol.Optional(PASS): str,
         vol.Required("text"): str,
         vol.Optional("member_id"): vol.Any(None, str),
         vol.Optional("until"): vol.Any(None, str),
@@ -229,7 +301,11 @@ async def ws_note_add(hass, connection, msg, manager) -> dict[str, Any]:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/note/remove", vol.Required("note_id"): str}
+    {
+        vol.Required("type"): f"{DOMAIN}/note/remove",
+        vol.Optional(PASS): str,
+        vol.Required("note_id"): str,
+    }
 )
 @websocket_api.async_response
 @_handler
@@ -239,12 +315,13 @@ async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
     return {}
 
 
-# ---- parents (admins) ----------------------------------------------------------------------
+# ---- parents (admins, or the parent PIN) ----------------------------------------------------------------------
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/review",
+        vol.Optional(PASS): str,
         vol.Required("entry_id"): str,
         vol.Required("approved"): bool,
         # Points taken on top when it didn't happen; leave out for the default.
@@ -253,7 +330,7 @@ async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
         ),
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
@@ -265,9 +342,13 @@ async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/given", vol.Required("entry_id"): str}
+    {
+        vol.Required("type"): f"{DOMAIN}/given",
+        vol.Optional(PASS): str,
+        vol.Required("entry_id"): str,
+    }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_given(hass, connection, msg, manager) -> dict[str, Any]:
@@ -277,11 +358,12 @@ async def ws_given(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/approve",
+        vol.Optional(PASS): str,
         vol.Required("group_id"): str,
         vol.Required("approved"): bool,
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_approve(hass, connection, msg, manager) -> dict[str, Any]:
@@ -292,12 +374,13 @@ async def ws_approve(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/adjust",
+        vol.Optional(PASS): str,
         vol.Required("member_id"): str,
         vol.Required("points"): int,
         vol.Optional("reason"): str,
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_adjust(hass, connection, msg, manager) -> dict[str, Any]:
@@ -308,11 +391,12 @@ async def ws_adjust(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/save",
+        vol.Optional(PASS): str,
         vol.Required("collection"): vol.In(COLLECTIONS),
         vol.Required("item"): dict,
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_save(hass, connection, msg, manager) -> dict[str, Any]:
@@ -337,12 +421,13 @@ async def ws_save(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/delete",
+        vol.Optional(PASS): str,
         vol.Required("collection"): vol.In(COLLECTIONS),
         # Not "id": that's the websocket message's own id.
         vol.Required("item_id"): str,
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_delete(hass, connection, msg, manager) -> dict[str, Any]:
@@ -353,12 +438,13 @@ async def ws_delete(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/move",
+        vol.Optional(PASS): str,
         vol.Required("collection"): vol.In(COLLECTIONS),
         vol.Required("item_id"): str,
         vol.Required("offset"): vol.In((-1, 1)),
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
@@ -369,6 +455,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/settings",
+        vol.Optional(PASS): str,
         vol.Optional("auto_check"): vol.Any(None, str),
         vol.Optional("bonus_all_done"): vol.Any(None, int),
         vol.Optional("streak_days"): vol.Any(None, int),
@@ -409,7 +496,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         ],
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
@@ -419,11 +506,12 @@ async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/meals",
+        vol.Optional(PASS): str,
         vol.Required("date"): str,
         **{vol.Optional(meal): vol.Any(None, str) for meal in model.MEALS},
     }
 )
-@websocket_api.require_admin
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_meals(hass, connection, msg, manager) -> dict[str, Any]:
@@ -431,8 +519,10 @@ async def ws_meals(hass, connection, msg, manager) -> dict[str, Any]:
     return {"meals": manager.save_meals(msg["date"], msg)}
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/choices"})
-@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/choices", vol.Optional(PASS): str}
+)
+@_require_parent
 @websocket_api.async_response
 @_handler
 async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
@@ -494,3 +584,19 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         "voices": voices,
         "players": players,
     }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/pin",
+        vol.Optional(PASS): str,
+        vol.Required("pin"): vol.Any(None, str),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_handler
+async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
+    """Set or clear the parent PIN (admins only, not with a pass)."""
+    manager.passes.set_pin(msg["pin"])
+    return {"pin_set": manager.passes.pin_set}

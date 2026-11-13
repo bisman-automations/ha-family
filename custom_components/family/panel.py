@@ -1,8 +1,11 @@
-"""The Family and Parents dashboards in the sidebar.
+"""The Family dashboard in the sidebar.
 
-Both use the same script. The Family dashboard is for everyone, including a
-shared display that kids tap; the Parents dashboard is for admins. Only
-registered when the frontend is running (not in tests).
+One page for everyone, including a shared display that kids tap. Its
+**Parents** button switches it to the parent controls: straight away for an
+admin, with the parent PIN on any other login. ``/family-parents`` (the
+Parents sidebar page before 2.0.0, and where the parents' notifications
+link) still opens it, already switched to the parent controls, but isn't in
+the sidebar. Only registered when the frontend is running (not in tests).
 """
 
 from __future__ import annotations
@@ -54,10 +57,12 @@ async def async_register_panels(hass: HomeAssistant) -> None:
         hass,
         frontend_url_path=PARENTS_PATH,
         webcomponent_name=COMPONENT,
-        sidebar_title="Parents",
-        sidebar_icon="mdi:account-supervisor",
+        # Not in the sidebar: old links and notifications open Family's
+        # parent controls (the PIN still applies to logins that aren't admins).
+        sidebar_title=None,
+        sidebar_icon=None,
         module_url=module_url,
-        require_admin=True,
+        require_admin=False,
         config={"mode": "parents"},
     )
     # The Family card on any dashboard: a dashboard can be a login's default

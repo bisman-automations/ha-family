@@ -2,7 +2,9 @@
 <!-- Fakes Home Assistant with a sample family, to look at the dashboards
      (and the Family card: mode=card).
      Serve the repo root over HTTP and open
-     scripts/panel-preview/index.html?mode=family (or mode=parents). -->
+     scripts/panel-preview/index.html?mode=family (or mode=parents).
+     &admin=0 logs in as the shared screen (not an admin): Parents then asks
+     for the parent PIN, 2468 here (&pin=0: no PIN set). -->
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body { margin: 0; font-family: Roboto, sans-serif; --primary-color: #03a9f4; --primary-background-color: #f5f5f5;
@@ -161,8 +163,14 @@ const routinesToday = () => routines.filter((r) => r.enabled !== false).map((r) 
 });
 const SECTION_KEYS = ["going", "chores", "routines", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
 const sectionList = (order) => { const out = (order || []).filter((k, i, all) => SECTION_KEYS.includes(k) && all.indexOf(k) === i); return [...out, ...SECTION_KEYS.filter((k) => !out.includes(k))]; };
+const IS_ADMIN = params.get("admin") !== "0";
+let pinSet = params.get("pin") !== "0";
+let parentPass = null;
+let wrongPins = 0;
+const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
+const PARENT_ONLY = ["review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 const state = () => ({
-  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet,
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -175,7 +183,7 @@ const state = () => ({
   to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e, i, all) => e.given === "to_give" && (!e.group || all.findIndex((x) => x.group === e.group && x.given === "to_give") === i)), history: [...entries].reverse(),
 });
 window.hass = {
-  states, user: { is_admin: true },
+  states, user: { is_admin: IS_ADMIN },
   formatEntityState: (s) => ({ on: "On", off: "Off", open: "Open", closed: "Closed", locked: "Locked", unlocked: "Unlocked", playing: "Playing", paused: "Paused", heat: "Heat" }[s.state] ?? `${s.state}${s.attributes.unit_of_measurement || ""}`),
   connection: { subscribeMessage: async () => () => {} },
   callWS: async (msg) => {
@@ -185,10 +193,18 @@ window.hass = {
     if (msg.type === "lovelace/config/save") { window.savedDashboard = msg; return null; }
     if (msg.type === "lovelace/config") { if (!window.savedDashboard) throw { code: "config_not_found", message: "No config found." }; return structuredClone(window.savedDashboard.config); }
     const t = msg.type.replace("family/", "");
-    if (t === "state") return state();
+    if (t === "state") { const st = state(); st.parent = isParent(msg); if (!st.parent) delete st.settings; return st; }
+    if (t === "unlock") {
+      if (!pinSet) throw { message: "No parent PIN is set. A parent sets one on the Family tab." };
+      if (msg.pin !== "2468") { wrongPins += 1; throw { message: wrongPins >= 5 ? "Too many wrong PINs. Try again in 5 min." : "That's not the PIN. Try again." }; }
+      wrongPins = 0; parentPass = "pass-" + Date.now(); return { pass: parentPass, seconds: 300 };
+    }
+    if (t === "lock") { if (msg.pass === parentPass) parentPass = null; return {}; }
+    if (t === "pin") { if (!IS_ADMIN) throw { code: "unauthorized", message: "Unauthorized" }; pinSet = !!msg.pin; parentPass = null; return { pin_set: pinSet }; }
+    if (PARENT_ONLY.includes(t) && !isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" };
     if (t === "choices") return { voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
-    if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: params.get("mode") === "parents", by: null }; notes.push(n); return { note: n }; }
-    if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && params.get("mode") !== "parents") throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
+    if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: isParent(msg), by: null }; notes.push(n); return { note: n }; }
+    if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && !IS_ADMIN) throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
     if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
     if (t === "control") {
       const c = controlList().find((x) => x.id === msg.control_id);

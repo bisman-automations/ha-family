@@ -1,12 +1,16 @@
 /*
  * Family dashboards: one plain web component, no build step.
  *
- * panel.config.mode picks the dashboard:
+ * One page with two views:
  *   "family"  - for everyone, made for a shared touch screen: tap who you are,
  *               mark chores done, spend points on rewards, use the home
  *               controls a parent added.
- *   "parents" - admins: check chores, edit chores, rewards, home controls and
- *               the family, change points, see the history.
+ *   "parents" - the parent controls: check chores, edit chores, rewards, home
+ *               controls and the family, change points, see the history.
+ * The Parents button switches views: straight away for an admin, with the
+ * parent PIN otherwise (family/unlock gives a pass, sent with every family/
+ * command until Back to Family or the screen goes idle). panel.config.mode
+ * "parents" (the old /family-parents page) starts in the parent view.
  * Data comes from family/state; family/subscribe says when to load it again.
  */
 
@@ -348,6 +352,18 @@ const STYLES = `
   button:focus-visible, .tile:focus-visible, .person:focus-visible { outline: 3px solid var(--primary-color); outline-offset: 2px; }
 
   /* Sheet: confirm and pick who */
+  .switchbar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  .switch-slot { margin-left: auto; }
+  .switch-slot .switchbar { margin: 0; }
+  .switch-slot .btn { color: inherit; border-color: currentColor; white-space: nowrap; }
+  .switchbar ha-icon { --mdc-icon-size: 18px; margin-right: 4px; }
+  .sheet.pin { max-width: 340px; text-align: center; }
+  .pin-dots { display: flex; justify-content: center; gap: 12px; margin: 8px 0; }
+  .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fam-muted); }
+  .pin-dot.on { background: var(--primary-text-color); border-color: var(--primary-text-color); }
+  .pin-error { color: var(--fam-bad); min-height: 20px; margin: 4px 0; }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 72px); gap: 10px; justify-content: center; margin-bottom: 12px; }
+  .pin-key { font: inherit; font-size: 24px; height: 60px; border-radius: 16px; border: 1px solid var(--fam-divider); background: transparent; color: inherit; cursor: pointer; }
   .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 5; padding: 16px; }
   .sheet {
     background: var(--fam-card); border-radius: 20px; padding: 24px; width: min(520px, 100%);
@@ -498,6 +514,8 @@ class FamilyPanel extends HTMLElement {
     this._edit = null; // {collection, item}
     this._choices = null;
     this._busy = false;
+    this._view = null; // "family" | "parents"; null: the page's own start
+    this._pass = null; // parent pass from the PIN, for logins that aren't admins
     try {
       this._sections = JSON.parse(localStorage.getItem(SECTIONS_KEY) || "{}") || {};
     } catch (_err) {
@@ -506,7 +524,65 @@ class FamilyPanel extends HTMLElement {
   }
 
   get _mode() {
-    return this._panel?.config?.mode === "parents" ? "parents" : "family";
+    return this._view || (this._panel?.config?.mode === "parents" ? "parents" : "family");
+  }
+
+  // ---- switching between Family and the parent controls
+
+  _openParents() {
+    const d = this._data;
+    if (!d) return;
+    if (d.is_admin || (this._pass && d.parent)) return this._switchView("parents");
+    if (!d.pin_set) {
+      this._toast("Ask a parent to set a parent PIN: Parents, then the Family tab, on their own login.", true);
+      return;
+    }
+    this._sheet = { type: "pin", pin: "", error: "" };
+    this._renderOverlay();
+  }
+
+  async _unlock() {
+    const s = this._sheet;
+    if (!s || s.type !== "pin" || !s.pin || this._busy) return;
+    this._busy = true;
+    try {
+      const res = await this._hass.callWS({ type: `${DOMAIN}/unlock`, pin: s.pin });
+      this._pass = res.pass;
+      this._sheet = null;
+      this._busy = false;
+      this._switchView("parents");
+    } catch (err) {
+      this._busy = false;
+      s.pin = "";
+      s.error = err?.message || String(err);
+      this._renderOverlay();
+    }
+  }
+
+  _backToFamily() {
+    if (this._pass) {
+      this._hass.callWS({ type: `${DOMAIN}/lock`, pass: this._pass }).catch(() => {});
+      this._pass = null;
+    }
+    this._switchView("family");
+  }
+
+  _switchView(view) {
+    this._view = view;
+    this._sheet = null;
+    this._lastTouch = Date.now();
+    if (view === "family") this._member = this._homeMember();
+    this._load();
+  }
+
+  _switchBar() {
+    const d = this._data;
+    if (!d) return "";
+    if (this._mode === "parents") {
+      return `<div class="switchbar"><button class="btn" data-to-family><ha-icon icon="mdi:arrow-left"></ha-icon> Back to Family</button></div>`;
+    }
+    const lock = d.is_admin ? "mdi:account-supervisor" : "mdi:lock";
+    return `<div class="switchbar"><button class="btn" data-to-parents><ha-icon icon="${lock}"></ha-icon> Parents</button></div>`;
   }
 
   set hass(hass) {
@@ -564,6 +640,10 @@ class FamilyPanel extends HTMLElement {
   }
 
   _idleCheck() {
+    if (this._mode === "parents" && this._pass && !this._busy && Date.now() - this._lastTouch >= IDLE_MS) {
+      this._backToFamily();
+      return;
+    }
     if (this._mode === "family" && this._data && this._overCount() !== this._over) {
       this._over = this._overCount();
       if (this._sheet?.type === "days") this._renderOverlay();
@@ -594,12 +674,19 @@ class FamilyPanel extends HTMLElement {
 
   async _load() {
     try {
-      this._data = await this._hass.callWS({ type: `${DOMAIN}/state` });
+      this._data = await this._ws({ type: `${DOMAIN}/state` });
+      // The pass ran out (or this login isn't a parent): back to Family.
+      if (this._mode === "parents" && !this._data.parent) {
+        this._pass = null;
+        const wanted = this._view === null;
+        this._view = "family";
+        if (wanted && this._data.pin_set) this._sheet = { type: "pin", pin: "", error: "" };
+      }
       this._error = "";
       // Someone logged in as a family member sees their own page.
       if (this._member === null && this._mode === "family") this._member = this._homeMember();
       if (this._member && !this._data.members.some((m) => m.id === this._member)) this._member = this._homeMember();
-      if (this._mode === "parents" && this._hasDashboard === undefined) {
+      if (this._mode === "parents" && this._data.is_admin && this._hasDashboard === undefined) {
         this._hasDashboard = null;
         this._ws({ type: "lovelace/dashboards/list" })
           .then((list) => {
@@ -611,7 +698,7 @@ class FamilyPanel extends HTMLElement {
           });
       }
       if (this._mode === "parents" && !this._choices) {
-        this._choices = await this._hass.callWS({ type: `${DOMAIN}/choices` });
+        this._choices = await this._ws({ type: `${DOMAIN}/choices` });
       }
     } catch (err) {
       this._error = err?.message || String(err);
@@ -623,7 +710,7 @@ class FamilyPanel extends HTMLElement {
     if (this._built) return;
     this._built = true;
     // As a card, the dashboard around it has its own header.
-    const toolbar = this._card ? "" : `<div class="toolbar"><div class="menu"></div><div class="title"></div></div>`;
+    const toolbar = this._card ? "" : `<div class="toolbar"><div class="menu"></div><div class="title"></div><div class="switch-slot"></div></div>`;
     this.shadowRoot.innerHTML = `<style>${STYLES}</style>${toolbar}
       <main></main><div class="overlay"></div>`;
     this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
@@ -921,7 +1008,11 @@ class FamilyPanel extends HTMLElement {
       return;
     }
     const error = this._error ? `<p class="error" role="alert">${esc(this._error)}</p>` : "";
-    main.innerHTML = error + (this._mode === "parents" ? this._renderParents() : this._renderFamily());
+    // The Parents / Back to Family button: in the toolbar, or (as a card,
+    // which has no toolbar) at the top of the page.
+    const slot = this.shadowRoot.querySelector(".switch-slot");
+    if (slot) slot.innerHTML = this._switchBar();
+    main.innerHTML = (slot ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : this._renderFamily());
     if (this._mode === "parents") this._foldCards();
     this._fit();
     this._renderOverlay();
@@ -1334,6 +1425,22 @@ class FamilyPanel extends HTMLElement {
   _renderSheet() {
     const s = this._sheet;
     const d = this._data;
+    if (s.type === "pin") {
+      const dots = Array.from({ length: Math.max(4, s.pin.length) }, (_v, i) => `<span class="pin-dot${i < s.pin.length ? " on" : ""}"></span>`).join("");
+      const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"]
+        .map((k) => (k === "" ? "<span></span>" : k === "del"
+          ? `<button class="pin-key" data-pin-key="del" aria-label="Delete"><ha-icon icon="mdi:backspace-outline"></ha-icon></button>`
+          : `<button class="pin-key" data-pin-key="${k}">${k}</button>`))
+        .join("");
+      return `<div class="sheet-bg" data-close><div class="sheet pin" role="dialog" aria-modal="true" aria-label="Parent PIN">
+        <h3>Parent PIN</h3>
+        <div class="pin-dots" aria-label="${s.pin.length} digits">${dots}</div>
+        <p class="pin-error" role="alert">${esc(s.error || "")}</p>
+        <div class="pin-pad">${keys}</div>
+        <div class="actions"><button class="big" data-close>Cancel</button>
+        <button class="big primary" data-pin-ok ${s.pin.length < 4 || this._busy ? "disabled" : ""}>Open</button></div>
+      </div></div>`;
+    }
     if (s.type === "note") {
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Add a note">
         <h3>Add a note</h3>
@@ -2097,7 +2204,25 @@ class FamilyPanel extends HTMLElement {
       <div class="card"><h2>Shared screen</h2>
         <p class="muted">Home Assistant only offers dashboards as a login's default, not sidebar pages like this one. Make a dashboard that shows the Family dashboard, then log in on the shared screen and pick <b>${esc(DASHBOARD_TITLE)}</b> under your profile's <b>Dashboard</b>.</p>
         <p class="muted">It has a <b>Home</b> tab for everyone and a tab for each family member, and the tabs follow when you add, rename or remove someone here. You can add your own tabs and cards to it in Home Assistant; they're kept. You can also add the <b>Family</b> card to any dashboard yourself, for everyone or for one person.</p>
-        <button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button></div>`;
+        ${this._data.is_admin
+          ? `<button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button>`
+          : `<p class="muted">Making or updating it needs an administrator's login.</p>`}</div>
+      ${this._pinCard()}`;
+  }
+
+  _pinCard() {
+    const d = this._data;
+    const status = d.pin_set ? "A parent PIN is set." : "No parent PIN yet: on the shared screen, only an administrator's login can open the parent controls.";
+    const form = d.is_admin
+      ? `<form class="row" data-pin-form>
+          <label class="field"><span>${d.pin_set ? "New PIN" : "PIN"}</span><input name="pin" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required placeholder="4 to 8 digits"></label>
+          <button class="btn primary" type="submit" ${this._busy ? "disabled" : ""}>${d.pin_set ? "Change PIN" : "Set PIN"}</button>
+          ${d.pin_set ? `<button class="btn" type="button" data-pin-clear>Remove PIN</button>` : ""}
+        </form>`
+      : `<p class="muted">Only an administrator can change it.</p>`;
+    return `<div class="card"><h2>Parent PIN</h2>
+      <p class="muted">On a login that isn't an administrator (the shared screen), <b>Parents</b> asks for this PIN. It opens the parent controls until <b>Back to Family</b>, or until nobody has tapped for two minutes. After five wrong PINs the pad locks for five minutes and your phones are told.</p>
+      <p>${esc(status)}</p>${form}</div>`;
   }
 
   // Every Parents card folds by its heading. Which are folded is kept per
@@ -2215,6 +2340,8 @@ class FamilyPanel extends HTMLElement {
 
   // After a family member is added, renamed or removed.
   async _followMembers() {
+    // Dashboards are admins' to change.
+    if (!this._data?.is_admin) return;
     try {
       await this._syncDashboard(false);
     } catch (err) {
@@ -2242,6 +2369,8 @@ class FamilyPanel extends HTMLElement {
   // ------------------------------------------------------------------ events
 
   async _ws(msg) {
+    // The parent pass goes with Family's own commands only.
+    if (this._pass && msg.type.startsWith(`${DOMAIN}/`)) msg = { ...msg, pass: this._pass };
     return this._hass.callWS(msg);
   }
 
@@ -2271,6 +2400,30 @@ class FamilyPanel extends HTMLElement {
       if (el.classList.contains("sheet-bg") && ev.target !== el) return;
       this._sheet = null;
       this._renderOverlay();
+      return;
+    }
+    if ("toParents" in ds) {
+      this._openParents();
+      return;
+    }
+    if ("toFamily" in ds) {
+      this._backToFamily();
+      return;
+    }
+    if (ds.pinKey !== undefined && this._sheet?.type === "pin") {
+      const s = this._sheet;
+      s.error = "";
+      if (ds.pinKey === "del") s.pin = s.pin.slice(0, -1);
+      else if (s.pin.length < 8) s.pin += ds.pinKey;
+      this._renderOverlay();
+      return;
+    }
+    if ("pinOk" in ds) {
+      this._unlock();
+      return;
+    }
+    if ("pinClear" in ds) {
+      this._call({ type: `${DOMAIN}/pin`, pin: null }, "Parent PIN removed.");
       return;
     }
     if (ds.member) {
@@ -2472,6 +2625,11 @@ class FamilyPanel extends HTMLElement {
   async _onSubmit(ev) {
     ev.preventDefault();
     const form = ev.target;
+    if (form.matches("[data-pin-form]")) {
+      const pin = form.querySelector("[name=pin]").value.trim();
+      await this._call({ type: `${DOMAIN}/pin`, pin }, "Parent PIN saved.");
+      return;
+    }
     if (form.dataset.penaltySetting !== undefined) {
       const value = Math.max(0, Math.round(Number(this._formValues(form).penalty) || 0));
       return this._call({ type: `${DOMAIN}/settings`, penalty: value }, "Saved.");
@@ -2701,10 +2859,6 @@ class FamilyCard extends FamilyPanel {
     super();
     this._card = true;
     this._panel = { config: { mode: "family" } };
-  }
-
-  get _mode() {
-    return "family";
   }
 
   // `member`: a family member's id, to show only their page.

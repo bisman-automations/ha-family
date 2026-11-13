@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Family",
-        "description": "Adds the Family dashboard for chores and rewards, and the Parents dashboard to manage them. You set up family members, chores and rewards on the Parents dashboard."
+        "description": "Adds the Family dashboard for chores and rewards. Its Parents button opens the parent controls, where you set up family members, chores and rewards."
       }
     },
     "abort": {

@@ -484,7 +484,12 @@ async def test_dashboards_registered(hass: HomeAssistant):
         }
         assert panels["family"]["require_admin"] is False
         assert panels["family"]["config"] == {"mode": "family"}
-        assert panels["family-parents"]["require_admin"] is True
+        # One Family page in the sidebar. The old Parents page still opens
+        # (notifications link to it) but isn't in the sidebar any more.
+        assert panels["family"]["sidebar_title"] == "Family"
+        assert panels["family-parents"]["sidebar_title"] is None
+        assert panels["family-parents"]["require_admin"] is False
+        assert panels["family-parents"]["config"] == {"mode": "parents"}
         # The Family card, for a dashboard a login can have as its default.
         card_url = add_card.call_args.args[1]
         assert card_url.startswith("/family_static/family-panel.js?v=")
@@ -1443,3 +1448,121 @@ async def test_weekly_summary(hass: HomeAssistant, client, freezer):
         "Sam: 0 chores, +0, 0 now",
         "1 chore to check",
     ]
+
+
+async def test_parent_pin_gives_the_shared_screen_a_pass(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    """The PIN opens the parent controls on a login that isn't an admin."""
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    state = await kiosk.ok("state")
+    assert state["pin_set"] is False
+    assert state["parent"] is False
+    res = await kiosk("unlock", pin="2468")
+    assert not res["success"]
+
+    # Only an admin sets the PIN; a pass can't change it.
+    res = await kiosk("pin", pin="1357")
+    assert res["error"]["code"] == "unauthorized"
+    res = await client("pin", pin="12")
+    assert not res["success"]
+    assert (await client.ok("pin", pin="2468"))["pin_set"] is True
+    stored = hass.config_entries.async_entries(DOMAIN)[0].runtime_data.settings
+    assert "2468" not in str(stored["parent_pin"])
+
+    res = await kiosk("unlock", pin="1111")
+    assert res["error"]["message"] == "That's not the PIN. Try again."
+    token = (await kiosk.ok("unlock", pin="2468"))["pass"]
+
+    # With the pass: parent commands and the parent data.
+    state = await kiosk.ok("state", **{"pass": token})
+    assert state["parent"] is True
+    assert state["is_admin"] is False
+    assert "settings" in state
+    saved = await kiosk.ok(
+        "save", collection="members", item={"name": "Alex"}, **{"pass": token}
+    )
+    assert saved["item"]["name"] == "Alex"
+    await kiosk.ok("choices", **{"pass": token})
+    res = await kiosk("pin", pin="1357", **{"pass": token})
+    assert res["error"]["code"] == "unauthorized"
+
+    # Without it, or with a made-up one: still refused.
+    res = await kiosk("adjust", member_id=saved["item"]["id"], points=5)
+    assert res["error"]["code"] == "unauthorized"
+    res = await kiosk(
+        "adjust", member_id=saved["item"]["id"], points=5, **{"pass": "nope"}
+    )
+    assert res["error"]["code"] == "unauthorized"
+
+    # Back to Family ends it.
+    await kiosk.ok("lock", **{"pass": token})
+    state = await kiosk.ok("state", **{"pass": token})
+    assert state["parent"] is False
+    assert "settings" not in state
+
+    # Removing the PIN ends every pass.
+    token = (await kiosk.ok("unlock", pin="2468"))["pass"]
+    assert (await client.ok("pin", pin=None))["pin_set"] is False
+    assert (await kiosk.ok("state", **{"pass": token}))["parent"] is False
+
+
+async def test_parent_pass_belongs_to_its_login(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    await client.ok("pin", pin="2468")
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    token = (await kiosk.ok("unlock", pin="2468"))["pass"]
+    manager = hass.config_entries.async_entries(DOMAIN)[0].runtime_data
+    assert manager.passes.valid(token, "someone-else") is False
+    assert (await kiosk.ok("state", **{"pass": token}))["parent"] is True
+
+
+async def test_parent_pass_runs_out(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    from custom_components.family import parent_pass
+
+    await client.ok("pin", pin="2468")
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    now = 1000.0
+    with patch.object(parent_pass.time, "monotonic", lambda: now):
+        token = (await kiosk.ok("unlock", pin="2468"))["pass"]
+        now += parent_pass.PASS_SECONDS - 5
+        # Using it keeps it going.
+        assert (await kiosk.ok("state", **{"pass": token}))["parent"] is True
+        now += parent_pass.PASS_SECONDS - 5
+        assert (await kiosk.ok("state", **{"pass": token}))["parent"] is True
+        now += parent_pass.PASS_SECONDS + 1
+        assert (await kiosk.ok("state", **{"pass": token}))["parent"] is False
+
+
+async def test_wrong_pins_lock_the_pad_and_tell_the_parents(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    from custom_components.family import parent_pass
+
+    sent = async_mock_service(hass, "notify", "mobile_app_parent")
+    await client.ok("settings", notify_targets=["mobile_app_parent"])
+    await client.ok("pin", pin="2468")
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    now = 1000.0
+    with patch.object(parent_pass.time, "monotonic", lambda: now):
+        for _ in range(parent_pass.MAX_TRIES - 1):
+            res = await kiosk("unlock", pin="0000")
+            assert res["error"]["message"] == "That's not the PIN. Try again."
+        res = await kiosk("unlock", pin="0000")
+        assert "Too many wrong PINs" in res["error"]["message"]
+        await hass.async_block_till_done()
+        assert sent and sent[-1].data["title"] == "Parent PIN locked"
+        # Even the right PIN waits.
+        res = await kiosk("unlock", pin="2468")
+        assert "Too many wrong PINs" in res["error"]["message"]
+        now += parent_pass.LOCK_SECONDS + 1
+        assert (await kiosk.ok("unlock", pin="2468"))["pass"]
+
+
+async def test_admins_are_parents_without_a_pin(hass: HomeAssistant, client):
+    state = await client.ok("state")
+    assert state["parent"] is True
+    assert state["is_admin"] is True

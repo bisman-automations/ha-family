@@ -66,12 +66,12 @@ If **Family** does not appear in search:
 
 Select the button above, or go to **Settings > Devices & services > Add
 integration** and search for **Family**. Family is set up once; there's nothing
-to fill in. Two dashboards appear in the sidebar:
+to fill in. **Family** appears in the sidebar, for everyone. It's made for a
+shared touch screen such as a wall tablet or a kitchen display, and the
+**Parents** button at the top switches it to the parent controls (see
+[Parent controls and the parent PIN](#parent-controls-and-the-parent-pin)).
 
-- **Family**, for everyone, made for a shared touch screen such as a wall tablet or a kitchen display.
-- **Parents**, for Home Assistant admins only.
-
-On the **Parents** dashboard:
+In the parent controls:
 
 1. Under **Family**, add each family member. Pick an emoji and a color, and link them to their Home Assistant person if they have one: its picture is used, and if they log in to Home Assistant, the Family dashboard opens on their own page.
 2. Under **Chores**, add chores, and add any to-do lists whose items are chores.
@@ -84,7 +84,7 @@ On the **Parents** dashboard:
 - **Going for** (on your own page). How many of today's own chores are done and the bonus for finishing them, your streak (🔥 days in a row) and the next streak bonus, and the reward you're saving for.
 - **Notes.** Short notes and reminders for everyone, or for one person on their page. Tap **Add a note** to put one up from the screen, and ✕ to take it down. A note a parent put up can only be taken down by a parent. A note can show until a chosen day, then it goes by itself.
 - **Today.** Today's events from the calendars a parent picked, all-day ones first. On someone's own page, their calendar and the family's. Events that are already over stay, faded and marked **Over**. Tap **Next few days** for today, tomorrow and the five days after, in a pop-up.
-- **Meals.** Today's and tomorrow's breakfast, lunch and dinner, as planned on the Parents dashboard.
+- **Meals.** Today's and tomorrow's breakfast, lunch and dinner, as planned in the parent controls.
 - **My chores** and **Up for grabs.** On your own page, **My chores** are yours to do: finishing them all earns the all-done bonus and keeps your streak going. **Up for grabs** are extra: whoever does one first gets the points. Everyone's page shows only what's up for grabs for everyone; a chore up for grabs for some people shows on their own pages. Tap the round check box on a chore to tick it off; the points are added straight away. On your own page, or for a chore only one person can do, that's it; otherwise it asks who did it. Tapping the rest of the tile does nothing, so a stray tap doesn't tick anything off.
 - **Routines.** Checklists such as Morning or Bedtime. Tap one to open its steps and tick them off one at a time (on everyone's page, pick who's doing it first). Ticking the last step finishes it: the points are given straight away and it waits for a parent, like a chore. Ticked steps start fresh each day.
 - **Family goal** (under **Going for**, on every page). Something the whole family works toward together, such as Pizza night at 200 points, with a bar showing how far everyone has got.
@@ -99,15 +99,15 @@ On the **Parents** dashboard:
 
 After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page. A screen that shows one person's page (their tab, or a card with their member id) stays on that page.
 
-Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open. A parent can change the order of the sections for every screen on the Parents dashboard, under **Family** → **Family dashboard sections**. Tick **Hide sections with nothing in them** there to leave out a section that's empty, such as **Up for grabs** when nothing is up for grabs (**Notes** always shows, so a note can be added).
+Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open. A parent can change the order of the sections for every screen in the parent controls, under **Family** → **Family dashboard sections**. Tick **Hide sections with nothing in them** there to leave out a section that's empty, such as **Up for grabs** when nothing is up for grabs (**Notes** always shows, so a note can be added).
 
 To show it on a shared display, point the display's browser or kiosk app at `/family` on your Home Assistant. The display can be logged in as a user who isn't an admin: everyone can mark chores done and pick rewards, but only admins can check chores or change anything. The display can only use the home controls a parent put on the dashboard, nothing else.
 
 ### As a shared screen's default dashboard
 
-Home Assistant only lets a login pick a dashboard as its default, and the Family page in the sidebar isn't one. So on the **Parents** dashboard, under **Family**, tap **Make a Family dashboard**. It makes a dashboard called **Family dashboard** that shows the Family page full screen, with a **Home** tab for everyone and a tab for each family member that always shows their page. It's left out of the sidebar, since **Family** is already there.
+Home Assistant only lets a login pick a dashboard as its default, and the Family page in the sidebar isn't one. So in the parent controls, under **Family**, tap **Make a Family dashboard**. It makes a dashboard called **Family dashboard** that shows the Family page full screen, with a **Home** tab for everyone and a tab for each family member that always shows their page. It's left out of the sidebar, since **Family** is already there.
 
-The tabs follow your family: adding, renaming or removing someone on the **Parents** dashboard adds, renames or removes their tab. Anything you add to the dashboard yourself in Home Assistant, such as another card on a tab or a tab of your own, is kept. The button becomes **Update the Family dashboard** once the dashboard is there, for bringing the tabs back in line, for example after removing one by hand.
+The tabs follow your family: adding, renaming or removing someone in the parent controls adds, renames or removes their tab. Anything you add to the dashboard yourself in Home Assistant, such as another card on a tab or a tab of your own, is kept. The button becomes **Update the Family dashboard** once the dashboard is there, for bringing the tabs back in line, for example after removing one by hand.
 
 Then log in on the shared screen as its user, open your profile, and pick **Family dashboard** under **Dashboard**.
 
@@ -118,9 +118,22 @@ type: custom:family-card
 member: <member id>
 ```
 
-## The Parents dashboard
+## Parent controls and the parent PIN
 
-Every card on the Parents dashboard folds away: tap its title. A folded card stays folded until you tap it again, and each device remembers which cards are folded.
+**Parents** at the top of the Family page switches it to the parent controls; **Back to Family** switches back. The **Family** card on a dashboard has the same button.
+
+- **Logged in as a Home Assistant administrator** (a parent's own phone or computer), **Parents** opens straight away.
+- **Any other login** (the shared screen, a kid's tablet) asks for the **parent PIN**. A parent sets it in the parent controls under **Family** → **Parent PIN**, from an administrator's login. It's 4 to 8 digits, and Home Assistant only keeps a scrambled copy of it, never the PIN itself.
+- The PIN opens the parent controls on that screen until **Back to Family**, or until nobody has tapped it for two minutes. Restarting Home Assistant closes them too.
+- After five wrong PINs in a row, the pad locks for five minutes and the phones picked under **Parents' phones** get a notification.
+- With no PIN set, only an administrator's login can open the parent controls.
+- Making or updating the **Family dashboard** (under **Family**) needs an administrator's login, since it changes Home Assistant's dashboards. Everything else works with the PIN.
+
+Links to the old **Parents** page (`/family-parents`), including the ones in the parents' notifications, still open the parent controls.
+
+## The parent controls
+
+Every card in the parent controls folds away: tap its title. A folded card stays folded until you tap it again, and each device remembers which cards are folded.
 
 - **Quick points** (top of **To check**). Buttons for the things you want to notice, good and not so good, such as "💛 Kind to a sibling +2" or "🙉 Not listening −1". One tap next to someone gives or takes the points straight away, and it shows in History. Tap **Change the buttons** to set your own (up to 12; use a minus for points taken away).
 - **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Above them are rewards the kids want to get together: **Yes** gives the reward (TV and music time straight away), **No** gives everyone their points back. Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.
@@ -188,15 +201,16 @@ For automations, for example to send a message or play a sound:
 
 - **Diagnostics:** on the integration's page, open the menu and choose **Download diagnostics**. Attach the file to an issue (check it first for anything you'd rather not share).
 - **Debug logs:** on the integration's page choose **Enable debug logging**, reproduce the problem, then **Disable debug logging** to download the log.
-- **A reward doesn't show for someone.** On the Parents dashboard, under **Rewards**, the row says who it's for. **For: Everyone** (everyone in the list selected) shows on every page, including people you add later. People you left selected see it on their own pages, not on everyone's. **For: nobody** means it is unavailable: edit it and select who can get it. Removing the last person a reward was for does this on purpose.
+- **A reward doesn't show for someone.** In the parent controls, under **Rewards**, the row says who it's for. **For: Everyone** (everyone in the list selected) shows on every page, including people you add later. People you left selected see it on their own pages, not on everyone's. **For: nobody** means it is unavailable: edit it and select who can get it. Removing the last person a reward was for does this on purpose.
 - **Someone can't get a reward the screen still offered.** Getting it is also refused by Home Assistant, with a message that says the reward isn't for them, or that nobody can get it until a parent chooses who it's for. Their points are not taken.
 - **A music time reward says Media Mgmt isn't set up.** Install Media Mgmt and set up the speaker, then pick the speaker again in the reward.
 - **No phones to pick under Phones.** Install the Home Assistant app on the phone and log in to your Home Assistant; it adds the phone's notify action.
 - **Tapping Done right on a phone does nothing.** Only phones logged in as an admin can check chores. The chore may also have been checked or undone already.
 - **A TV time reward says TV Mgmt isn't set up.** Install TV Mgmt 1.20.0 or newer and set up the TV, then pick the TV again in the reward.
-- **A to-do list's items don't show.** Check the list on the Parents dashboard under **Chores**, and that the to-do list itself is available in Home Assistant.
-- **The Parents dashboard is missing.** It's only in the sidebar for admins.
-- **A home control says it isn't available.** The device is offline or was removed from Home Assistant. Check it in Home Assistant, or remove it under **Home** on the Parents dashboard and add its replacement.
+- **A to-do list's items don't show.** Check the list in the parent controls under **Chores**, and that the to-do list itself is available in Home Assistant.
+- **Where did the Parents page go?** Since 2.0.0 it's part of the Family page: tap **Parents** at the top.
+- **Parents asks for a PIN, but none was set.** Only an administrator's login opens the parent controls without a PIN. Log in as an administrator, then set one under **Family** → **Parent PIN**.
+- **A home control says it isn't available.** The device is offline or was removed from Home Assistant. Check it in Home Assistant, or remove it under **Home** in the parent controls and add its replacement.
 
 ## Development
 

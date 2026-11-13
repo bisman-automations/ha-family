@@ -46,6 +46,7 @@ from .const import (
     TV_MGMT_GRANT,
 )
 from .live_activity import ChoreActivity
+from .parent_pass import ParentPasses
 from .parents_notify import ParentNotices
 from .reminders import ChoreReminders
 from .routines import Routines
@@ -129,6 +130,7 @@ class FamilyManager:
         self.reminders = ChoreReminders(self)
         self.routines = Routines(self)
         self.live = ChoreActivity(self)
+        self.passes = ParentPasses(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
@@ -1844,7 +1846,9 @@ class FamilyManager:
 
     # ---- what the dashboards show ------------------------------------------------------
 
-    def snapshot(self, user_id: str | None, is_admin: bool) -> dict[str, Any]:
+    def snapshot(
+        self, user_id: str | None, is_admin: bool, parent: bool | None = None
+    ) -> dict[str, Any]:
         today = dt_util.now().date()
         members = [
             {
@@ -1932,13 +1936,15 @@ class FamilyManager:
             else None,
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
+            "parent": bool(is_admin if parent is None else parent),
+            "pin_set": self.passes.pin_set,
             "undo_seconds": model.UNDO_SECONDS,
             # The Family dashboard's sections, in the order a parent set.
             "section_order": model.section_order(self.settings.get("section_order")),
             "hide_empty_sections": bool(self.settings.get("hide_empty_sections")),
             "family_goal": self.family_goal(),
         }
-        if is_admin:
+        if is_admin if parent is None else parent:
             result["settings"] = {
                 "auto_check": self.settings.get("auto_check"),
                 "penalty": int(self.settings.get("penalty") or 0),

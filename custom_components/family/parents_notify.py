@@ -109,6 +109,18 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_chore")
 
     @callback
+    def pin_locked(self) -> None:
+        """Someone got the parent PIN wrong too many times on the shared screen."""
+        if not self.targets():
+            return
+        data = {
+            "title": "Parent PIN locked",
+            "message": "Someone entered a wrong parent PIN too many times on the Family screen. It's locked for a few minutes.",
+            "data": {"tag": "family-pin", "group": "family", "url": PARENTS_PATH},
+        }
+        self._spawn(self._send(data), "family_notify_pin")
+
+    @callback
     def reward_to_give(self, entry: dict[str, Any], member: dict[str, Any]) -> None:
         if not self._settings.get("notify_rewards") or not self.targets():
             return

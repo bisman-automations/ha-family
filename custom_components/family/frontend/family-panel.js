@@ -131,6 +131,7 @@ const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 const SECTIONS = [
   ["going", "Going for"],
   ["chores", "My chores"],
+  ["routines", "Routines"],
   ["grabs", "Up for grabs"],
   ["notes", "Notes"],
   ["today", "Today"],
@@ -393,6 +394,17 @@ const STYLES = `
   .items li.skipped .item-name { opacity: 0.5; text-decoration: line-through; }
   .chip.leave-out { color: var(--error-color, #db4437); }
   [hidden] { display: none !important; }
+  .routine-tile { text-align: left; }
+  .routine-people { display: flex; flex-wrap: wrap; gap: 4px; }
+  .routine-people .pill { font-size: 0.8em; padding: 2px 8px; border-radius: 999px; background: var(--secondary-background-color, #eee); }
+  .routine-people .pill.won { background: rgba(67, 160, 71, 0.18); }
+  textarea[name="steps"] { font: inherit; line-height: 1.5; }
+  ul.steps { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+  .step { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; font: inherit; font-size: 1.1em; text-align: left; border-radius: 14px; border: 1px solid var(--divider-color, #ddd); background: var(--card-background-color, #fff); color: var(--primary-text-color); cursor: pointer; }
+  .step .box { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; border: 2px solid var(--primary-color); color: #fff; font-weight: 700; }
+  .step.done { opacity: 0.75; }
+  .step.done .box { background: var(--primary-color); }
+  .step.done span:last-child { text-decoration: line-through; }
   .goal-status .bar { display: block; margin: 6px 0 4px; }
   .quick-buttons { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   details.left-out { margin-top: 8px; }
@@ -965,6 +977,8 @@ class FamilyPanel extends HTMLElement {
           <span class="worth">+${pts(e.points)}</span></div>`;
       })
       .join("")}</div>`;
+    // Someone's own routines on their page; every routine on everyone's.
+    const routines = (d.routines || []).filter((r) => !member || r.who.includes(member.id));
     const goingFor = [this._familyGoalTile(), ...(member ? this._goingFor(member) : [])].filter(Boolean);
     const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
     // "Add a note" comes first, so it's never folded away with the rest.
@@ -990,6 +1004,7 @@ class FamilyPanel extends HTMLElement {
       going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
       chores: member && (mine.length || (own.total && !hide)) ? this._section("chores", "My chores", mineBody, mine.length) : "",
       grabs: grabs.length || (!member && !hide) ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
+      routines: routines.length ? this._section("routines", "Routines", `<div class="tiles" data-fit="routines">${routines.map((r) => this._routineTile(r, member)).join("")}</div>`, routines.length) : "",
       notes: this._section("notes", "Notes", noteTiles, notes.length),
       today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
       meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
@@ -1005,6 +1020,75 @@ class FamilyPanel extends HTMLElement {
 
   // What someone's working toward: today's own chores, their streak, and
   // the reward they're saving for.
+  // A routine: its steps ticked so far (for that person, or everyone's).
+  _routineTile(r, member) {
+    const total = r.steps.length;
+    const done = (id) => (r.finished.includes(id) ? total : (r.ticked[id] || []).length);
+    const finished = member ? r.finished.includes(member.id) : r.who.every((id) => r.finished.includes(id));
+    const people = member
+      ? `${this._bar(done(member.id), total)}<span class="sub">${finished ? "All done" : `${done(member.id)} of ${total} steps`}</span>`
+      : `<span class="routine-people">${r.who
+          .map((id) => this._memberById(id))
+          .filter(Boolean)
+          .map((m) => `<span class="pill${r.finished.includes(m.id) ? " won" : ""}">${esc(m.name)} ${r.finished.includes(m.id) ? "✓" : `${done(m.id)}/${total}`}</span>`)
+          .join("")}</span>`;
+    return `<button class="tile routine-tile${finished ? " won" : ""}" data-routine="${esc(r.id)}"><span class="emoji">${esc(r.emoji || "📋")}</span>
+      <span class="label">${esc(r.name)}</span>${people}${r.points ? `<span class="worth">+${pts(r.points)}</span>` : ""}</button>`;
+  }
+
+  _routineSheet() {
+    const s = this._sheet;
+    const r = (this._data.routines || []).find((x) => x.id === s.id);
+    if (!r) return "";
+    const head = `<h3>${esc(r.emoji || "📋")} ${esc(r.name)}</h3>`;
+    if (!s.member) {
+      const people = r.who.map((id) => this._memberById(id)).filter(Boolean);
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(r.name)}">${head}
+        <p class="muted">Who's doing it?</p>
+        <div class="people small-people">${people.map((m) => `<button class="person" style="--c:${esc(m.color)}" data-routine-who="${esc(m.id)}" ${r.finished.includes(m.id) ? "disabled" : ""}>${this._avatar(m, true)}<span class="name">${esc(m.name)}${r.finished.includes(m.id) ? " ✓" : ""}</span></button>`).join("")}</div>
+        <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
+    }
+    const member = this._memberById(s.member);
+    const finished = r.finished.includes(s.member);
+    const ticked = new Set(finished ? r.steps.map((_, i) => i) : r.ticked[s.member] || []);
+    const steps = r.steps
+      .map((text, i) => `<li><button class="step${ticked.has(i) ? " done" : ""}" data-routine-step="${i}" aria-pressed="${ticked.has(i)}" ${finished || this._busy ? "disabled" : ""}>
+        <span class="box" aria-hidden="true">${ticked.has(i) ? "✓" : ""}</span><span>${esc(text)}</span></button></li>`)
+      .join("");
+    return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(r.name)}">${head}
+      <p class="muted">${esc(member?.name || "")}${finished ? " finished it today." : `: tick each step. The last one finishes it${r.points ? ` for +${pts(r.points)}` : ""}.`}</p>
+      ${this._bar(ticked.size, r.steps.length)}
+      <ul class="steps">${steps}</ul>
+      <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
+  }
+
+  async _routineStep(index) {
+    const s = this._sheet;
+    const r = (this._data.routines || []).find((x) => x.id === s?.id);
+    if (!r || !s.member || this._busy) return;
+    const member = this._memberById(s.member);
+    const done = !(r.ticked[s.member] || []).includes(index);
+    this._busy = true;
+    // Show the tick straight away; the reply confirms it.
+    r.ticked[s.member] = done ? [...(r.ticked[s.member] || []), index] : (r.ticked[s.member] || []).filter((i) => i !== index);
+    this._renderOverlay();
+    try {
+      const res = await this._ws({ type: `${DOMAIN}/routine/step`, routine_id: r.id, member_id: s.member, step: index, done });
+      if (res.entry) {
+        this._sheet = null;
+        this._toast(`${r.name} done, ${member?.name}!${r.points ? ` +${pts(r.points)}` : ""}`, false, res.entry.id);
+        this._celebrate(member);
+      }
+      await this._load();
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+      await this._load();
+    } finally {
+      this._busy = false;
+      this._renderOverlay();
+    }
+  }
+
   // The goal the whole family works toward together.
   _familyGoalTile() {
     const g = this._data.family_goal;
@@ -1244,6 +1328,7 @@ class FamilyPanel extends HTMLElement {
         <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
     }
     if (s.type === "together") return this._togetherSheet();
+    if (s.type === "routine") return this._routineSheet();
     if (s.type === "control") {
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.verb)}">
         <h3>${esc(s.verb)} ${esc(s.name)}?</h3>
@@ -1339,6 +1424,7 @@ class FamilyPanel extends HTMLElement {
     const tabs = [
       ["review", `To check${checks ? `<span class="badge">${checks}</span>` : ""}`],
       ["chores", "Chores"],
+      ["routines", "Routines"],
       ["rewards", "Rewards"],
       ["home", "Home"],
       ["meals", "Meals"],
@@ -1352,6 +1438,7 @@ class FamilyPanel extends HTMLElement {
     const body = {
       review: () => this._renderReview(),
       chores: () => this._renderChores(),
+      routines: () => this._renderRoutines(),
       rewards: () => this._renderRewards(),
       home: () => this._renderHome(),
       meals: () => this._renderMeals(),
@@ -1473,6 +1560,55 @@ class FamilyPanel extends HTMLElement {
     return `<div class="inline">${d.members
       .map((m) => `<label class="check"><input type="checkbox" name="members" value="${esc(m.id)}" ${selected?.includes(m.id) ? "checked" : ""}> ${esc(m.name)}</label>`)
       .join("")}</div><small>None ticked: anyone can do it.</small>`;
+  }
+
+  // Routines: step-by-step checklists such as Morning or Bedtime.
+  _renderRoutines() {
+    const d = this._data;
+    const all = d.all_routines || [];
+    const edit = this._edit;
+    const last = all.length - 1;
+    const rows = all.length
+      ? `<ul class="rows">${all
+          .map((r, i) => {
+            const who = (r.members || []).map((id) => this._memberById(id)?.name).filter(Boolean);
+            const when = [r.days?.length && r.days.length < 7 ? r.days.map((x) => DAYS[x]).join(", ") : "Every day", r.from_time || r.until_time ? `${r.from_time ? timeText(r.from_time) : "…"} to ${r.until_time ? timeText(r.until_time) : "…"}` : ""].filter(Boolean).join(" · ");
+            return `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>${r.enabled === false ? " <small>(hidden)</small>" : ""}
+              <small>${r.steps.length} ${r.steps.length === 1 ? "step" : "steps"} · +${pts(r.points)} when finished · ${esc(who.length ? namesText(who) : "Everyone")} · ${esc(when)}</small></span>
+              <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+              <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="1" ${i === last ? "disabled" : ""} aria-label="Move down">↓</button>
+              <button class="btn" data-edit="routines" data-id="${esc(r.id)}">Edit</button>
+              <button class="btn bad" data-delete="routines" data-id="${esc(r.id)}">Remove</button></li>`;
+          })
+          .join("")}</ul>`
+      : `<p class="empty">No routines yet. A morning or bedtime checklist is a good start.</p>`;
+    const form = edit?.collection === "routines" ? this._routineForm(edit.item) : `<button class="btn primary" data-new="routines">Add a routine</button>`;
+    return `<div class="card"><h2>Routines</h2>
+      <p class="muted">A checklist someone works through on the Family dashboard, one step at a time. Ticking the last step finishes it: the points are given straight away and it waits under <b>To check</b>, like a chore. Ticked steps start fresh each day.</p>
+      ${rows}${form}</div>`;
+  }
+
+  _routineForm(item) {
+    const r = item || { name: "", points: 5, members: [], steps: [], enabled: true };
+    return `<form class="edit" data-form="routines" data-id="${esc(r.id || "")}">
+      <div class="inline">
+        <label class="field"><span>Routine</span><input type="text" name="name" value="${esc(r.name)}" required placeholder="Morning"></label>
+        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(r.emoji || "")}" size="3" placeholder="🌅"></label>
+        <label class="field"><span>Points when finished</span><input type="number" name="points" min="0" max="10000" value="${esc(r.points)}"></label>
+      </div>
+      <label class="field"><span>Steps, one on each line</span><textarea name="steps" rows="6" required placeholder="🛏️ Make your bed&#10;👕 Get dressed&#10;🪥 Brush your teeth&#10;🎒 Pack your bag">${esc((r.steps || []).join("\n"))}</textarea>
+        <small>Up to 20. Start a line with an emoji if you like.</small></label>
+      <div class="field"><span>Who does it</span>${this._whoChecks(r.members)}</div>
+      <div class="field"><span>Which days</span><div class="inline">${DAYS.map((x, i) => `<label class="check"><input type="checkbox" name="days" value="${i}" ${(r.days || []).includes(i) ? "checked" : ""}> ${x}</label>`).join("")}</div>
+        <small>None ticked: every day. School mornings? Tick Monday to Friday.</small></div>
+      <div class="inline">
+        <label class="field"><span>Shown from</span><input type="time" name="from_time" value="${esc(r.from_time || "")}"></label>
+        <label class="field"><span>Until</span><input type="time" name="until_time" value="${esc(r.until_time || "")}"></label>
+        <small style="align-self:end">Empty: all day.</small>
+      </div>
+      <label class="check"><input type="checkbox" name="enabled" ${r.enabled !== false ? "checked" : ""}> Show it on the Family dashboard</label>
+      <div class="form-actions"><button class="btn primary" type="submit">Save routine</button><button class="btn" type="button" data-cancel>Cancel</button></div>
+    </form>`;
   }
 
   _renderChores() {
@@ -2131,6 +2267,17 @@ class FamilyPanel extends HTMLElement {
       this._sheet = { type: "chore", id: ds.chore, member: who, quick: !!who };
       if (who) this._confirm();
       else this._renderOverlay();
+    } else if (ds.routine) {
+      this._sheet = { type: "routine", id: ds.routine, member: this._member || null };
+      const r = (this._data.routines || []).find((x) => x.id === ds.routine);
+      // Only one person does it: no need to ask who.
+      if (!this._sheet.member && r?.who.length === 1) this._sheet.member = r.who[0];
+      this._renderOverlay();
+    } else if (ds.routineWho) {
+      this._sheet = { ...this._sheet, member: ds.routineWho };
+      this._renderOverlay();
+    } else if (ds.routineStep !== undefined) {
+      this._routineStep(Number(ds.routineStep));
     } else if (ds.reward) {
       this._sheet = { type: "reward", id: ds.reward, member: this._member };
       this._renderOverlay();
@@ -2178,7 +2325,7 @@ class FamilyPanel extends HTMLElement {
       this._rewardKind = null;
       this._render();
     } else if (ds.edit) {
-      const list = ds.edit === "chores" ? this._data.all_chores : this._data[ds.edit];
+      const list = ds.edit === "chores" ? this._data.all_chores : ds.edit === "routines" ? this._data.all_routines : this._data[ds.edit];
       this._edit = { collection: ds.edit, item: list.find((x) => x.id === ds.id) };
       this._rewardKind = null;
       this._render();
@@ -2353,6 +2500,8 @@ class FamilyPanel extends HTMLElement {
     let item;
     if (collection === "chores") {
       item = { remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
+    } else if (collection === "routines") {
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), members: v.members || [], steps: (v.steps || "").split("\n").map((x) => x.trim()).filter(Boolean), days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, enabled: !!v.enabled };
     } else if (collection === "rewards") {
       // All ticked: anyone, including people added later. A shorter list:
       // only those people. Nobody ticked: the reward is unavailable.

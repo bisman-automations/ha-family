@@ -279,6 +279,7 @@ async def test_section_order(hass: HomeAssistant, client):
         [
             "going",
             "chores",
+            "routines",
             "grabs",
             "notes",
             "today",

@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-11-13
+
+### Added
+
+- **Routines.** Step-by-step checklists such as Morning or Bedtime, in their own **Routines** tab on the Parents dashboard. Give a routine its steps, the points for finishing it, who does it, and which days and hours it shows. On the Family dashboard, tap a routine to open its checklist and tick the steps off one at a time. Ticking the last step finishes it: the points are given straight away, there's a celebration, and it waits under **To check** like a chore. Ticked steps start fresh each day. The Family dashboard gets a **Routines** section, which can be moved like the others.
+
 ## [1.20.0] - 2026-11-13
 
 ### Added
@@ -245,6 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.21.0]: https://github.com/bisman-automations/ha-family/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/bisman-automations/ha-family/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/bisman-automations/ha-family/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/bisman-automations/ha-family/compare/v1.17.0...v1.18.0

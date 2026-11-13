@@ -56,6 +56,7 @@ GIVEN_DONE = "given"
 SECTIONS = (
     "going",
     "chores",
+    "routines",
     "grabs",
     "notes",
     "today",

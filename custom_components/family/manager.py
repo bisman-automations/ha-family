@@ -47,6 +47,7 @@ from .const import (
 )
 from .parents_notify import ParentNotices
 from .reminders import ChoreReminders
+from .routines import Routines
 from .todo_sync import TodoSync
 
 _LOGGER = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ class FamilyManager:
         self.notes: list[dict[str, Any]] = []
         self.calendar = CalendarToday(self)
         self.reminders = ChoreReminders(self)
+        self.routines = Routines(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
@@ -154,6 +156,7 @@ class FamilyManager:
             if isinstance(v, dict)
         }
         self.notes = [n for n in data.get("notes") or [] if isinstance(n, dict)]
+        self.routines.load(data)
         # Streaks count days with all of one's own chores done from this day;
         # before it, any chore, as they used to.
         if "streak_rule_from" not in self.settings:
@@ -181,6 +184,7 @@ class FamilyManager:
             "carried": self.carried,
             "meals": self.meals,
             "notes": self.notes,
+            **self.routines.data(),
         }
 
     @callback
@@ -193,6 +197,17 @@ class FamilyManager:
         if members:
             for listener in list(self._member_listeners):
                 listener()
+
+    @callback
+    def changed(self) -> None:
+        """Save and tell the dashboards (for the family tools in other modules)."""
+        self._changed()
+
+    def known_members(self, raw: Any) -> list[str]:
+        return self._known_members(raw)
+
+    async def is_parent(self, member: dict[str, Any]) -> bool:
+        return await self._is_parent(member)
 
     @callback
     def save(self) -> None:
@@ -1681,12 +1696,14 @@ class FamilyManager:
             "rewards": self.rewards,
             "todo_lists": self.todo_lists,
             "controls": self.controls,
+            "routines": self.routines.items,
         }[collection]
 
     async def async_delete(self, collection: str, item_id: str) -> None:
         items = self._collection(collection)
         items[:] = [i for i in items if i["id"] != item_id]
         if collection == "members":
+            self.routines.forget_member(item_id)
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
             # Drop them from rewards they were picked for. An empty list stays
@@ -1860,6 +1877,7 @@ class FamilyManager:
         result: dict[str, Any] = {
             "members": members,
             "chores": self.chores_for(None),
+            "routines": self.routines.today(),
             "rewards": rewards,
             "controls": controls,
             "done_today": sorted(
@@ -1924,6 +1942,7 @@ class FamilyManager:
                 "reminder_tts": self.settings.get("reminder_tts"),
             }
             result["all_chores"] = self.chores
+            result["all_routines"] = self.routines.items
             result["todo_lists"] = [
                 {
                     **t,

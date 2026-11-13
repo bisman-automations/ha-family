@@ -24,7 +24,7 @@ from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
 from .parents_notify import target_name
 
-COLLECTIONS = ("members", "chores", "rewards", "todo_lists", "controls")
+COLLECTIONS = ("members", "chores", "rewards", "todo_lists", "controls", "routines")
 
 
 @callback
@@ -33,6 +33,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_state,
         ws_subscribe,
         ws_complete,
+        ws_routine_step,
         ws_redeem,
         ws_control,
         ws_undo,
@@ -110,6 +111,24 @@ def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
         hass, SIGNAL_CHANGED, changed
     )
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/routine/step",
+        vol.Required("routine_id"): str,
+        vol.Required("member_id"): str,
+        vol.Required("step"): int,
+        vol.Required("done"): bool,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
+    """Tick a routine's step: open to everyone, like ticking off a chore."""
+    return await manager.routines.async_step(
+        msg["routine_id"], msg["member_id"], msg["step"], msg["done"]
+    )
 
 
 @websocket_api.websocket_command(
@@ -307,6 +326,9 @@ async def ws_save(hass, connection, msg, manager) -> dict[str, Any]:
         saved = manager.save_reward(item)
     elif collection == "controls":
         saved = manager.save_control(item)
+    elif collection == "routines":
+        saved = manager.routines.save(item)
+        manager.changed()
     else:
         saved = await manager.async_save_todo_list(item)
     return {"item": saved}

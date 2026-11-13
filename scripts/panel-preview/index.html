@@ -148,10 +148,21 @@ const familyGoal = () => {
   const progress = entries.filter((e) => (e.kind === "chore" || e.kind === "bonus") && e.review !== "rejected" && e.at >= g.since).reduce((n, e) => n + Math.max(0, e.points || 0), 0);
   return { name: g.name, emoji: g.emoji, target: g.target, progress: Math.min(progress, g.target), reached: progress >= g.target, since: g.since };
 };
-const SECTION_KEYS = ["going", "chores", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
+// Routines, like routines.py: today's ticked steps, and who finished.
+let routines = [
+  { id: "rt1", name: "Morning", emoji: "🌅", points: 3, members: [], steps: ["🛏️ Make your bed", "👕 Get dressed", "🪥 Brush your teeth", "🎒 Pack your bag"], days: [], from_time: null, until_time: null, enabled: true },
+  { id: "rt2", name: "Bedtime", emoji: "🌙", points: 2, members: ["a"], steps: ["🛁 Bath", "🪥 Brush your teeth", "📖 Read a story"], days: [], from_time: null, until_time: null, enabled: true },
+];
+const routineSteps = { rt1: { a: [0, 1], s: [0] } };
+const routineFinished = (id, member) => entries.some((e) => e.routine_id === id && e.member === member && e.review !== "rejected" && isToday(e.at));
+const routinesToday = () => routines.filter((r) => r.enabled !== false).map((r) => {
+  const who = r.members.length ? r.members : members.map((x) => x.id);
+  return { ...r, who, ticked: Object.fromEntries(who.map((id) => [id, [...((routineSteps[r.id] || {})[id] || [])]])), finished: who.filter((id) => routineFinished(r.id, id)) };
+});
+const SECTION_KEYS = ["going", "chores", "routines", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
 const sectionList = (order) => { const out = (order || []).filter((k, i, all) => SECTION_KEYS.includes(k) && all.indexOf(k) === i); return [...out, ...SECTION_KEYS.filter((k) => !out.includes(k))]; };
 const state = () => ({
-  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: params.get("mode") === "parents",
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -186,6 +197,7 @@ window.hass = {
       if (next) setTimeout(() => setState(c.entity_id, next), 300);
       return {};
     }
+    if (t === "move" && msg.collection === "routines") { const i = routines.findIndex((x) => x.id === msg.item_id); const j = Math.max(0, Math.min(routines.length - 1, i + msg.offset)); routines.splice(j, 0, routines.splice(i, 1)[0]); return {}; }
     if (t === "move") { const i = controls.findIndex((x) => x.id === msg.item_id); const j = Math.max(0, Math.min(controls.length - 1, i + msg.offset)); controls.splice(j, 0, controls.splice(i, 1)[0]); return {}; }
     const m = members.find((x) => x.id === msg.member_id);
     if (t === "complete") { const c = chores().find((x) => x.id === msg.chore_id); m.points += c.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "chore", member: m.id, chore_id: c.id, title: c.name, points: c.points, review: "pending" }; entries.push(e);
@@ -242,8 +254,25 @@ window.hass = {
       return {};
     }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
-    if (t === "save") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (msg.collection === "rewards" && !Object.hasOwn(msg.item, "members")) item.members = i >= 0 ? (list[i].members ?? null) : null; if (msg.collection === "rewards" && Array.isArray(item.members)) { const ids = members.map((m) => m.id); const known = item.members.filter((id) => ids.includes(id)); item.members = ids.length && known.length === ids.length ? null : known; } if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); if (msg.collection === "rewards") { for (const person of members) { if (person.goal === item.id && item.members != null && !item.members.includes(person.id)) person.goal = null; } } } return { item: msg.item }; }
-    if (t === "delete") { const list = { chores: allChores, rewards, members, controls }[msg.collection]; const i = list ? list.findIndex((x) => x.id === msg.item_id) : -1; if (i >= 0) list.splice(i, 1); if (msg.collection === "members") { for (const reward of rewards) { if (Array.isArray(reward.members)) reward.members = reward.members.filter((id) => id !== msg.item_id); } for (const person of members) { const reward = rewards.find((r) => r.id === person.goal); if (person.goal && reward && reward.members != null && !reward.members.includes(person.id)) person.goal = null; } } if (msg.collection === "rewards") { for (const person of members) if (person.goal === msg.item_id) person.goal = null; } return {}; }
+    if (t === "save" && msg.collection === "routines" && !(msg.item.steps || []).length) throw { message: "Give the routine at least one step" };
+    if (t === "save") { const list = { chores: allChores, rewards, members, controls, routines }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (msg.collection === "rewards" && !Object.hasOwn(msg.item, "members")) item.members = i >= 0 ? (list[i].members ?? null) : null; if (msg.collection === "rewards" && Array.isArray(item.members)) { const ids = members.map((m) => m.id); const known = item.members.filter((id) => ids.includes(id)); item.members = ids.length && known.length === ids.length ? null : known; } if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); if (msg.collection === "rewards") { for (const person of members) { if (person.goal === item.id && item.members != null && !item.members.includes(person.id)) person.goal = null; } } } return { item: msg.item }; }
+    if (t === "delete") { const list = { chores: allChores, rewards, members, controls, routines }[msg.collection]; const i = list ? list.findIndex((x) => x.id === msg.item_id) : -1; if (i >= 0) list.splice(i, 1); if (msg.collection === "members") { for (const reward of rewards) { if (Array.isArray(reward.members)) reward.members = reward.members.filter((id) => id !== msg.item_id); } for (const person of members) { const reward = rewards.find((r) => r.id === person.goal); if (person.goal && reward && reward.members != null && !reward.members.includes(person.id)) person.goal = null; } } if (msg.collection === "rewards") { for (const person of members) if (person.goal === msg.item_id) person.goal = null; } return {}; }
+    if (t === "routine/step") {
+      const r = routines.find((x) => x.id === msg.routine_id);
+      if (!r) throw { message: "That routine isn't there any more" };
+      const who = r.members.length ? r.members : members.map((x) => x.id);
+      if (!who.includes(msg.member_id)) throw { message: `${r.name} isn't ${m.name}'s` };
+      if (routineFinished(r.id, msg.member_id)) throw { message: `${m.name} already finished ${r.name}` };
+      const ticked = new Set((routineSteps[r.id] ||= {})[msg.member_id] || []);
+      if (msg.done) ticked.add(msg.step); else ticked.delete(msg.step);
+      routineSteps[r.id][msg.member_id] = [...ticked].sort();
+      const res = { ticked: routineSteps[r.id][msg.member_id] };
+      if (ticked.size >= r.steps.length) {
+        const entry = { id: "e" + Date.now(), at: new Date().toISOString(), kind: "chore", member: msg.member_id, title: r.name, points: r.points, routine_id: r.id, chore_id: "routine:" + r.id, review: "pending" };
+        entries.push(entry); m.points += r.points; res.entry = entry;
+      }
+      return res;
+    }
     if (t === "adjust") { m.points += msg.points; return { points: m.points }; }
     throw { message: "unknown " + msg.type };
   },

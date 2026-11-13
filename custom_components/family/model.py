@@ -480,6 +480,32 @@ def clean_points(value: Any, label: str = "Points", minimum: int = 0) -> int:
     return points
 
 
+MAX_QUICK_POINTS = 12
+
+
+def quick_points(raw: Any) -> list[dict[str, Any]]:
+    """Parents' one-tap points buttons: a label, an optional emoji, and points
+    to give (or, below 0, to take away). Blank or 0-point rows are dropped."""
+    result = []
+    for row in raw or []:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()[:40]
+        points = clean_points(
+            row.get("points") or 0, f"Points for {label or 'a button'}", -MAX_POINTS
+        )
+        if not label or not points:
+            continue
+        result.append(
+            {
+                "label": label,
+                "emoji": str(row.get("emoji") or "").strip()[:8],
+                "points": points,
+            }
+        )
+    return result[:MAX_QUICK_POINTS]
+
+
 # ---- home controls ------------------------------------------------------------------
 # Entities a parent puts on the Family dashboard: what each kind of entity does
 # when it's tapped, and which actions it allows.

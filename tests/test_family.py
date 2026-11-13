@@ -244,6 +244,7 @@ async def test_chores_from_a_todo_list(hass: HomeAssistant, client):
         "unrated": 3,
         "members": [],
         "emoji": None,
+        "skip": False,
     }
     await client.ok(
         "save",

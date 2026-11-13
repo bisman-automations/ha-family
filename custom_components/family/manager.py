@@ -442,6 +442,8 @@ class FamilyManager:
                 )
                 if model.item_key(name) in seen:
                     continue
+                if model.item_key(name) in (todo.get("item_skip") or []):
+                    continue  # left out of the chores by a parent
                 seen.add(model.item_key(name))
                 chores.append(
                     {
@@ -831,6 +833,8 @@ class FamilyManager:
         if "streak_days" in raw:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
+        if "quick_points" in raw:
+            self.settings["quick_points"] = model.quick_points(raw["quick_points"])
         if "hide_empty_sections" in raw:
             self.settings["hide_empty_sections"] = bool(raw["hide_empty_sections"])
         if "section_order" in raw:
@@ -1498,6 +1502,15 @@ class FamilyManager:
                 emojis[key] = text
             else:
                 emojis.pop(key, None)
+        # Items left out of the chores, by name, kept the same way.
+        skipped = set(existing.get("item_skip") or [])
+        for name, skip in (raw.get("item_skip") or {}).items():
+            if not (key := model.item_key(name)):
+                continue
+            if skip:
+                skipped.add(key)
+            else:
+                skipped.discard(key)
         todo = {
             "id": entity_id,
             "entity_id": entity_id,
@@ -1508,6 +1521,7 @@ class FamilyManager:
             "item_points": rated,
             "item_members": assigned,
             "item_emojis": emojis,
+            "item_skip": sorted(skipped),
             # Only items due now or overdue show as chores; ones with no due
             # date always do.
             "due_only": bool(raw.get("due_only")),
@@ -1821,6 +1835,7 @@ class FamilyManager:
                 "point_value": self.settings.get("point_value"),
                 "currency": self.settings.get("currency") or "",
                 "calendars": list(self.settings.get("calendars") or []),
+                "quick_points": list(self.settings.get("quick_points") or []),
             }
             result["all_chores"] = self.chores
             result["todo_lists"] = [
@@ -1893,6 +1908,7 @@ class FamilyManager:
                         (todo.get("item_members") or {}).get(model.item_key(name), [])
                     ),
                     "emoji": (todo.get("item_emojis") or {}).get(model.item_key(name)),
+                    "skip": model.item_key(name) in (todo.get("item_skip") or []),
                 }
             )
         return rows

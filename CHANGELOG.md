@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-11-13
+
+### Added
+
+- **Leave single to-do items out of the chores.** Under **Chores from to-do lists**, tap **Points for items** and tick **Leave out** next to an item that isn't a chore, such as a bill to pay. It stays on the to-do list but never shows on the Family dashboard. Untick it to bring it back. Left-out items move into a folded **Left out** group at the end of the list, so the rows you use stay short.
+- **Quick points.** At the top of **To check**, one-tap buttons give or take points for the things you want to notice, such as "💛 Kind to a sibling +2" or "🙉 Not listening −1". Each tap shows in History. Tap **Change the buttons** to set your own, up to 12.
+
 ## [1.18.0] - 2026-11-13
 
 ### Added
@@ -227,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[1.19.0]: https://github.com/bisman-automations/ha-family/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/bisman-automations/ha-family/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/bisman-automations/ha-family/compare/v1.16.1...v1.17.0
 [1.16.1]: https://github.com/bisman-automations/ha-family/compare/v1.16.0...v1.16.1

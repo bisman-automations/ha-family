@@ -327,3 +327,61 @@ async def test_hide_empty_sections(hass: HomeAssistant, client):
     assert (await client.ok("state"))["hide_empty_sections"] is False
     await client.ok("settings", hide_empty_sections=True)
     assert (await client.ok("state"))["hide_empty_sections"] is True
+
+
+async def test_leave_out_items(hass: HomeAssistant, client):
+    from tests.test_family import FakeTodoList, _sync
+
+    await _family(client)
+    todo = FakeTodoList(hass, "todo.house")
+    for uid, name in [("a", "Pay the bill"), ("b", "Feed the dog")]:
+        todo.items.append({"uid": uid, "summary": name, "status": "needs_action"})
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={
+            "entity_id": "todo.house",
+            "points": 1,
+            "item_skip": {"pay the bill": True},
+        },
+    )
+    await _sync(hass)
+    names = [c["name"] for c in (await client.ok("state"))["chores"]]
+    assert "Pay the bill" not in names and "Feed the dog" in names
+    # Still on the list, and back once it's unticked.
+    assert len(todo.items) == 2
+    await client.ok(
+        "save",
+        collection="todo_lists",
+        item={
+            "entity_id": "todo.house",
+            "points": 1,
+            "item_skip": {"Pay the bill": False},
+        },
+    )
+    names = [c["name"] for c in (await client.ok("state"))["chores"]]
+    assert "Pay the bill" in names
+
+
+async def test_quick_points(hass: HomeAssistant, client):
+    alex, _sam = await _family(client)
+    settings = await client.ok(
+        "settings",
+        quick_points=[
+            {"label": " Kind to a sibling ", "emoji": "💛", "points": 2},
+            {"label": "Not listening", "points": -1},
+            {"label": "", "points": 3},  # no label: dropped
+            {"label": "Nothing", "points": 0},  # no points: dropped
+        ],
+    )
+    assert settings["settings"]["quick_points"] == [
+        {"label": "Kind to a sibling", "emoji": "💛", "points": 2},
+        {"label": "Not listening", "emoji": "", "points": -1},
+    ]
+    state = await client.ok("state")
+    assert len(state["settings"]["quick_points"]) == 2
+    # A tap is a points change with the button's name, so it shows in History.
+    before = next(m for m in state["members"] if m["id"] == alex)["points"]
+    reply = await client.ok("adjust", member_id=alex, points=-1, reason="Not listening")
+    assert reply["points"] == before - 1
+    assert reply["entry"]["title"] == "Not listening"

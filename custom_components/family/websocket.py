@@ -362,6 +362,13 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("currency"): vol.Any(None, str),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
+        vol.Optional("quick_points"): [
+            {
+                vol.Required("label"): str,
+                vol.Optional("emoji"): vol.Any(None, str),
+                vol.Required("points"): vol.Coerce(int),
+            }
+        ],
         vol.Optional("calendars"): [
             {vol.Required("entity_id"): str, vol.Optional("member"): vol.Any(None, str)}
         ],

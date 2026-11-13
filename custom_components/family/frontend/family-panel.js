@@ -390,6 +390,11 @@ const STYLES = `
   .card > h2[data-fold]::before { content: ""; width: 9px; height: 9px; border-right: 2.5px solid currentColor; border-bottom: 2.5px solid currentColor; transform: rotate(45deg); margin: 0 4px 4px 2px; transition: transform .15s; flex: none; }
   .card.folded > h2[data-fold]::before { transform: rotate(-45deg); margin-bottom: 0; }
   .card.folded > :not(h2) { display: none; }
+  .items li.skipped .item-name { opacity: 0.5; text-decoration: line-through; }
+  .chip.leave-out { color: var(--error-color, #db4437); }
+  .quick-buttons { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  details.left-out { margin-top: 8px; }
+  details.left-out > summary { cursor: pointer; color: var(--secondary-text-color); padding: 6px 0; }
   .matrix-wrap { overflow-x: auto; }
   .matrix table { border-collapse: collapse; }
   .matrix th, .matrix td { padding: 8px 6px; min-width: 64px; border-top: 1px solid var(--fam-divider); text-align: center; font-weight: 400; }
@@ -1344,6 +1349,38 @@ class FamilyPanel extends HTMLElement {
     return bar + body;
   }
 
+  // One-tap points for how someone's doing ("Kind to a sibling" +2,
+  // "Not listening" -1). The buttons are the parents' own; each tap is a
+  // points change in History, like Change points.
+  _quickCard() {
+    const d = this._data;
+    const buttons = d.settings?.quick_points || [];
+    if (this._edit?.collection === "quick_points") return `<div class="card"><h2>Quick points</h2>${this._quickForm(buttons)}</div>`;
+    const rows = buttons.length && d.members.length
+      ? `<ul class="rows quick">${d.members
+          .map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b><small>${pts(m.points)}</small></span>
+            <span class="quick-buttons">${buttons
+              .map((b, i) => `<button class="btn ${b.points > 0 ? "good" : "bad"}" data-quick="${i}" data-member-id="${esc(m.id)}" ${this._busy ? "disabled" : ""}>${b.emoji ? `${esc(b.emoji)} ` : ""}${esc(b.label)} ${b.points > 0 ? "+" : "−"}${Math.abs(b.points)}</button>`)
+              .join("")}</span></li>`)
+          .join("")}</ul>`
+      : `<p class="empty">${d.members.length ? "No buttons yet. Add a few for the things you want to notice, good and not so good." : "Add your family first."}</p>`;
+    return `<div class="card"><h2>Quick points</h2>
+      <p class="muted">One tap gives or takes points straight away. It shows in History.</p>
+      ${rows}<button class="btn" data-new="quick_points">${buttons.length ? "Change the buttons" : "Add buttons"}</button></div>`;
+  }
+
+  _quickForm(buttons) {
+    const rows = [...buttons, { label: "", emoji: "", points: "" }, { label: "", emoji: "", points: "" }];
+    return `<form class="edit" data-quick-form>
+      <p class="muted">Use a minus for points taken away, like −1. Leave a row empty to remove it. Up to 12 buttons.</p>
+      <ul class="rows">${rows
+        .map((b) => `<li><input class="item-emoji" name="emoji" maxlength="8" value="${esc(b.emoji || "")}" placeholder="+" aria-label="Emoji">
+          <input class="grow" name="label" maxlength="40" value="${esc(b.label || "")}" placeholder="Kind to a sibling" aria-label="What it's for">
+          <input type="number" name="points" min="-10000" max="10000" value="${esc(b.points)}" placeholder="2" aria-label="Points" style="width:90px"></li>`)
+        .join("")}</ul>
+      <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div></form>`;
+  }
+
   _renderReview() {
     const d = this._data;
     const check = d.to_check.length
@@ -1381,7 +1418,7 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul>`
       : `<p class="empty">No rewards to hand out.</p>`;
     const auto = d.settings?.auto_check || "";
-    return `${approve}<div class="card"><h2>Chores to check</h2>
+    return `${this._quickCard()}${approve}<div class="card"><h2>Chores to check</h2>
         <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}, and takes the penalty in the box next to it: the chore's own penalty, or the family's. Type a number to change it this time.</p>${check}
         <form class="inline penalty-setting" data-penalty-setting>
           <label class="field"><span>When a chore didn't happen, also take away</span>
@@ -1579,17 +1616,20 @@ class FamilyPanel extends HTMLElement {
 
   _itemPoints(list) {
     const items = list.items || [];
-    const rows = items.length
-      ? `<ul class="items">${items
-          .map((i) => `<li><input class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
+    const row = (i) => `<li class="${i.skip ? "skipped" : ""}"><input class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
             <span class="item-who">${this._data.members
               .map((m) => `<label class="chip"><input type="checkbox" data-item-member="${esc(i.name)}" value="${esc(m.id)}" ${(i.members || []).includes(m.id) ? "checked" : ""}>${esc(m.name)}</label>`)
-              .join("")}</span>
-            <input type="number" min="0" max="10000" aria-label="Points for ${esc(i.name)}" data-item-name="${esc(i.name)}" data-rated="${i.rated ? 1 : ""}" data-unrated="${esc(i.unrated)}" value="${i.rated ? esc(i.points) : ""}" placeholder="${esc(i.unrated)}"></li>`)
-          .join("")}</ul>`
+              .join("")}<label class="chip leave-out"><input type="checkbox" data-item-skip="${esc(i.name)}" ${i.skip ? "checked" : ""}>Leave out</label></span>
+            <input type="number" min="0" max="10000" aria-label="Points for ${esc(i.name)}" data-item-name="${esc(i.name)}" data-rated="${i.rated ? 1 : ""}" data-unrated="${esc(i.unrated)}" value="${i.rated ? esc(i.points) : ""}" placeholder="${esc(i.unrated)}"></li>`;
+    // Items left out go in their own folded group at the end, so the rows
+    // in use stay short.
+    const used = items.filter((i) => !i.skip);
+    const left = items.filter((i) => i.skip);
+    const rows = items.length
+      ? `${used.length ? `<ul class="items">${used.map(row).join("")}</ul>` : ""}${left.length ? `<details class="left-out"><summary>Left out (${left.length})</summary><ul class="items">${left.map(row).join("")}</ul></details>` : ""}`
       : `<p class="muted">Nothing open on this list right now.</p>`;
     return `<div class="field"><span>Single items: emoji, who and points</span>
-      <small>Give an item an emoji for the Family dashboard. Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
+      <small>Give an item an emoji for the Family dashboard. Tick <b>Leave out</b> for an item that isn't a chore: it stays on the list but never shows on the Family dashboard. Tick who an item is for; nobody ticked: the people ticked for the whole list. Give it its own points; empty: the list's points, or the points written in the item. Repeating items keep both when they come back.</small>${rows}</div>`;
   }
 
   _renderRewards() {
@@ -2063,6 +2103,12 @@ class FamilyPanel extends HTMLElement {
       this._tab = ds.tab;
       this._edit = null;
       this._render();
+    } else if (ds.quick !== undefined && ds.memberId) {
+      const button = (this._data.settings?.quick_points || [])[Number(ds.quick)];
+      const m = this._memberById(ds.memberId);
+      if (!button || !m || this._busy) return;
+      const sign = button.points > 0 ? "+" : "−";
+      this._call({ type: `${DOMAIN}/adjust`, member_id: m.id, points: button.points, reason: `${button.emoji ? `${button.emoji} ` : ""}${button.label}` }, `${m.name}: ${sign}${pts(Math.abs(button.points))} for ${button.label}`);
     } else if (ds.new) {
       this._edit = { collection: ds.new, item: null };
       this._rewardKind = null;
@@ -2092,6 +2138,10 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.itemSkip !== undefined) {
+      ev.target.closest("li")?.classList.toggle("skipped", ev.target.checked);
+      return;
+    }
     if (ev.target.name === "members" && ev.target.closest("[data-eligible]")) {
       this._syncEligible(ev.target.closest("[data-eligible]"));
       return;
@@ -2170,6 +2220,21 @@ class FamilyPanel extends HTMLElement {
       const v = this._formValues(form);
       return this._call({ type: `${DOMAIN}/settings`, notify_targets: v.notify_targets || [], notify_done: !!v.notify_done, notify_rewards: !!v.notify_rewards, weekly_summary: !!v.weekly_summary }, "Saved.");
     }
+    if (form.dataset.quickForm !== undefined) {
+      const quick_points = [...form.querySelectorAll("li")]
+        .map((li) => ({
+          label: li.querySelector('[name="label"]').value.trim(),
+          emoji: li.querySelector('[name="emoji"]').value.trim(),
+          points: Math.round(Number(li.querySelector('[name="points"]').value) || 0),
+        }))
+        .filter((b) => b.label && b.points);
+      const ok = await this._call({ type: `${DOMAIN}/settings`, quick_points }, "Saved.");
+      if (ok) {
+        this._edit = null;
+        this._render();
+      }
+      return;
+    }
     if (form.dataset.noteForm !== undefined) {
       const v = this._formValues(form);
       if (!String(v.text || "").trim()) return this._toast("Write something for the note.", true);
@@ -2238,6 +2303,9 @@ class FamilyPanel extends HTMLElement {
       const itemEmojis = {};
       for (const input of form.querySelectorAll("[data-item-emoji]")) itemEmojis[input.dataset.itemEmoji] = input.value.trim();
       item.item_emojis = itemEmojis;
+      const itemSkip = {};
+      for (const box of form.querySelectorAll("[data-item-skip]")) itemSkip[box.dataset.itemSkip] = box.checked;
+      item.item_skip = itemSkip;
     }
     if (form.dataset.id) item.id = form.dataset.id;
     const ok = await this._call({ type: `${DOMAIN}/save`, collection, item }, "Saved.");

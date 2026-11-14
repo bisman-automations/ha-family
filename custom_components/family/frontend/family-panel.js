@@ -505,6 +505,12 @@ const STYLES = `
   .eligible-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--primary-color); }
   .field small.eligible-warn { color: var(--fam-bad); font-weight: 600; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .quick-edit li { flex-wrap: wrap; }
+  .quick-edit .item-emoji { width: 3em; flex: none; text-align: center; font-size: 20px; padding: 4px; }
+  .quick-edit .grow { flex: 1 1 160px; min-width: 0; }
+  .quick-who { flex: 0 1 220px; min-width: 160px; }
+  .quick-who .eligible { position: relative; }
+  .quick-who .eligible-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 3; }
   .items { list-style: none; margin: 4px 0 0; padding: 0; max-width: 980px; }
   .items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fam-divider); flex-wrap: wrap; }
   .items .item-name { flex: 1 1 200px; }
@@ -902,24 +908,34 @@ class FamilyPanel extends HTMLElement {
   // saved as everyone, so a person added later is included. A shorter list
   // is only those people. Ticking nobody leaves the reward unavailable.
   _rewardWho(members) {
-    const people = this._data.members || [];
-    if (!people.length) {
+    if (!(this._data.members || []).length) {
       return `<small>Add family members under Family. Until then, anyone can get it.</small>`;
     }
+    return this._whoDropdown(members, {
+      id: "who-can-get-it",
+      label: "Who can get it",
+      help: "All of the family starts selected. Leave them all selected and anyone can get it, including people you add later: Family saves that as everyone. Untick people to limit it to whoever is still selected. Untick all of them and nobody can get it.",
+      warn: "Nobody is selected. Nobody can get this reward until you select someone.",
+    });
+  }
+
+  // The family as a dropdown of ticks. null (everyone) starts with all ticked.
+  _whoDropdown(members, { id, label, help = "", warn = "", everyone = false }) {
+    const people = this._data.members || [];
     const selected = members == null ? new Set(people.map((m) => m.id)) : new Set(Array.isArray(members) ? members : []);
     const chosen = people.filter((m) => selected.has(m.id));
-    const label = chosen.length ? chosen.map((m) => m.name).join(", ") : "Nobody";
+    const shown = !chosen.length ? "Nobody" : everyone && chosen.length === people.length ? "Everyone" : chosen.map((m) => m.name).join(", ");
     const options = people
       .map((m) => {
         const on = selected.has(m.id);
         return `<label class="eligible-option" role="option" aria-selected="${on}"><input type="checkbox" name="members" value="${esc(m.id)}" data-name="${esc(m.name)}" ${on ? "checked" : ""}> ${esc(m.name)}</label>`;
       })
       .join("");
-    return `<div class="eligible" data-eligible>
-      <button type="button" class="eligible-btn" data-eligible-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="who-can-get-it"><span data-eligible-label>${esc(label)}</span></button>
-      <div class="eligible-menu" id="who-can-get-it" data-eligible-menu role="listbox" aria-multiselectable="true" aria-label="Who can get it" hidden>${options}</div>
-      <small>All of the family starts selected. Leave them all selected and anyone can get it, including people you add later: Family saves that as everyone. Untick people to limit it to whoever is still selected. Untick all of them and nobody can get it.</small>
-      <small class="eligible-warn" data-eligible-warn ${chosen.length ? "hidden" : ""}>Nobody is selected. Nobody can get this reward until you select someone.</small>
+    return `<div class="eligible" data-eligible ${everyone ? "data-everyone" : ""}>
+      <button type="button" class="eligible-btn" data-eligible-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="${esc(id)}" aria-label="${esc(label)}"><span data-eligible-label>${esc(shown)}</span></button>
+      <div class="eligible-menu" id="${esc(id)}" data-eligible-menu role="listbox" aria-multiselectable="true" aria-label="${esc(label)}" hidden>${options}</div>
+      ${help ? `<small>${esc(help)}</small>` : ""}
+      ${warn ? `<small class="eligible-warn" data-eligible-warn ${chosen.length ? "hidden" : ""}>${esc(warn)}</small>` : ""}
     </div>`;
   }
 
@@ -935,16 +951,18 @@ class FamilyPanel extends HTMLElement {
 
   _toggleEligible(button) {
     const menu = button.parentElement.querySelector("[data-eligible-menu]");
+    this._closeEligible(menu);
     const open = menu.hidden;
     menu.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
   }
 
-  _closeEligible() {
-    const menu = this.shadowRoot?.querySelector("[data-eligible-menu]");
-    if (!menu || menu.hidden) return;
-    menu.hidden = true;
-    menu.parentElement.querySelector("[data-eligible-toggle]")?.setAttribute("aria-expanded", "false");
+  _closeEligible(keep = null) {
+    for (const menu of this.shadowRoot?.querySelectorAll("[data-eligible-menu]") || []) {
+      if (menu === keep || menu.hidden) continue;
+      menu.hidden = true;
+      menu.parentElement.querySelector("[data-eligible-toggle]")?.setAttribute("aria-expanded", "false");
+    }
   }
 
   // The closed label and the nobody warning follow the ticks, without
@@ -953,7 +971,8 @@ class FamilyPanel extends HTMLElement {
     const boxes = [...root.querySelectorAll('input[name="members"]')];
     const names = boxes.filter((el) => el.checked).map((el) => el.dataset.name || "");
     const label = root.querySelector("[data-eligible-label]");
-    if (label) label.textContent = names.length ? names.join(", ") : "Nobody";
+    const all = root.hasAttribute("data-everyone") && names.length === boxes.length;
+    if (label) label.textContent = !names.length ? "Nobody" : all ? "Everyone" : names.join(", ");
     const warn = root.querySelector("[data-eligible-warn]");
     if (warn) warn.hidden = names.length > 0;
     for (const el of boxes) el.closest('[role="option"]')?.setAttribute("aria-selected", el.checked ? "true" : "false");
@@ -1708,14 +1727,16 @@ class FamilyPanel extends HTMLElement {
     const d = this._data;
     const buttons = d.settings?.quick_points || [];
     if (this._edit?.collection === "quick_points") return `<div class="card"><h2>Quick points</h2>${this._quickForm(buttons)}</div>`;
-    const rows = buttons.length && d.members.length
-      ? `<ul class="rows quick">${d.members
+    const forMember = (m) => buttons.map((b, i) => [b, i]).filter(([b]) => b.members == null || b.members.includes(m.id));
+    const people = d.members.filter((m) => forMember(m).length);
+    const rows = buttons.length && people.length
+      ? `<ul class="rows quick">${people
           .map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b><small>${pts(m.points)}</small></span>
-            <span class="quick-buttons">${buttons
-              .map((b, i) => `<button class="btn ${b.points > 0 ? "good" : "bad"}" data-quick="${i}" data-member-id="${esc(m.id)}" ${this._busy ? "disabled" : ""}>${b.emoji ? `${esc(b.emoji)} ` : ""}${esc(b.label)} ${b.points > 0 ? "+" : "−"}${Math.abs(b.points)}</button>`)
+            <span class="quick-buttons">${forMember(m)
+              .map(([b, i]) => `<button class="btn ${b.points > 0 ? "good" : "bad"}" data-quick="${i}" data-member-id="${esc(m.id)}" ${this._busy ? "disabled" : ""}>${b.emoji ? `${esc(b.emoji)} ` : ""}${esc(b.label)} ${b.points > 0 ? "+" : "−"}${Math.abs(b.points)}</button>`)
               .join("")}</span></li>`)
           .join("")}</ul>`
-      : `<p class="empty">${d.members.length ? "No buttons yet. Add a few for the things you want to notice, good and not so good." : "Add your family first."}</p>`;
+      : `<p class="empty">${buttons.length && d.members.length ? "None of the buttons is for anyone yet. Change the buttons to pick who each is for." : d.members.length ? "No buttons yet. Add a few for the things you want to notice, good and not so good." : "Add your family first."}</p>`;
     return `<div class="card"><h2>Quick points</h2>
       <p class="muted">One tap gives or takes points straight away. It shows in History.</p>
       ${rows}<button class="btn" data-new="quick_points">${buttons.length ? "Change the buttons" : "Add buttons"}</button></div>`;
@@ -1723,12 +1744,13 @@ class FamilyPanel extends HTMLElement {
 
   _quickForm(buttons) {
     const rows = [...buttons, { label: "", emoji: "", points: "" }, { label: "", emoji: "", points: "" }];
+    const family = (this._data.members || []).length > 1;
     return `<form class="edit" data-quick-form>
-      <p class="muted">Use a minus for points taken away, like −1. Leave a row empty to remove it. Up to 12 buttons.</p>
-      <ul class="rows">${rows
-        .map((b) => `<li><input class="item-emoji" name="emoji" maxlength="8" value="${esc(b.emoji || "")}" placeholder="+" aria-label="Emoji">
-          <input class="grow" name="label" maxlength="40" value="${esc(b.label || "")}" placeholder="Kind to a sibling" aria-label="What it's for">
-          <input type="number" name="points" min="-10000" max="10000" value="${esc(b.points)}" placeholder="2" aria-label="Points" style="width:90px"></li>`)
+      <p class="muted">Use a minus for points taken away, like −1. Leave a row empty to remove it. Up to 12 buttons.${family ? " Each button is for everyone unless you untick people: it then shows only for whoever is still ticked." : ""}</p>
+      <ul class="rows quick-edit">${rows
+        .map((b, i) => `<li><input type="text" class="item-emoji" name="emoji" maxlength="8" value="${esc(b.emoji || "")}" placeholder="+" aria-label="Emoji">
+          <input type="text" class="grow" name="label" maxlength="40" value="${esc(b.label || "")}" placeholder="Kind to a sibling" aria-label="What it's for">
+          <input type="number" name="points" min="-10000" max="10000" value="${esc(b.points)}" placeholder="2" aria-label="Points" style="width:90px">${family ? `<span class="quick-who">${this._whoDropdown(b.members, { id: `quick-who-${i}`, label: "Who it's for", everyone: true })}</span>` : ""}</li>`)
         .join("")}</ul>
       <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div></form>`;
   }
@@ -2051,7 +2073,7 @@ class FamilyPanel extends HTMLElement {
 
   _itemPoints(list) {
     const items = list.items || [];
-    const row = (i) => `<li class="${i.skip ? "skipped" : ""}"><input class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
+    const row = (i) => `<li class="${i.skip ? "skipped" : ""}"><input type="text" class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
             <span class="item-who">${this._data.members
               .map((m) => `<label class="chip"><input type="checkbox" data-item-member="${esc(i.name)}" value="${esc(m.id)}" ${(i.members || []).includes(m.id) ? "checked" : ""}>${esc(m.name)}</label>`)
               .join("")}<label class="chip leave-out"><input type="checkbox" data-item-skip="${esc(i.name)}" ${i.skip ? "checked" : ""}>Leave out</label></span>
@@ -2837,6 +2859,7 @@ class FamilyPanel extends HTMLElement {
           label: li.querySelector('[name="label"]').value.trim(),
           emoji: li.querySelector('[name="emoji"]').value.trim(),
           points: Math.round(Number(li.querySelector('[name="points"]').value) || 0),
+          members: li.querySelector("[data-eligible]") ? this._rewardMembers({ members: [...li.querySelectorAll('input[name="members"]:checked')].map((el) => el.value) }) : null,
         }))
         .filter((b) => b.label && b.points);
       const ok = await this._call({ type: `${DOMAIN}/settings`, quick_points }, "Saved.");

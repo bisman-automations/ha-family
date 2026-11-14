@@ -506,6 +506,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
                 vol.Required("label"): str,
                 vol.Optional("emoji"): vol.Any(None, str),
                 vol.Required("points"): vol.Coerce(int),
+                vol.Optional("members"): vol.Any(None, [str]),
             }
         ],
         vol.Optional("calendars"): [

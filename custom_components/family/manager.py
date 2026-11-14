@@ -989,7 +989,14 @@ class FamilyManager:
         if "live_from" in raw:
             self.settings["live_from"] = model.clean_time(raw["live_from"], "Show from")
         if "quick_points" in raw:
-            self.settings["quick_points"] = model.quick_points(raw["quick_points"])
+            family = [m["id"] for m in self.members]
+            buttons = model.quick_points(raw["quick_points"])
+            for button in buttons:
+                if button["members"] is not None:
+                    button["members"] = model.reward_selection(
+                        self._known_members(button["members"]), family
+                    )
+            self.settings["quick_points"] = buttons
         if "hide_empty_sections" in raw:
             self.settings["hide_empty_sections"] = bool(raw["hide_empty_sections"])
         if "section_order" in raw:
@@ -1835,6 +1842,9 @@ class FamilyManager:
                 picked = reward.get("members")
                 if picked:
                     reward["members"] = [m for m in picked if m != item_id]
+            for button in self.settings.get("quick_points") or []:
+                if button.get("members"):
+                    button["members"] = [m for m in button["members"] if m != item_id]
             for row in [*(self.settings.get("calendars") or []), *self.notes]:
                 if row.get("member") == item_id:
                     row["member"] = None

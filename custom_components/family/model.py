@@ -485,8 +485,10 @@ MAX_QUICK_POINTS = 12
 
 
 def quick_points(raw: Any) -> list[dict[str, Any]]:
-    """Parents' one-tap points buttons: a label, an optional emoji, and points
-    to give (or, below 0, to take away). Blank or 0-point rows are dropped."""
+    """Parents' one-tap points buttons: a label, an optional emoji, points
+    to give (or, below 0, to take away), and who it's for (``members``:
+    None is everyone, a list only those people, [] nobody). Blank or
+    0-point rows are dropped."""
     result = []
     for row in raw or []:
         if not isinstance(row, dict):
@@ -497,14 +499,26 @@ def quick_points(raw: Any) -> list[dict[str, Any]]:
         )
         if not label or not points:
             continue
+        members = row.get("members")
         result.append(
             {
                 "label": label,
                 "emoji": str(row.get("emoji") or "").strip()[:8],
                 "points": points,
+                "members": (
+                    None
+                    if not isinstance(members, list)
+                    else [str(m) for m in members if m]
+                ),
             }
         )
     return result[:MAX_QUICK_POINTS]
+
+
+def quick_for(button: dict[str, Any], member_id: str) -> bool:
+    """Whether a quick points button is shown for that person."""
+    members = button.get("members")
+    return members is None or member_id in members
 
 
 # ---- home controls ------------------------------------------------------------------

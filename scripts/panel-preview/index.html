@@ -112,7 +112,7 @@ const ownToday = (id) => {
   return { total: own.length, left, done: own.length > 0 && left === 0 };
 };
 window.calls = [];
-let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_parent_phone"], notify_done: true, notify_rewards: true, weekly_summary: false, allowance_day: 6, allowance_hour: 8, point_value: 0.1, currency: "$", family_goal: { name: "Pizza night", emoji: "🍕", target: 60, since: new Date(Date.now() - 2 * 86400000).toISOString() }, reminder_tts: "tts.piper", quick_points: [{ label: "Kind to a sibling", emoji: "💛", points: 2 }, { label: "Helped without asking", emoji: "🙌", points: 3 }, { label: "Not listening", emoji: "🙉", points: -1 }], calendars: [{ entity_id: "calendar.family", member: null }, { entity_id: "calendar.alex_school", member: "a" }] };
+let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_parent_phone"], notify_done: true, notify_rewards: true, weekly_summary: false, allowance_day: 6, allowance_hour: 8, point_value: 0.1, currency: "$", family_goal: { name: "Pizza night", emoji: "🍕", target: 60, since: new Date(Date.now() - 2 * 86400000).toISOString() }, reminder_tts: "tts.piper", quick_points: [{ label: "Kind to a sibling", emoji: "💛", points: 2, members: null }, { label: "Helped without asking", emoji: "🙌", points: 3, members: null }, { label: "Homework first", emoji: "📚", points: 2, members: ["a"] }, { label: "Not listening", emoji: "🙉", points: -1, members: null }], calendars: [{ entity_id: "calendar.family", member: null }, { entity_id: "calendar.alex_school", member: "a" }] };
 members[0].allowance = 10; members[1].allowance = 5;
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const dayIso = (n) => iso(new Date(now + n * 86400000));
@@ -274,6 +274,11 @@ window.hass = {
         }
       }
       for (const key of ["section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "live_activity", "live_per_child", "live_from", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
+      if (msg.quick_points) settings.quick_points = msg.quick_points.filter((b) => b.label && b.points).map((b) => {
+        const ids = members.map((m) => m.id);
+        const picked = Array.isArray(b.members) ? b.members.filter((id) => ids.includes(id)) : null;
+        return { label: b.label, emoji: b.emoji || "", points: b.points, members: picked && ids.every((id) => picked.includes(id)) ? null : picked };
+      });
       if ("point_value" in msg) { if (msg.point_value !== null && !(msg.point_value > 0 && msg.point_value <= 100)) throw { message: "What a point is worth must be above 0 and at most 100" }; settings.point_value = msg.point_value; }
       if ("bonus_all_done" in msg) bonus = { all_done: msg.bonus_all_done, streak_days: msg.streak_days, streak: msg.streak_bonus };
       return { settings };

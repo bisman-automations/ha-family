@@ -376,8 +376,8 @@ async def test_quick_points(hass: HomeAssistant, client):
         ],
     )
     assert settings["settings"]["quick_points"] == [
-        {"label": "Kind to a sibling", "emoji": "💛", "points": 2},
-        {"label": "Not listening", "emoji": "", "points": -1},
+        {"label": "Kind to a sibling", "emoji": "💛", "points": 2, "members": None},
+        {"label": "Not listening", "emoji": "", "points": -1, "members": None},
     ]
     state = await client.ok("state")
     assert len(state["settings"]["quick_points"]) == 2
@@ -386,3 +386,22 @@ async def test_quick_points(hass: HomeAssistant, client):
     reply = await client.ok("adjust", member_id=alex, points=-1, reason="Not listening")
     assert reply["points"] == before - 1
     assert reply["entry"]["title"] == "Not listening"
+
+
+async def test_quick_points_for_some(hass: HomeAssistant, client):
+    alex, sam = await _family(client)
+    settings = await client.ok(
+        "settings",
+        quick_points=[
+            {"label": "Homework done", "points": 2, "members": [alex, "gone"]},
+            {"label": "Kind act", "points": 1, "members": [alex, sam]},
+            {"label": "Nobody yet", "points": 1, "members": []},
+        ],
+    )
+    buttons = settings["settings"]["quick_points"]
+    # Unknown people are dropped; the whole family is saved as everyone.
+    assert [b["members"] for b in buttons] == [[alex], None, []]
+    # Removing someone takes them off the buttons that named them.
+    await client.ok("delete", collection="members", item_id=alex)
+    buttons = (await client.ok("state"))["settings"]["quick_points"]
+    assert [b["members"] for b in buttons] == [[], None, []]

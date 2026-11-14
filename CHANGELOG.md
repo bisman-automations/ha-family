@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-11-13
+
+### Added
+
+- **Quick points for some of the family.** Each quick points button has its own list of who it's for. Leave everyone ticked and it shows for the whole family, including people you add later; untick people and it shows only next to whoever is still ticked. Buttons you already have stay for everyone.
+
+### Fixed
+
+- **Tidy quick points and to-do item boxes.** The emoji and name boxes when changing quick points, and the emoji boxes on to-do items, now look like the other boxes.
+
 ## [2.2.0] - 2026-11-13
 
 ### Added
@@ -301,6 +311,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.3.0]: https://github.com/bisman-automations/ha-family/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/bisman-automations/ha-family/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/bisman-automations/ha-family/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/bisman-automations/ha-family/compare/v1.22.0...v2.0.0

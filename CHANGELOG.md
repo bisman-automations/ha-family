@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-13
+
+### Added
+
+- **Badges.** First chore, 10, 50 and 100 chores, All done, 3-day, week and 30-day streaks, First reward and Cashed out. They show under someone's name on their page, pop up when earned, and stay once earned. The new `family_badge_earned` event is for automations.
+- **Trading chores.** The ⇄ on one of your own chores offers it for today, to one person or anyone. Someone takes it, a parent says yes under **To check**, and they do it today instead.
+- **Cashing out.** With a point value set, **💰 Cash out** turns points into money. The points are taken right away; a parent marks it **Paid**, or cancels it to give the points back.
+- **Week by week.** The top of **History** shows each person's points earned and spent, and chores done, for each of the last 8 weeks.
+- **Ask Assist.** "I finished feed the dog", "How many points do I have?" and "What chores do I have left?" work with Assist by voice or typing. A chore done this way still waits for a parent's check.
+
 ## [2.0.0] - 2026-11-13
 
 One Family page for everyone: the Parents sidebar page is now part of it. Nothing else changes: your family, chores, points, entities, actions and events stay as they are.
@@ -285,6 +295,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.1.0]: https://github.com/bisman-automations/ha-family/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/bisman-automations/ha-family/compare/v1.22.0...v2.0.0
 [1.22.0]: https://github.com/bisman-automations/ha-family/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/bisman-automations/ha-family/compare/v1.20.0...v1.21.0

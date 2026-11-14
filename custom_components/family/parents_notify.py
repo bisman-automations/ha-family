@@ -109,6 +109,23 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_chore")
 
     @callback
+    def trade_to_approve(self, trade: dict[str, Any], taker: str) -> None:
+        """Someone took another's chore: a parent says yes in the parent controls."""
+        if not self._settings.get("notify_done") or not self.targets():
+            return
+        data = {
+            "title": f"{taker} wants to take {trade['from_name']}'s {trade['chore']}",
+            "message": "Say yes or no under To check.",
+            "data": {
+                "tag": tag_for(trade["id"]),
+                "group": "family",
+                "url": PARENTS_PATH,
+                "clickAction": PARENTS_PATH,
+            },
+        }
+        self._spawn(self._send(data), "family_notify_trade")
+
+    @callback
     def pin_locked(self) -> None:
         """Someone got the parent PIN wrong too many times on the shared screen."""
         if not self.targets():

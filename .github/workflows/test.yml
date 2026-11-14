@@ -26,3 +26,6 @@ concurrency:
 jobs:
   test:
     uses: bisman-automations/.github/.github/workflows/ha-test.yml@main
+    with:
+      # Assist sentences (voice.py): the tests talk to the conversation integration.
+      core-requirements: conversation

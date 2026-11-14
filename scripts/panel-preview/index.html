@@ -24,7 +24,7 @@ customElements.define("ha-icon", class extends HTMLElement {
 const now = Date.now();
 const ago = (m) => new Date(now - m * 60000).toISOString();
 let members = [
-  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", streak: 4, points: 42, picture: null, to_check: 1 },
+  { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", streak: 4, points: 42, picture: null, to_check: 1, badges: [{ key: "first_chore", emoji: "🌱", name: "First chore", text: "Did a first chore", at: "2026-10-01" }, { key: "chores_10", emoji: "⭐", name: "10 chores", text: "Did 10 chores", at: "2026-10-09" }, { key: "streak_3", emoji: "🔥", name: "3-day streak", text: "All their own chores 3 days running", at: "2026-11-11" }] },
   { id: "b", name: "Sam", emoji: "🦄", color: "#E91E63", person: null, points: 15, picture: null, to_check: 0, goal: "ice" },
   { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0 },
 ];
@@ -168,9 +168,12 @@ let pinSet = params.get("pin") !== "0";
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const PARENT_ONLY = ["trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+// Trades for today (like trades.py): offered, taken, approved.
+let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
+const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
 const state = () => ({
-  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet,
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet, trades: trades.map((t) => ({ ...t })), weeks: weeks(),
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -193,7 +196,13 @@ window.hass = {
     if (msg.type === "lovelace/config/save") { window.savedDashboard = msg; return null; }
     if (msg.type === "lovelace/config") { if (!window.savedDashboard) throw { code: "config_not_found", message: "No config found." }; return structuredClone(window.savedDashboard.config); }
     const t = msg.type.replace("family/", "");
-    if (t === "state") { const st = state(); st.parent = isParent(msg); if (!st.parent) delete st.settings; return st; }
+    if (t === "state") { const st = state(); st.parent = isParent(msg); if (!st.parent) { delete st.settings; delete st.weeks; } return st; }
+    if (t === "trade/offer") { if (trades.some((x) => x.chore_id === msg.chore_id && x.from === msg.member_id)) throw { message: "You've already offered that one" }; const c = chores().find((x) => x.id === msg.chore_id); const from = members.find((x) => x.id === msg.member_id); const tr = { id: "t" + Date.now(), chore_id: c.id, chore: c.name, emoji: c.emoji, points: c.points, from: from.id, from_name: from.name, to: msg.to || null, day: "today", status: "offered", at: new Date().toISOString() }; trades.push(tr); return { trade: tr }; }
+    if (t === "trade/take") { const tr = trades.find((x) => x.id === msg.trade_id); if (!tr || tr.status !== "offered") throw { message: "Someone already took that one" }; if (tr.from === msg.member_id) throw { message: "That's your own chore" }; if ((chores().find((c) => c.id === tr.chore_id)?.members || []).includes(msg.member_id)) throw { message: "You already have that chore today" }; tr.to = msg.member_id; tr.status = "taken"; return { trade: tr }; }
+    if (t === "trade/cancel") { trades = trades.filter((x) => x.id !== msg.trade_id); return {}; }
+    if (t === "trade/decide") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const tr = trades.find((x) => x.id === msg.trade_id); if (msg.approved) { tr.status = "approved"; return { trade: tr }; } trades = trades.filter((x) => x !== tr); return { trade: null }; }
+    if (t === "cash_out") { const mm = members.find((x) => x.id === msg.member_id); if (!settings.point_value) throw { message: "Cashing out needs a point value. A parent sets it under Family." }; if (msg.points < 1) throw { message: "Pick how many points to cash out" }; if (msg.points > mm.points) throw { message: `Only ${mm.points} points to cash out` }; mm.points -= msg.points; const cash = Math.round(msg.points * settings.point_value * 100) / 100; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "cashout", member: mm.id, title: `Cash out ${settings.currency}${cash.toFixed(2)}`, points: -msg.points, money: cash, given: "to_give" }; entries.push(e); return { entry: e, points: mm.points, badges: (mm.badges || []).some((b) => b.key === "cashed_out") ? [] : [{ member: mm.id, key: "cashed_out", emoji: "💰", name: "Cashed out" }] }; }
+    if (t === "cash_out/cancel") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const e = entries.find((x) => x.id === msg.entry_id); members.find((x) => x.id === e.member).points -= e.points; entries = entries.filter((x) => x !== e); return {}; }
     if (t === "unlock") {
       if (!pinSet) throw { message: "No parent PIN is set. A parent sets one on the Family tab." };
       if (msg.pin !== "2468") { wrongPins += 1; throw { message: wrongPins >= 5 ? "Too many wrong PINs. Try again in 5 min." : "That's not the PIN. Try again." }; }

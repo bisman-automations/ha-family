@@ -59,6 +59,12 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_unlock,
         ws_lock,
         ws_pin,
+        ws_trade_offer,
+        ws_trade_take,
+        ws_trade_cancel,
+        ws_trade_decide,
+        ws_cash_out,
+        ws_cash_out_cancel,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -206,7 +212,11 @@ async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
 @_handler
 async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
     entry = await manager.async_complete(msg["member_id"], msg["chore_id"])
-    return {"entry": entry, "points": manager.points(msg["member_id"])}
+    return {
+        "entry": entry,
+        "points": manager.points(msg["member_id"]),
+        "badges": manager.take_new_badges(msg["member_id"]),
+    }
 
 
 @websocket_api.websocket_command(
@@ -225,7 +235,11 @@ async def ws_redeem(hass, connection, msg, manager) -> dict[str, Any]:
     entry = await manager.async_redeem(
         msg["member_id"], msg["reward_id"], msg.get("together")
     )
-    return {"entry": entry, "points": manager.points(msg["member_id"])}
+    return {
+        "entry": entry,
+        "points": manager.points(msg["member_id"]),
+        "badges": manager.take_new_badges(msg["member_id"]),
+    }
 
 
 @websocket_api.websocket_command(
@@ -600,3 +614,102 @@ async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
     """Set or clear the parent PIN (admins only, not with a pass)."""
     manager.passes.set_pin(msg["pin"])
     return {"pin_set": manager.passes.pin_set}
+
+
+# ---- trading chores and cashing out (everyone asks, a parent says yes) ------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trade/offer",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("chore_id"): str,
+        vol.Optional("to"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_trade_offer(hass, connection, msg, manager) -> dict[str, Any]:
+    """Offer one of your own chores today to someone else (or anyone)."""
+    return {
+        "trade": manager.trades.offer(msg["member_id"], msg["chore_id"], msg.get("to"))
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trade/take",
+        vol.Optional(PASS): str,
+        vol.Required("trade_id"): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_trade_take(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"trade": manager.trades.take(msg["trade_id"], msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trade/cancel",
+        vol.Optional(PASS): str,
+        vol.Required("trade_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_trade_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.trades.cancel(msg["trade_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trade/decide",
+        vol.Optional(PASS): str,
+        vol.Required("trade_id"): str,
+        vol.Required("approved"): bool,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_trade_decide(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"trade": manager.trades.decide(msg["trade_id"], msg["approved"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/cash_out",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("points"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_cash_out(hass, connection, msg, manager) -> dict[str, Any]:
+    """Turn points into money: the points go now, a parent pays it out."""
+    entry = manager.cash_out(msg["member_id"], msg["points"])
+    return {
+        "entry": entry,
+        "points": manager.points(msg["member_id"]),
+        "badges": manager.take_new_badges(msg["member_id"]),
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/cash_out/cancel",
+        vol.Optional(PASS): str,
+        vol.Required("entry_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_cash_out_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.cancel_cash_out(msg["entry_id"])
+    return {}

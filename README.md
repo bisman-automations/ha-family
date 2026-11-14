@@ -97,6 +97,30 @@ In the parent controls:
 - **Lately.** What was done and spent recently.
 - **Done today.** What's finished today, ticked off, under its own section.
 
+### Badges
+
+Badges are earned along the way and show under someone's name on their page: 🌱 **First chore**, ⭐ **10 chores**, 🌟 **50 chores**, 🏆 **100 chores**, 🎉 **All done** (all their own chores in a day), 🔥 **3-day streak** and **Week streak**, 💎 **30-day streak**, 🎁 **First reward** and 💰 **Cashed out**. A new one pops up after the chore or reward that earned it. Once earned, a badge stays, even when the history that earned it is long gone.
+
+### Trading chores
+
+On someone's page, the ⇄ on one of their own chores offers it for today, to one person or to anyone. Whoever wants it taps **Take it** on their page, and a parent says yes or no in the parent controls under **To check** (the parents' phones get a notification when **Parents' phones** gets chores done). Until a parent says yes it stays with whoever had it, and **Take back** withdraws the offer. A yes lasts for today only; tomorrow the chore is back with its usual people. Chores up for grabs and to-do items can't be traded, and nobody can take a chore they already have.
+
+### Cashing out
+
+When a parent has set what a point is worth (**Family** → allowance and money), someone's **Rewards** start with **💰 Cash out**: pick how many points to turn into money. The points are taken straight away, and the cash out waits under **To check** → **Rewards and cash outs to hand out** until a parent marks it **Paid**, or **Cancel**s it, which gives the points back.
+
+### Asking Assist
+
+With Home Assistant's Assist (a voice speaker, or typing to Assist in the app), anyone can say:
+
+- "**I finished** feed the dog", or "**Alex did** make your bed": marks the chore done, the same as tapping it, so it still waits for a parent's check.
+- "**How many points do I have?**", or "How many points does Sam have?"
+- "**What chores do I have left?**", or "What does Riley have left?"
+
+"I" works when the Assist device or app is logged in as someone linked to their Home Assistant person in the family; otherwise say the name. The sentences are in English, and Assist's other sentences keep working.
+
+### Going back to everyone
+
 After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page. A screen that shows one person's page (their tab, or a card with their member id) stays on that page.
 
 Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open. A parent can change the order of the sections for every screen in the parent controls, under **Family** → **Family dashboard sections**. Tick **Hide sections with nothing in them** there to leave out a section that's empty, such as **Up for grabs** when nothing is up for grabs (**Notes** always shows, so a note can be added).
@@ -163,7 +187,7 @@ Every card in the parent controls folds away: tap its title. A folded card stays
 - **Family.** Add, edit or remove family members, and add or take away points by hand, with a reason. Each member can have an **allowance**: points added every week.
 - **Allowance and money** (under **Family**). The day and time the weekly allowance is given (a week Home Assistant was off isn't made up), and optionally what one point is worth and a money sign, so points also show as money, like "42 points · $4.20".
 - **Today's calendar** (under **Family**). Pick the calendars whose events show under **Today**, each for everyone or for one person.
-- **History.** Everything done and spent. Pick someone under **Who**, or type in **Search** (a chore, reward or bonus), to narrow it down. A chore found not done later can still be marked **Didn't happen** here.
+- **History.** **Week by week** at the top shows, for each person, the points earned and spent and the chores done in each of the last 8 weeks. Below it, everything done and spent. Pick someone under **Who**, or type in **Search** (a chore, reward or bonus), to narrow it down. A chore found not done later can still be marked **Didn't happen** here.
 
 ## Entities
 
@@ -195,6 +219,7 @@ For automations, for example to send a message or play a sound:
 | `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `penalty` (extra points taken), `balance` |
 | `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
 | `family_goal_reached` | The family goal was reached. | `name`, `target` |
+| `family_badge_earned` | Someone earned a badge. | `member`, `member_id`, `badge` (its key, such as `streak_7`), `name` |
 | `family_reward_redeemed` | Points were spent on a reward. For a reward bought together, once per person when a parent says yes, with their share. | `member`, `member_id`, `reward`, `points`, `balance`, `eligible` (`everyone`, or the names of the people the reward is for), and `together` (everyone's names) for a reward bought together |
 
 ## Troubleshooting

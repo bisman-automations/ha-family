@@ -30,6 +30,7 @@ from . import model
 from .calendar_today import DAYS as CALENDAR_DAYS, CalendarToday, clean_calendars
 from .const import (
     DOMAIN,
+    EVENT_BADGE_EARNED,
     EVENT_BONUS,
     EVENT_CHORE_DONE,
     EVENT_CHORE_REVIEWED,
@@ -51,6 +52,8 @@ from .parents_notify import ParentNotices
 from .reminders import ChoreReminders
 from .routines import Routines
 from .todo_sync import TodoSync
+from .trades import Trades
+from .voice import Voice
 
 _LOGGER = logging.getLogger(__name__)
 SAVE_DELAY = 2
@@ -131,6 +134,9 @@ class FamilyManager:
         self.routines = Routines(self)
         self.live = ChoreActivity(self)
         self.passes = ParentPasses(self)
+        self.trades = Trades(self)
+        self.new_badges: list[dict[str, Any]] = []
+        self.voice = Voice(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
 
@@ -161,6 +167,7 @@ class FamilyManager:
         }
         self.notes = [n for n in data.get("notes") or [] if isinstance(n, dict)]
         self.routines.load(data)
+        self.trades.load(data)
         # Streaks count days with all of one's own chores done from this day;
         # before it, any chore, as they used to.
         if "streak_rule_from" not in self.settings:
@@ -168,12 +175,16 @@ class FamilyManager:
             self.save()
         self._prune()
         self._prune_board()
+        # Badges the history already earns, without telling anyone: an
+        # update shouldn't throw a party for last month's chores.
+        self._check_badges(quiet=True)
         self.async_auto_check()
         self._watch_todo_lists()
         await self.async_refresh_todo()
         self.calendar.watch()
         await self.calendar.async_refresh()
         self.async_allowance()
+        await self.voice.async_start()
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -189,11 +200,13 @@ class FamilyManager:
             "meals": self.meals,
             "notes": self.notes,
             **self.routines.data(),
+            **self.trades.data(),
         }
 
     @callback
     def _changed(self, members: bool = False) -> None:
         self._check_goal()
+        self._check_badges()
         self._store.async_delay_save(self._data, SAVE_DELAY)
         async_dispatcher_send(self.hass, SIGNAL_CHANGED)
         # A chore done, back, renamed or removed: its to-do item follows.
@@ -285,6 +298,39 @@ class FamilyManager:
             {"name": goal["name"], "target": goal["target"]},
         )
 
+    def _check_badges(self, quiet: bool = False) -> None:
+        """Badges just earned: kept on the member, with an event, and told
+        to the dashboard in ``new_badges`` (for the screen that earned them)."""
+        today = dt_util.now().date().isoformat()
+        for member in self.members:
+            stored = member.setdefault("badges", {})
+            earned = model.badges_earned(
+                self.entries, member["id"], self.streak(member["id"])
+            )
+            for key in [k for k, *_rest in model.BADGES if k in earned - set(stored)]:
+                stored[key] = today
+                if quiet:
+                    continue
+                emoji, name, _text = model.BADGE_INFO[key]
+                self.new_badges.append(
+                    {"member": member["id"], "key": key, "emoji": emoji, "name": name}
+                )
+                self.hass.bus.async_fire(
+                    EVENT_BADGE_EARNED,
+                    {
+                        "member_id": member["id"],
+                        "member": member["name"],
+                        "badge": key,
+                        "name": name,
+                    },
+                )
+
+    def take_new_badges(self, member_id: str | None = None) -> list[dict[str, Any]]:
+        """Badges earned since last asked (for one member, or all)."""
+        taken = [b for b in self.new_badges if member_id in (None, b["member"])]
+        self.new_badges = [b for b in self.new_badges if b not in taken]
+        return taken
+
     @callback
     def async_tick(self, _now: Any = None) -> None:
         """Every minute: tell the dashboards when a chore's hours start or end,
@@ -319,6 +365,7 @@ class FamilyManager:
         return lambda: self._member_listeners.remove(listener)
 
     async def async_unload(self) -> None:
+        self.voice.stop()
         self.calendar.stop()
         self.live.stop()
         if self._unsub_todo:
@@ -553,15 +600,18 @@ class FamilyManager:
         whoever's turn it is (``turn``), and keeps its people as ``rotation``."""
         turn = model.turn_member(chore, self.entries, now)
         if turn is None:
-            return dict(chore, source="family", grab=model.is_grab(chore))
-        return dict(
-            chore,
-            source="family",
-            grab=False,
-            rotation=list(chore.get("members") or []),
-            members=[turn],
-            turn=turn,
-        )
+            chore = dict(chore, source="family", grab=model.is_grab(chore))
+        else:
+            chore = dict(
+                chore,
+                source="family",
+                grab=False,
+                rotation=list(chore.get("members") or []),
+                members=[turn],
+                turn=turn,
+            )
+        # Traded today, with a parent's yes: whoever took it does it.
+        return chore if chore["grab"] else self.trades.apply(chore)
 
     def chore(self, chore_id: str) -> dict[str, Any]:
         for chore in self.all_chores():
@@ -1376,6 +1426,54 @@ class FamilyManager:
         return entry
 
     @callback
+    def cash_out(self, member_id: str, points: Any) -> dict[str, Any]:
+        """A member turns points into money; a parent pays it out.
+
+        Needs a point value (Allowance and money). The points are taken now,
+        like a reward, and the entry waits under To give until a parent marks
+        it **Paid**, or cancels it and gives the points back.
+        """
+        member = self.member(member_id)
+        value = self.settings.get("point_value")
+        if not value:
+            raise FamilyError(
+                "Cashing out needs a point value. A parent sets it under Family."
+            )
+        try:
+            points = model.cashout_points(points, self.points(member_id))
+        except ValueError as err:
+            raise FamilyError(str(err)) from err
+        money = round(points * float(value), 2)
+        currency = self.settings.get("currency") or ""
+        entry = {
+            "id": _id(),
+            "at": _now_iso(),
+            "kind": model.KIND_CASHOUT,
+            "member": member_id,
+            "title": f"Cash out {currency}{money:.2f}",
+            "points": -points,
+            "money": money,
+            "given": model.GIVEN_PENDING,
+        }
+        self.entries.append(entry)
+        self._changed()
+        self.notices.reward_to_give(entry, member)
+        return entry
+
+    @callback
+    def cancel_cash_out(self, entry_id: str) -> None:
+        """A parent says no to a cash out: the points go back."""
+        entry = self._entry(entry_id)
+        if (
+            entry.get("kind") != model.KIND_CASHOUT
+            or entry.get("given") != model.GIVEN_PENDING
+        ):
+            raise FamilyError("That isn't a cash out waiting to be paid")
+        self.entries.remove(entry)
+        self.notices.clear(entry_id)
+        self._changed()
+
+    @callback
     def set_goal(self, member_id: str, reward_id: str | None) -> dict[str, Any]:
         """The reward a member is saving for, or None to stop.
 
@@ -1445,6 +1543,11 @@ class FamilyManager:
             "goal": next(
                 (m.get("goal") for m in self.members if m["id"] == member_id), None
             ),
+            # Earned, not edited: kept as they are.
+            "badges": next(
+                (m.get("badges") for m in self.members if m["id"] == member_id), None
+            )
+            or {},
         }
         new = self._upsert(self.members, member)
         self._changed(members=new)
@@ -1867,6 +1970,7 @@ class FamilyManager:
                 ),
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
+                "badges": model.badge_list(m.get("badges")),
                 "to_check": sum(
                     1
                     for e in self.entries
@@ -1934,6 +2038,7 @@ class FamilyManager:
             }
             if self.settings.get("point_value")
             else None,
+            "trades": self.trades.snapshot(),
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
             "parent": bool(is_admin if parent is None else parent),
@@ -1967,6 +2072,9 @@ class FamilyManager:
                 "quick_points": list(self.settings.get("quick_points") or []),
                 "reminder_tts": self.settings.get("reminder_tts"),
             }
+            result["weeks"] = model.weekly_stats(
+                self.entries, [m["id"] for m in self.members], today
+            )
             result["all_chores"] = self.chores
             result["all_routines"] = self.routines.items
             result["todo_lists"] = [

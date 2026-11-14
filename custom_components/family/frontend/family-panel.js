@@ -352,6 +352,21 @@ const STYLES = `
   button:focus-visible, .tile:focus-visible, .person:focus-visible { outline: 3px solid var(--primary-color); outline-offset: 2px; }
 
   /* Sheet: confirm and pick who */
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+  .badge-pill { font-size: 13px; padding: 3px 10px; border-radius: 12px; background: var(--secondary-background-color, rgba(127,127,127,.12)); }
+  .tile.chore { position: relative; }
+  .trade-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--fam-divider); background: var(--card-background-color, transparent); color: inherit; font-size: 16px; cursor: pointer; }
+  .trades-head { margin: 16px 0 4px; font-size: 16px; font-weight: 500; }
+  .cash-preview { font-size: 20px; margin: 8px 0; min-height: 24px; }
+  .weeks { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .week-member h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 16px; font-weight: 500; }
+  .week-row { display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: center; font-size: 13px; padding: 2px 0; }
+  .week-bars { display: grid; gap: 2px; }
+  .week-bars span { display: block; height: 6px; border-radius: 3px; min-width: 2px; }
+  .bar-earned, .key-earned { background: var(--fam-good); }
+  .bar-spent, .key-spent { background: var(--primary-color); }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
+  .week-nums { color: var(--fam-muted); white-space: nowrap; }
   .switchbar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
   .switch-slot { margin-left: auto; }
   .switch-slot .switchbar { margin: 0; }
@@ -943,10 +958,31 @@ class FamilyPanel extends HTMLElement {
   _renderHistory() {
     const f = (this._historyFilter ||= { member: "", text: "" });
     const people = this._data.members.map((m) => `<option value="${esc(m.id)}" ${f.member === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("");
-    return `<div class="card"><div class="history-filter inline">
+    return `${this._weeksCard()}<div class="card"><div class="history-filter inline">
         <label class="field"><span>Who</span><select data-history-member aria-label="Who"><option value="">Everyone</option>${people}</select></label>
         <label class="field grow"><span>Search</span><input type="search" data-history-text value="${esc(f.text)}" placeholder="A chore, reward or bonus" aria-label="Search history"></label>
       </div><div data-history-list>${this._historyList()}</div></div>`;
+  }
+
+  // Points earned and spent, and chores done, per person over the last weeks.
+  _weeksCard() {
+    const weeks = this._data.weeks || [];
+    const members = this._data.members;
+    if (!weeks.length || !members.length) return "";
+    const max = Math.max(1, ...weeks.flatMap((w) => Object.values(w.members).flatMap((v) => [v.earned, v.spent])));
+    const label = (iso, i) => (i === weeks.length - 1 ? "This week" : new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    const blocks = members.map((m) => {
+      const rows = weeks.map((w, i) => {
+        const v = w.members[m.id] || { earned: 0, spent: 0, chores: 0 };
+        return `<div class="week-row"><span class="week-label">${esc(label(w.week, i))}</span>
+          <span class="week-bars"><span class="bar-earned" style="width:${(v.earned / max) * 100}%"></span><span class="bar-spent" style="width:${(v.spent / max) * 100}%"></span></span>
+          <span class="week-nums">+${v.earned} · −${v.spent} · ${v.chores} chore${v.chores === 1 ? "" : "s"}</span></div>`;
+      });
+      return `<div class="week-member"><h3>${this._avatar(m, true)} ${esc(m.name)}</h3>${rows.join("")}</div>`;
+    });
+    return `<div class="card"><h2>Week by week</h2>
+      <p class="muted">Points earned <span class="key key-earned"></span> and spent <span class="key key-spent"></span> each week (Monday to Sunday), and chores done. Chores that didn't happen don't count.</p>
+      <div class="weeks">${blocks.join("")}</div></div>`;
   }
 
   _historyList() {
@@ -1059,14 +1095,18 @@ class FamilyPanel extends HTMLElement {
               ${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}
               <span class="label">${esc(c.name)}</span>
               ${(c.list || c.on_list) && !own ? `<span class="sub">${esc(c.list || c.on_list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
+              ${c.traded ? `<span class="sub">Traded from ${esc(this._tradeFrom(c.traded))}</span>` : ""}
               <span class="worth">+${pts(c.points)}</span>
+              ${member && fit === "chores" && c.source !== "todo" && !c.list && !c.traded && !this._offered(c.id, member.id) ? `<button class="trade-btn" data-trade-offer="${esc(c.id)}" aria-label="Trade ${esc(c.name)}" title="Trade">⇄</button>` : ""}
               <button class="check" data-chore="${esc(c.id)}" aria-label="${esc(c.name)} is done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>`;
           })
           .join("")}</div>`;
     const own = member?.own_today || {};
-    const mineBody = mine.length
-      ? choreTiles(mine, "chores")
-      : `<p class="empty">${own.done ? `All done, ${esc(member.name)}! 🎉` : "Nothing of your own right now."}</p>`;
+    const mineBody =
+      (mine.length
+        ? choreTiles(mine, "chores")
+        : `<p class="empty">${own.done ? `All done, ${esc(member.name)}! 🎉` : "Nothing of your own right now."}</p>`) +
+      (member ? this._tradesBlock(member) : "");
     const grabBody = grabs.length ? choreTiles(grabs, "grabs") : `<p class="empty">Nothing up for grabs right now.</p>`;
     const visibleRewards = this._visibleRewards(member);
     const rewardTiles = visibleRewards.length
@@ -1088,6 +1128,10 @@ class FamilyPanel extends HTMLElement {
           })
           .join("")}</div>`
       : `<p class="empty">${d.rewards.length ? (member ? `No rewards for ${esc(member.name)} right now.` : "No rewards for everyone right now.") : "No rewards yet. A parent adds them on the <b>Parents</b> dashboard."}</p>`;
+    const cashTile =
+      member && d.money
+        ? `<button class="tile cashout" data-cash-out><span class="emoji">💰</span><span class="label">Cash out</span><span class="sub">${esc(money(member.points, d.money))} in points</span></button>`
+        : "";
     const feed = member ? d.recent.filter((e) => e.member === member.id) : d.recent;
     const controls = this._visibleControls();
     const home = controls.length ? this._section("home", "Home", `<div class="tiles home" data-fit="home">${this._controlTiles()}</div>`, controls.length) : "";
@@ -1125,20 +1169,60 @@ class FamilyPanel extends HTMLElement {
     const hide = !!d.hide_empty_sections;
     const sections = {
       going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
-      chores: member && (mine.length || (own.total && !hide)) ? this._section("chores", "My chores", mineBody, mine.length) : "",
+      chores: member && (mine.length || (own.total && !hide) || this._tradesFor(member).length) ? this._section("chores", "My chores", mineBody, mine.length) : "",
       grabs: grabs.length || (!member && !hide) ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
       routines: routines.length ? this._section("routines", "Routines", `<div class="tiles" data-fit="routines">${routines.map((r) => this._routineTile(r, member)).join("")}</div>`, routines.length) : "",
       notes: this._section("notes", "Notes", noteTiles, notes.length),
       today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
       meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
       done: done.length ? this._section("done", "Done today", doneTiles, done.length) : "",
-      rewards: visibleRewards.length || !hide ? this._section("rewards", "Rewards", rewardTiles, visibleRewards.length) : "",
+      rewards: visibleRewards.length || cashTile || !hide ? this._section("rewards", "Rewards", cashTile && visibleRewards.length ? rewardTiles.replace('data-fit="rewards">', `data-fit="rewards">${cashTile}`) : cashTile ? `<div class="tiles" data-fit="rewards">${cashTile}</div>` : rewardTiles, visibleRewards.length) : "",
       home,
       lately: feed.length || !hide ? this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`) : "",
     };
-    return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>
+    const badges = member && (member.badges || []).length
+      ? `<div class="badges" aria-label="Badges">${member.badges.map((b) => `<span class="badge-pill" title="${esc(b.text)}">${esc(b.emoji)} ${esc(b.name)}</span>`).join("")}</div>`
+      : "";
+    return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>${badges}
       ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}
       ${sectionOrder(d.section_order).map((key) => sections[key] || "").join("")}`;
+  }
+
+  _badgeToast(member, badges) {
+    if (!badges?.length) return;
+    setTimeout(() => this._toast(`🏅 New badge for ${member.name}: ${badges.map((b) => `${b.emoji} ${b.name}`).join(", ")}!`), 3600);
+  }
+
+  _tradeFrom(tradeId) {
+    const t = (this._data.trades || []).find((x) => x.id === tradeId);
+    return t?.from_name || "someone";
+  }
+
+  _offered(choreId, memberId) {
+    return (this._data.trades || []).some((t) => t.chore_id === choreId && t.from === memberId);
+  }
+
+  // Trades that matter on someone's page: theirs, and offers they could take.
+  _tradesFor(member) {
+    return (this._data.trades || []).filter(
+      (t) => t.status !== "approved" && (t.from === member.id || t.to === member.id || (t.status === "offered" && !t.to)),
+    );
+  }
+
+  _tradesBlock(member) {
+    const rows = this._tradesFor(member).map((t) => {
+      const chore = `${t.emoji ? `${esc(t.emoji)} ` : ""}<b>${esc(t.chore)}</b> +${pts(t.points)}`;
+      if (t.from === member.id) {
+        const taker = t.to ? this._memberById(t.to)?.name || "someone" : "anyone";
+        const text = t.status === "taken" ? `${esc(taker)} took it · waiting for a parent` : `Offered to ${esc(taker)}`;
+        return `<li><span class="grow">${chore}<small>${text}</small></span><button class="btn" data-trade-cancel="${esc(t.id)}">Take back</button></li>`;
+      }
+      if (t.status === "taken") {
+        return `<li><span class="grow">${chore}<small>From ${esc(t.from_name)} · waiting for a parent</small></span></li>`;
+      }
+      return `<li><span class="grow">${chore}<small>${esc(t.from_name)} wants to trade it</small></span><button class="btn primary" data-trade-take="${esc(t.id)}">Take it</button></li>`;
+    });
+    return rows.length ? `<h3 class="trades-head">Trades</h3><ul class="rows trades">${rows.join("")}</ul>` : "";
   }
 
   // What someone's working toward: today's own chores, their streak, and
@@ -1425,6 +1509,29 @@ class FamilyPanel extends HTMLElement {
   _renderSheet() {
     const s = this._sheet;
     const d = this._data;
+    if (s.type === "trade") {
+      const chore = d.chores.find((c) => c.id === s.id);
+      const others = d.members.filter((m) => m.id !== s.member);
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Trade a chore">
+        <h3>Trade ${esc(chore?.name || "this chore")}?</h3>
+        <p class="muted">Whoever takes it does it today instead, once a parent says yes.</p>
+        <div class="people small-people">${others.map((m) => `<button class="person pick" style="--c:${esc(m.color)}" data-trade-to="${esc(m.id)}">${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></button>`).join("")}
+          <button class="person pick" data-trade-to=""><span class="name">Anyone</span></button></div>
+        <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
+    }
+    if (s.type === "cashout") {
+      const member = this._memberById(s.member);
+      const n = Number(s.points) || 0;
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Cash out">
+        <h3>Cash out points</h3>
+        <form data-cashout-form>
+          <p class="muted">${esc(member?.name || "")} has ${pts(member?.points || 0)} (${esc(money(member?.points || 0, d.money))}). A parent pays it out.</p>
+          <label class="field"><span>Points</span><input type="number" name="points" min="1" max="${esc(member?.points || 0)}" value="${esc(s.points)}" data-cashout-points required inputmode="numeric"></label>
+          <p class="cash-preview">${n > 0 ? `= ${esc(money(n, d.money))}` : "&nbsp;"}</p>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button>
+          <button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Cash out</button></div>
+        </form></div></div>`;
+    }
     if (s.type === "pin") {
       const dots = Array.from({ length: Math.max(4, s.pin.length) }, (_v, i) => `<span class="pin-dot${i < s.pin.length ? " on" : ""}"></span>`).join("");
       const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"]
@@ -1559,7 +1666,7 @@ class FamilyPanel extends HTMLElement {
 
   _renderParents() {
     const d = this._data;
-    const checks = (d.to_check?.length || 0) + (d.to_give?.length || 0) + (d.to_approve?.length || 0);
+    const checks = (d.to_check?.length || 0) + (d.to_give?.length || 0) + (d.to_approve?.length || 0) + (d.trades || []).filter((t) => t.status === "taken").length;
     const tabs = [
       ["review", `To check${checks ? `<span class="badge">${checks}</span>` : ""}`],
       ["chores", "Chores"],
@@ -1651,13 +1758,27 @@ class FamilyPanel extends HTMLElement {
           .map((e) => {
             const people = (e.together || [e.member]).map((id) => this._memberById(id)).filter(Boolean);
             const who = people.length ? namesText(people.map((m) => m.name)) : "Someone";
-            return `<li><span class="avatars">${people.map((m) => this._avatar(m, true)).join("")}</span><span class="grow">${esc(who)}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))}</small></span>
-              <button class="btn primary" data-given="${esc(e.id)}">Handed out</button></li>`;
+            const cash = e.kind === "cashout";
+            return `<li><span class="avatars">${people.map((m) => this._avatar(m, true)).join("")}</span><span class="grow">${esc(who)}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))}${cash ? ` · ${pts(-e.points)}` : ""}</small></span>
+              <button class="btn primary" data-given="${esc(e.id)}">${cash ? "Paid" : "Handed out"}</button>${cash ? `<button class="btn bad" data-cash-cancel="${esc(e.id)}">Cancel</button>` : ""}</li>`;
           })
           .join("")}</ul>`
       : `<p class="empty">No rewards to hand out.</p>`;
+    const taken = (d.trades || []).filter((t) => t.status === "taken");
+    const trades = taken.length
+      ? `<div class="card"><h2>Trades to say yes to</h2>
+        <p class="muted"><b>Yes</b>: whoever took it does the chore today instead. <b>No</b>: it stays with who had it.</p>
+        <ul class="rows">${taken
+          .map((t) => {
+            const taker = this._memberById(t.to);
+            return `<li>${taker ? this._avatar(taker, true) : ""}<span class="grow">${esc(taker?.name || "Someone")} takes ${esc(t.from_name)}'s <b>${esc(t.chore)}</b><small>Today · +${pts(t.points)}</small></span>
+              <button class="btn good" data-trade-decide="${esc(t.id)}" data-yes="1">Yes</button>
+              <button class="btn bad" data-trade-decide="${esc(t.id)}" data-yes="0">No</button></li>`;
+          })
+          .join("")}</ul></div>`
+      : "";
     const auto = d.settings?.auto_check || "";
-    return `${this._quickCard()}${approve}<div class="card"><h2>Chores to check</h2>
+    return `${this._quickCard()}${approve}${trades}<div class="card"><h2>Chores to check</h2>
         <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}, and takes the penalty in the box next to it: the chore's own penalty, or the family's. Type a number to change it this time.</p>${check}
         <form class="inline penalty-setting" data-penalty-setting>
           <label class="field"><span>When a chore didn't happen, also take away</span>
@@ -1666,7 +1787,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field" style="margin-top:16px"><span>Count chores nobody checked as done right</span>
           <select data-auto-check>${AUTO_CHECKS.map((a) => `<option value="${a.id}" ${auto === a.id ? "selected" : ""}>${a.label}</option>`).join("")}</select>
           <small>You can still mark one <b>Didn't happen</b> from History.</small></label></div>
-      <div class="card"><h2>Rewards to hand out</h2>${give}</div>
+      <div class="card"><h2>Rewards and cash outs to hand out</h2>${give}</div>
       ${this._phonesCard()}`;
   }
 
@@ -2471,6 +2592,24 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.reward) {
       this._sheet = { type: "reward", id: ds.reward, member: this._member };
       this._renderOverlay();
+    } else if (ds.tradeOffer) {
+      this._sheet = { type: "trade", id: ds.tradeOffer, member: this._member };
+      this._renderOverlay();
+    } else if (ds.tradeTo !== undefined && this._sheet?.type === "trade") {
+      const s = this._sheet;
+      this._sheet = null;
+      this._call({ type: `${DOMAIN}/trade/offer`, member_id: s.member, chore_id: s.id, to: ds.tradeTo || null }, "Offered. It's still yours until someone takes it and a parent says yes.");
+    } else if (ds.tradeTake) {
+      this._call({ type: `${DOMAIN}/trade/take`, trade_id: ds.tradeTake, member_id: this._member }, "Taken. A parent will say yes or no.");
+    } else if (ds.tradeCancel) {
+      this._call({ type: `${DOMAIN}/trade/cancel`, trade_id: ds.tradeCancel }, "Taken back.");
+    } else if (ds.tradeDecide) {
+      this._call({ type: `${DOMAIN}/trade/decide`, trade_id: ds.tradeDecide, approved: ds.yes === "1" }, ds.yes === "1" ? "Traded for today." : "Trade turned down.");
+    } else if ("cashOut" in ds) {
+      this._sheet = { type: "cashout", member: this._member, points: "" };
+      this._renderOverlay();
+    } else if (ds.cashCancel) {
+      this._call({ type: `${DOMAIN}/cash_out/cancel`, entry_id: ds.cashCancel }, "Cash out cancelled; the points are back.");
     } else if (ds.sectionMove) {
       const order = sectionOrder(this._data.section_order);
       const from = order.indexOf(ds.sectionMove);
@@ -2600,6 +2739,13 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onInput(ev) {
+    if (ev.target?.dataset?.cashoutPoints !== undefined && this._sheet?.type === "cashout") {
+      this._sheet.points = ev.target.value;
+      const preview = this.shadowRoot.querySelector(".cash-preview");
+      const n = Number(ev.target.value) || 0;
+      if (preview) preview.textContent = n > 0 ? `= ${money(n, this._data.money)}` : "";
+      return;
+    }
     if (ev.target.dataset.historyText !== undefined) {
       this._historyFilter = { ...(this._historyFilter || { member: "" }), text: ev.target.value };
       const list = this.shadowRoot.querySelector("[data-history-list]");
@@ -2625,6 +2771,26 @@ class FamilyPanel extends HTMLElement {
   async _onSubmit(ev) {
     ev.preventDefault();
     const form = ev.target;
+    if (form.matches("[data-cashout-form]")) {
+      const s = this._sheet;
+      const member = this._memberById(s?.member);
+      const points = Number(form.querySelector("[name=points]").value);
+      if (!member || this._busy) return;
+      this._busy = true;
+      try {
+        const res = await this._ws({ type: `${DOMAIN}/cash_out`, member_id: member.id, points });
+        this._sheet = null;
+        this._toast(`${res.entry.title} asked for, ${member.name}. A parent will pay it out.`);
+        this._badgeToast(member, res.badges);
+        await this._load();
+      } catch (err) {
+        this._toast(err?.message || String(err), true);
+      } finally {
+        this._busy = false;
+        this._renderOverlay();
+      }
+      return;
+    }
     if (form.matches("[data-pin-form]")) {
       const pin = form.querySelector("[name=pin]").value.trim();
       await this._call({ type: `${DOMAIN}/pin`, pin }, "Parent PIN saved.");
@@ -2833,10 +2999,12 @@ class FamilyPanel extends HTMLElement {
         const bonus = (res.entry?.bonuses || []).map((b) => (b.points ? ` ${b.title} +${pts(b.points)}` : ` ${b.title}`)).join("");
         this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
         if ((res.entry?.bonuses || []).some((b) => b.bonus === "all_done")) this._celebrate(member);
+        this._badgeToast(member, res.badges);
       } else {
         const reward = this._data.rewards.find((r) => r.id === s.id);
         const res = await this._ws({ type: `${DOMAIN}/redeem`, member_id: s.member, reward_id: s.id });
         this._toast(`Enjoy ${reward?.name || "it"}, ${member.name}! ${pts(res.points)} left`, false, res.entry?.id);
+        this._badgeToast(member, res.badges);
       }
       this._sheet = null;
       await this._load();

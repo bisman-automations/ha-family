@@ -963,3 +963,145 @@ def reminder_text(chore: str, names: list[str]) -> str:
     if not names:
         return f"Reminder: {chore}."
     return f"Reminder for {names_text(names)}: {chore}."
+
+
+# ---- badges ---------------------------------------------------------------------------
+
+KIND_CASHOUT = "cashout"  # points turned into money; a parent pays it out
+
+# (key, emoji, name, what earns it). In the order they show.
+BADGES: tuple[tuple[str, str, str, str], ...] = (
+    ("first_chore", "🌱", "First chore", "Did a first chore"),
+    ("chores_10", "⭐", "10 chores", "Did 10 chores"),
+    ("chores_50", "🌟", "50 chores", "Did 50 chores"),
+    ("chores_100", "🏆", "100 chores", "Did 100 chores"),
+    ("all_done", "🎉", "All done", "Did all their own chores in a day"),
+    ("streak_3", "🔥", "3-day streak", "All their own chores 3 days running"),
+    ("streak_7", "🔥", "Week streak", "All their own chores 7 days running"),
+    ("streak_30", "💎", "30-day streak", "All their own chores 30 days running"),
+    ("first_reward", "🎁", "First reward", "Spent points on a first reward"),
+    ("cashed_out", "💰", "Cashed out", "Turned points into money"),
+)
+BADGE_INFO = {key: (emoji, name, text) for key, emoji, name, text in BADGES}
+
+
+def badges_earned(
+    entries: Iterable[dict[str, Any]], member_id: str, streak: int
+) -> set[str]:
+    """The badges a member's history earns now.
+
+    Chores count when they weren't marked as didn't happen. Badges are kept
+    once earned (the caller stores them), so history that ages out doesn't
+    take one away.
+    """
+    chores = 0
+    all_done = rewards = cashed = False
+    for e in entries:
+        if e.get("member") != member_id or e.get("review") == REVIEW_REJECTED:
+            continue
+        kind = e.get("kind")
+        if kind == KIND_CHORE:
+            chores += 1
+        elif kind == KIND_BONUS and e.get("bonus") == BONUS_ALL_DONE:
+            all_done = True
+        elif kind == KIND_REWARD and e.get("given") != GIVEN_APPROVAL:
+            rewards = True
+        elif kind == KIND_CASHOUT:
+            cashed = True
+    earned = {
+        key
+        for key, needed in (
+            ("first_chore", 1),
+            ("chores_10", 10),
+            ("chores_50", 50),
+            ("chores_100", 100),
+        )
+        if chores >= needed
+    }
+    earned |= {
+        key
+        for key, needed in (("streak_3", 3), ("streak_7", 7), ("streak_30", 30))
+        if streak >= needed
+    }
+    if all_done:
+        earned.add("all_done")
+    if rewards:
+        earned.add("first_reward")
+    if cashed:
+        earned.add("cashed_out")
+    return earned
+
+
+def badge_list(stored: dict[str, str] | None) -> list[dict[str, Any]]:
+    """A member's stored badges ({key: date}) in display order."""
+    stored = stored or {}
+    return [
+        {"key": key, "emoji": emoji, "name": name, "text": text, "at": stored[key]}
+        for key, emoji, name, text in BADGES
+        if key in stored
+    ]
+
+
+# ---- week by week ---------------------------------------------------------------------
+
+
+def week_start(day: date) -> date:
+    """The Monday of ``day``'s week."""
+    return day - timedelta(days=day.weekday())
+
+
+def weekly_stats(
+    entries: Iterable[dict[str, Any]],
+    member_ids: Iterable[str],
+    today: date,
+    weeks: int = 8,
+) -> list[dict[str, Any]]:
+    """Points earned and spent, and chores done, per member per week.
+
+    The newest week (this one) last. Earned is every positive entry that
+    wasn't marked as didn't happen; spent is rewards and cash outs (points
+    held for a reward waiting for a yes count too); chores counts chore
+    entries that weren't marked as didn't happen.
+    """
+    first = week_start(today) - timedelta(weeks=weeks - 1)
+    ids = list(member_ids)
+    table = [
+        {
+            "week": (first + timedelta(weeks=i)).isoformat(),
+            "members": {m: {"earned": 0, "spent": 0, "chores": 0} for m in ids},
+        }
+        for i in range(weeks)
+    ]
+    for e in entries:
+        member = e.get("member")
+        if member not in ids or e.get("review") == REVIEW_REJECTED:
+            continue
+        try:
+            day = datetime.fromisoformat(e["at"]).date()
+        except KeyError, TypeError, ValueError:
+            continue
+        index = (week_start(day) - first).days // 7
+        if not 0 <= index < weeks:
+            continue
+        row = table[index]["members"][member]
+        points = int(e.get("points", 0))
+        if e.get("kind") in (KIND_REWARD, KIND_CASHOUT):
+            row["spent"] += -points
+        elif points > 0:
+            row["earned"] += points
+        if e.get("kind") == KIND_CHORE:
+            row["chores"] += 1
+    return table
+
+
+def cashout_points(points: Any, balance: int) -> int:
+    """Points to cash out: a whole number from 1 to the member's balance."""
+    try:
+        value = int(points)
+    except TypeError, ValueError:
+        raise ValueError("Pick how many points to cash out") from None
+    if value < 1:
+        raise ValueError("Pick how many points to cash out")
+    if value > balance:
+        raise ValueError(f"Only {balance} points to cash out")
+    return value

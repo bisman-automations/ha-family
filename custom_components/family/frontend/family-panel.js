@@ -369,6 +369,9 @@ const STYLES = `
   .week-nums { color: var(--fam-muted); white-space: nowrap; }
   .switchbar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
   .switch-slot { margin-left: auto; }
+  .pin-head { margin: 16px 0 2px; font-size: 16px; font-weight: 500; }
+  .pin-form { align-items: flex-end; }
+  .pin-form input { width: 160px; }
   .switch-slot .switchbar { margin: 0; }
   .switch-slot .btn { color: inherit; border-color: currentColor; white-space: nowrap; }
   .switchbar ha-icon { --mdc-icon-size: 18px; margin-right: 4px; }
@@ -472,7 +475,7 @@ const STYLES = `
   .field small { color: var(--fam-muted); }
   .inline { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
   .check { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
-  input[type="text"], input[type="search"], input[type="number"], input[type="time"], select {
+  input[type="text"], input[type="password"], input[type="search"], input[type="number"], input[type="time"], select {
     font: inherit; font-size: 15px; padding: 8px 10px; min-height: 40px; box-sizing: border-box;
     border-radius: 8px; border: 1px solid var(--fam-divider); background: var(--fam-card); color: inherit; max-width: 100%;
   }
@@ -563,6 +566,7 @@ class FamilyPanel extends HTMLElement {
     try {
       const res = await this._hass.callWS({ type: `${DOMAIN}/unlock`, pin: s.pin });
       this._pass = res.pass;
+      this._passBy = res.by || null;
       this._sheet = null;
       this._busy = false;
       this._switchView("parents");
@@ -578,6 +582,7 @@ class FamilyPanel extends HTMLElement {
     if (this._pass) {
       this._hass.callWS({ type: `${DOMAIN}/lock`, pass: this._pass }).catch(() => {});
       this._pass = null;
+      this._passBy = null;
     }
     this._switchView("family");
   }
@@ -594,7 +599,8 @@ class FamilyPanel extends HTMLElement {
     const d = this._data;
     if (!d) return "";
     if (this._mode === "parents") {
-      return `<div class="switchbar"><button class="btn" data-to-family><ha-icon icon="mdi:arrow-left"></ha-icon> Back to Family</button></div>`;
+      const who = this._pass && this._passBy ? ` <span class="pass-by">(${esc(this._passBy)})</span>` : "";
+      return `<div class="switchbar"><button class="btn" data-to-family><ha-icon icon="mdi:arrow-left"></ha-icon> Back to Family${who}</button></div>`;
     }
     const lock = d.is_admin ? "mdi:account-supervisor" : "mdi:lock";
     return `<div class="switchbar"><button class="btn" data-to-parents><ha-icon icon="${lock}"></ha-icon> Parents</button></div>`;
@@ -2333,17 +2339,22 @@ class FamilyPanel extends HTMLElement {
 
   _pinCard() {
     const d = this._data;
-    const status = d.pin_set ? "A parent PIN is set." : "No parent PIN yet: on the shared screen, only an administrator's login can open the parent controls.";
-    const form = d.is_admin
-      ? `<form class="row" data-pin-form>
-          <label class="field"><span>${d.pin_set ? "New PIN" : "PIN"}</span><input name="pin" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required placeholder="4 to 8 digits"></label>
-          <button class="btn primary" type="submit" ${this._busy ? "disabled" : ""}>${d.pin_set ? "Change PIN" : "Set PIN"}</button>
-          ${d.pin_set ? `<button class="btn" type="button" data-pin-clear>Remove PIN</button>` : ""}
-        </form>`
-      : `<p class="muted">Only an administrator can change it.</p>`;
+    const pins = d.pins || {};
+    const pinForm = (own, set) => `<form class="inline pin-form" data-pin-form data-own="${own ? 1 : 0}">
+        <label class="field"><span>${set ? "New PIN" : "PIN"}</span><input name="pin" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required placeholder="4 to 8 digits"></label>
+        <button class="btn primary" type="submit" ${this._busy ? "disabled" : ""}>${set ? "Change" : "Set"}</button>
+        ${set ? `<button class="btn" type="button" data-pin-clear="${own ? 1 : 0}">Remove</button>` : ""}
+      </form>`;
+    const body = d.is_admin
+      ? `<h3 class="pin-head">Family PIN</h3>
+        <p class="muted">${pins.family ? "Set. Any parent can use it." : "Not set."}</p>${pinForm(false, pins.family)}
+        <h3 class="pin-head">Your own PIN</h3>
+        <p class="muted">${pins.mine ? "Set. It opens the parent controls as you." : "Not set. Only you can set or change it, from your own login."}</p>${pinForm(true, pins.mine)}
+        ${(pins.parents || []).length ? `<p class="muted">Parents with their own PIN: ${esc(namesText(pins.parents))}.</p>` : ""}`
+      : `<p>${d.pin_set ? "A parent PIN is set." : "No parent PIN yet."}</p><p class="muted">Only an administrator can set or change PINs.</p>`;
     return `<div class="card"><h2>Parent PIN</h2>
-      <p class="muted">On a login that isn't an administrator (the shared screen), <b>Parents</b> asks for this PIN. It opens the parent controls until <b>Back to Family</b>, or until nobody has tapped for two minutes. After five wrong PINs the pad locks for five minutes and your phones are told.</p>
-      <p>${esc(status)}</p>${form}</div>`;
+      <p class="muted">On a login that isn't an administrator (the shared screen), <b>Parents</b> asks for a PIN: the family PIN, or a parent's own. It opens the parent controls until <b>Back to Family</b>, or until nobody has tapped for two minutes. After five wrong PINs the pad locks for five minutes and your phones are told. With no PIN set, only an administrator's login opens them.</p>
+      ${body}</div>`;
   }
 
   // Every Parents card folds by its heading. Which are folded is kept per
@@ -2544,7 +2555,8 @@ class FamilyPanel extends HTMLElement {
       return;
     }
     if ("pinClear" in ds) {
-      this._call({ type: `${DOMAIN}/pin`, pin: null }, "Parent PIN removed.");
+      const own = ds.pinClear === "1";
+      this._call({ type: `${DOMAIN}/pin`, pin: null, own }, own ? "Your PIN is removed." : "Family PIN removed.");
       return;
     }
     if (ds.member) {
@@ -2793,7 +2805,8 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.matches("[data-pin-form]")) {
       const pin = form.querySelector("[name=pin]").value.trim();
-      await this._call({ type: `${DOMAIN}/pin`, pin }, "Parent PIN saved.");
+      const own = form.dataset.own === "1";
+      await this._call({ type: `${DOMAIN}/pin`, pin, own }, own ? "Your PIN is saved." : "Family PIN saved.");
       return;
     }
     if (form.dataset.penaltySetting !== undefined) {

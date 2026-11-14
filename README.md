@@ -147,7 +147,11 @@ member: <member id>
 **Parents** at the top of the Family page switches it to the parent controls; **Back to Family** switches back. The **Family** card on a dashboard has the same button.
 
 - **Logged in as a Home Assistant administrator** (a parent's own phone or computer), **Parents** opens straight away.
-- **Any other login** (the shared screen, a kid's tablet) asks for the **parent PIN**. A parent sets it in the parent controls under **Family** → **Parent PIN**, from an administrator's login. It's 4 to 8 digits, and Home Assistant only keeps a scrambled copy of it, never the PIN itself.
+- **Any other login** (the shared screen, a kid's tablet) asks for a **parent PIN**. Set them in the parent controls under **Family** → **Parent PIN**, from an administrator's login:
+  - **Family PIN**: one PIN any parent can use. Any administrator can set, change or remove it.
+  - **Your own PIN**: each administrator can set their own. **Back to Family** then shows who opened the parent controls. Only you can change yours, from your own login, and it stops working if your login stops being an administrator.
+
+  Use either or both. PINs are 4 to 8 digits, no two can be the same, and Home Assistant only keeps a scrambled copy of each, never the PIN itself.
 - The PIN opens the parent controls on that screen until **Back to Family**, or until nobody has tapped it for two minutes. Restarting Home Assistant closes them too.
 - After five wrong PINs in a row, the pad locks for five minutes and the phones picked under **Parents' phones** get a notification.
 - With no PIN set, only an administrator's login can open the parent controls.
@@ -234,6 +238,7 @@ For automations, for example to send a message or play a sound:
 - **A TV time reward says TV Mgmt isn't set up.** Install TV Mgmt 1.20.0 or newer and set up the TV, then pick the TV again in the reward.
 - **A to-do list's items don't show.** Check the list in the parent controls under **Chores**, and that the to-do list itself is available in Home Assistant.
 - **Where did the Parents page go?** Since 2.0.0 it's part of the Family page: tap **Parents** at the top.
+- **My own PIN stopped working.** It only works while your login is an administrator. Use the family PIN, or set your own again from an administrator's login.
 - **Parents asks for a PIN, but none was set.** Only an administrator's login opens the parent controls without a PIN. Log in as an administrator, then set one under **Family** → **Parent PIN**.
 - **A home control says it isn't available.** The device is offline or was removed from Home Assistant. Check it in Home Assistant, or remove it under **Home** in the parent controls and add its replacement.
 

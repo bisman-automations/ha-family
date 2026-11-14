@@ -1,6 +1,10 @@
 """The parent PIN on the shared screen, and the short-lived passes it gives.
 
-A parent sets a PIN on the Family tab (admins only). On a screen logged in as
+There's a family PIN that any admin sets, and each admin can also set their
+own PIN (``settings.parent_pins``, by Home Assistant user id). An admin's own
+PIN stops working if they stop being an admin, and the pass it gives says
+which parent opened the controls. Both are set on the Family tab (admins
+only). On a screen logged in as
 someone who isn't an admin (the shared tablet), **Parents** asks for it.
 The right PIN gives that login a pass: a random token the dashboard sends
 with each parent command. A pass lasts ``PASS_SECONDS`` after its last use
@@ -24,7 +28,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .manager import FamilyManager
 
-PIN_KEY = "parent_pin"
+PIN_KEY = "parent_pin"  # the family PIN
+PINS_KEY = "parent_pins"  # each admin's own PIN: {user id: hash}
 PIN_MIN = 4
 PIN_MAX = 8
 ITERATIONS = 200_000
@@ -71,6 +76,7 @@ def clean_pin(pin: str) -> str:
 class _Pass:
     user_id: str | None
     expires: float
+    by: str | None = None  # the parent whose own PIN opened it
 
 
 class ParentPasses:
@@ -83,21 +89,75 @@ class ParentPasses:
         self._locked_until = 0.0
 
     @property
-    def pin_set(self) -> bool:
-        return bool(self.manager.settings.get(PIN_KEY))
+    def _own(self) -> dict[str, dict[str, Any]]:
+        return self.manager.settings.get(PINS_KEY) or {}
 
-    def set_pin(self, pin: str | None) -> None:
-        """Set the PIN, or clear it with None or an empty string (ends every pass)."""
+    @property
+    def pin_set(self) -> bool:
+        """Any PIN at all: the family's, or a parent's own."""
+        settings = self.manager.settings
+        return bool(settings.get(PIN_KEY) or settings.get(PINS_KEY))
+
+    def status(self, user_id: str | None) -> dict[str, Any]:
+        """For the PIN card: which PINs are set (never the PINs)."""
+        return {
+            "family": bool(self.manager.settings.get(PIN_KEY)),
+            "mine": bool(user_id and user_id in self._own),
+            "parents": sorted(
+                str(h.get("name") or "A parent") for h in self._own.values()
+            ),
+        }
+
+    def _taken(self, pin: str, skip: str | None) -> bool:
+        """Another PIN (the family's, or another parent's) is these digits."""
+        others = [] if skip == "" else [self.manager.settings.get(PIN_KEY)]
+        others += [h for uid, h in self._own.items() if uid != skip]
+        return any(pin_matches(pin, h) for h in others if h)
+
+    def set_pin(
+        self, pin: str | None, owner: str | None = None, owner_name: str | None = None
+    ) -> None:
+        """Set the family PIN (``owner`` None), or a parent's own (their user
+        id). None or "" clears it. Ends every pass."""
         if pin:
-            self.manager.settings[PIN_KEY] = hash_pin(clean_pin(pin))
-        else:
+            pin = clean_pin(pin)
+            if self._taken(pin, "" if owner is None else owner):
+                raise _error("That PIN is already used. Pick another one.")
+            value = hash_pin(pin)
+            if owner is None:
+                self.manager.settings[PIN_KEY] = value
+            else:
+                self.manager.settings[PINS_KEY] = {
+                    **self._own,
+                    owner: {**value, "name": owner_name},
+                }
+        elif owner is None:
             self.manager.settings.pop(PIN_KEY, None)
+        else:
+            self.manager.settings[PINS_KEY] = {
+                k: v for k, v in self._own.items() if k != owner
+            }
+        if not self.manager.settings.get(PINS_KEY):
+            self.manager.settings.pop(PINS_KEY, None)
         self._passes.clear()
         self._wrong = 0
         self._locked_until = 0.0
         self.manager.changed()
 
-    def unlock(self, pin: str, user_id: str | None) -> dict[str, Any]:
+    async def _match(self, pin: str) -> tuple[bool, str | None]:
+        """(matched, the parent's user id for their own PIN)."""
+        if pin_matches(pin, self.manager.settings.get(PIN_KEY)):
+            return True, None
+        for owner, stored in list(self._own.items()):
+            if not pin_matches(pin, stored):
+                continue
+            user = await self.manager.hass.auth.async_get_user(owner)
+            # Only while they're still an admin.
+            if user is not None and user.is_active and user.is_admin:
+                return True, owner
+        return False, None
+
+    async def unlock(self, pin: str, user_id: str | None) -> dict[str, Any]:
         """A pass for the right PIN. Raises FamilyError otherwise."""
         now = time.monotonic()
         if not self.pin_set:
@@ -105,7 +165,8 @@ class ParentPasses:
         if now < self._locked_until:
             wait = int(self._locked_until - now) // 60 + 1
             raise _error(f"Too many wrong PINs. Try again in {wait} min.")
-        if not pin_matches((pin or "").strip(), self.manager.settings.get(PIN_KEY)):
+        matched, owner = await self._match((pin or "").strip())
+        if not matched:
             self._wrong += 1
             if self._wrong >= MAX_TRIES:
                 self._wrong = 0
@@ -118,8 +179,12 @@ class ParentPasses:
         self._wrong = 0
         self._prune(now)
         token = secrets.token_urlsafe(24)
-        self._passes[token] = _Pass(user_id, now + PASS_SECONDS)
-        return {"pass": token, "seconds": PASS_SECONDS}
+        name = None
+        if owner is not None:
+            user = await self.manager.hass.auth.async_get_user(owner)
+            name = user.name if user else self._own[owner].get("name")
+        self._passes[token] = _Pass(user_id, now + PASS_SECONDS, name)
+        return {"pass": token, "seconds": PASS_SECONDS, "by": name}
 
     def valid(self, token: str | None, user_id: str | None) -> bool:
         """True for a live pass given to this login; each use extends it."""

@@ -2043,6 +2043,8 @@ class FamilyManager:
             "is_admin": is_admin,
             "parent": bool(is_admin if parent is None else parent),
             "pin_set": self.passes.pin_set,
+            # Admins: which PINs are set, for the PIN card (never the PINs).
+            "pins": self.passes.status(user_id) if is_admin else None,
             "undo_seconds": model.UNDO_SECONDS,
             # The Family dashboard's sections, in the order a parent set.
             "section_order": model.section_order(self.settings.get("section_order")),

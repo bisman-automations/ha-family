@@ -4,7 +4,8 @@
      Serve the repo root over HTTP and open
      scripts/panel-preview/index.html?mode=family (or mode=parents).
      &admin=0 logs in as the shared screen (not an admin): Parents then asks
-     for the parent PIN, 2468 here (&pin=0: no PIN set). -->
+     for the parent PIN: the family PIN 2468, or the sample parent's own PIN
+     1357 (&pin=0: no PIN set). -->
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body { margin: 0; font-family: Roboto, sans-serif; --primary-color: #03a9f4; --primary-background-color: #f5f5f5;
@@ -164,7 +165,9 @@ const routinesToday = () => routines.filter((r) => r.enabled !== false).map((r) 
 const SECTION_KEYS = ["going", "chores", "routines", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
 const sectionList = (order) => { const out = (order || []).filter((k, i, all) => SECTION_KEYS.includes(k) && all.indexOf(k) === i); return [...out, ...SECTION_KEYS.filter((k) => !out.includes(k))]; };
 const IS_ADMIN = params.get("admin") !== "0";
-let pinSet = params.get("pin") !== "0";
+let familyPin = params.get("pin") !== "0" ? "2468" : null;
+let ownPins = params.get("pin") !== "0" ? { parent: { pin: "1357", name: "Dana" } } : {};
+const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
@@ -173,7 +176,7 @@ const PARENT_ONLY = ["trade/decide", "cash_out/cancel", "review", "given", "appr
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
 const state = () => ({
-  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet, trades: trades.map((t) => ({ ...t })), weeks: weeks(),
+  members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet(), pins: IS_ADMIN ? { family: !!familyPin, mine: !!ownPins.parent, parents: Object.values(ownPins).map((o) => o.name).sort() } : null, trades: trades.map((t) => ({ ...t })), weeks: weeks(),
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
@@ -204,12 +207,20 @@ window.hass = {
     if (t === "cash_out") { const mm = members.find((x) => x.id === msg.member_id); if (!settings.point_value) throw { message: "Cashing out needs a point value. A parent sets it under Family." }; if (msg.points < 1) throw { message: "Pick how many points to cash out" }; if (msg.points > mm.points) throw { message: `Only ${mm.points} points to cash out` }; mm.points -= msg.points; const cash = Math.round(msg.points * settings.point_value * 100) / 100; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "cashout", member: mm.id, title: `Cash out ${settings.currency}${cash.toFixed(2)}`, points: -msg.points, money: cash, given: "to_give" }; entries.push(e); return { entry: e, points: mm.points, badges: (mm.badges || []).some((b) => b.key === "cashed_out") ? [] : [{ member: mm.id, key: "cashed_out", emoji: "💰", name: "Cashed out" }] }; }
     if (t === "cash_out/cancel") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const e = entries.find((x) => x.id === msg.entry_id); members.find((x) => x.id === e.member).points -= e.points; entries = entries.filter((x) => x !== e); return {}; }
     if (t === "unlock") {
-      if (!pinSet) throw { message: "No parent PIN is set. A parent sets one on the Family tab." };
-      if (msg.pin !== "2468") { wrongPins += 1; throw { message: wrongPins >= 5 ? "Too many wrong PINs. Try again in 5 min." : "That's not the PIN. Try again." }; }
-      wrongPins = 0; parentPass = "pass-" + Date.now(); return { pass: parentPass, seconds: 300 };
+      if (!pinSet()) throw { message: "No parent PIN is set. A parent sets one on the Family tab." };
+      const own = Object.values(ownPins).find((o) => o.pin === msg.pin);
+      if (msg.pin !== familyPin && !own) { wrongPins += 1; throw { message: wrongPins >= 5 ? "Too many wrong PINs. Try again in 5 min." : "That's not the PIN. Try again." }; }
+      wrongPins = 0; parentPass = "pass-" + Date.now(); return { pass: parentPass, seconds: 300, by: own ? own.name : null };
     }
     if (t === "lock") { if (msg.pass === parentPass) parentPass = null; return {}; }
-    if (t === "pin") { if (!IS_ADMIN) throw { code: "unauthorized", message: "Unauthorized" }; pinSet = !!msg.pin; parentPass = null; return { pin_set: pinSet }; }
+    if (t === "pin") {
+      if (!IS_ADMIN) throw { code: "unauthorized", message: "Unauthorized" };
+      if (msg.pin && !/^[0-9]{4,8}$/.test(msg.pin)) throw { message: "The PIN has to be 4 to 8 digits" };
+      const others = [msg.own ? familyPin : null, ...Object.entries(ownPins).filter(([k]) => !msg.own || k !== "parent").map(([, o]) => o.pin)];
+      if (msg.pin && others.includes(msg.pin)) throw { message: "That PIN is already used. Pick another one." };
+      if (msg.own) { if (msg.pin) ownPins.parent = { pin: msg.pin, name: "Dana" }; else delete ownPins.parent; } else familyPin = msg.pin || null;
+      parentPass = null; return { pin_set: pinSet() };
+    }
     if (PARENT_ONLY.includes(t) && !isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" };
     if (t === "choices") return { voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
     if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: isParent(msg), by: null }; notes.push(n); return { note: n }; }

@@ -25,7 +25,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from . import model
 from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
+from .parent_pass import PIN_KEY, PINS_KEY
 from .parents_notify import target_name
+
+PIN_KEYS = (PIN_KEY, PINS_KEY)
 
 # The parent pass, sent with any command (only parent commands use it).
 PASS = "pass"
@@ -148,7 +151,7 @@ async def ws_state(hass, connection, msg, manager) -> dict[str, Any]:
 @_handler
 async def ws_unlock(hass, connection, msg, manager) -> dict[str, Any]:
     """Swap the parent PIN for a pass (open to everyone: it's the PIN pad)."""
-    return manager.passes.unlock(msg["pin"], _user(connection)[0])
+    return await manager.passes.unlock(msg["pin"], _user(connection)[0])
 
 
 @websocket_api.websocket_command(
@@ -514,7 +517,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.async_response
 @_handler
 async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
-    return {"settings": manager.save_settings(msg)}
+    settings = manager.save_settings(msg)
+    # The PINs' hashes stay in Home Assistant.
+    return {"settings": {k: v for k, v in settings.items() if k not in PIN_KEYS}}
 
 
 @websocket_api.websocket_command(
@@ -605,15 +610,22 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("type"): f"{DOMAIN}/pin",
         vol.Optional(PASS): str,
         vol.Required("pin"): vol.Any(None, str),
+        # True: your own PIN; false (the default): the family PIN.
+        vol.Optional("own", default=False): bool,
     }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
 @_handler
 async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
-    """Set or clear the parent PIN (admins only, not with a pass)."""
-    manager.passes.set_pin(msg["pin"])
-    return {"pin_set": manager.passes.pin_set}
+    """Set or clear the family PIN, or your own (admins only, not with a pass)."""
+    user = connection.user
+    user_id = user.id if user else None
+    if msg["own"]:
+        manager.passes.set_pin(msg["pin"], user_id, user.name if user else None)
+    else:
+        manager.passes.set_pin(msg["pin"])
+    return {"pin_set": manager.passes.pin_set, **manager.passes.status(user_id)}
 
 
 # ---- trading chores and cashing out (everyone asks, a parent says yes) ------------------

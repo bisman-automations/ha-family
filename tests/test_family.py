@@ -1566,3 +1566,58 @@ async def test_admins_are_parents_without_a_pin(hass: HomeAssistant, client):
     state = await client.ok("state")
     assert state["parent"] is True
     assert state["is_admin"] is True
+
+
+async def test_each_parent_can_have_their_own_pin(
+    hass: HomeAssistant,
+    client,
+    hass_ws_client,
+    hass_admin_user,
+    hass_read_only_access_token,
+):
+    state = await client.ok("state")
+    assert state["pins"] == {"family": False, "mine": False, "parents": []}
+    res = await client.ok("pin", pin="1357", own=True)
+    assert res["mine"] is True
+    assert res["family"] is False
+    assert res["parents"] == [hass_admin_user.name]
+    await client.ok("pin", pin="2468")
+    # Two PINs can't be the same digits.
+    res = await client("pin", pin="1357")
+    assert res["error"]["message"] == "That PIN is already used. Pick another one."
+    res = await client("pin", pin="2468", own=True)
+    assert not res["success"]
+    # The hashes never leave Home Assistant.
+    settings = (await client.ok("settings", penalty=1))["settings"]
+    assert "parent_pin" not in settings
+    assert "parent_pins" not in settings
+
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    state = await kiosk.ok("state")
+    assert state["pin_set"] is True
+    assert state["pins"] is None
+    own = await kiosk.ok("unlock", pin="1357")
+    assert own["by"] == hass_admin_user.name
+    family = await kiosk.ok("unlock", pin="2468")
+    assert family["by"] is None
+    for token in (own["pass"], family["pass"]):
+        assert (await kiosk.ok("state", **{"pass": token}))["parent"] is True
+
+    # A parent who's no longer an admin: their own PIN stops working.
+    hass_admin_user.groups = []
+    res = await kiosk("unlock", pin="1357")
+    assert res["error"]["message"] == "That's not the PIN. Try again."
+    assert (await kiosk.ok("unlock", pin="2468"))["pass"]
+
+
+async def test_only_the_family_pin_or_your_own(hass: HomeAssistant, client):
+    await client.ok("pin", pin="1357", own=True)
+    await client.ok("pin", pin=None)
+    state = await client.ok("state")
+    assert state["pins"]["mine"] is True
+    assert state["pin_set"] is True
+    await client.ok("pin", pin=None, own=True)
+    state = await client.ok("state")
+    assert state["pin_set"] is False
+    manager = hass.config_entries.async_entries(DOMAIN)[0].runtime_data
+    assert "parent_pins" not in manager.settings

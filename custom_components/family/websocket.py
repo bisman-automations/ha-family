@@ -27,6 +27,8 @@ from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
 from .parent_pass import PIN_KEY, PINS_KEY
 from .parents_notify import target_name
+from .report import week_report
+from .shopping import async_add_to_list
 
 PIN_KEYS = (PIN_KEY, PINS_KEY)
 
@@ -69,6 +71,21 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_trade_decide,
         ws_cash_out,
         ws_cash_out_cancel,
+        ws_request_add,
+        ws_request_cancel,
+        ws_request_decide,
+        ws_vote_cast,
+        ws_vote_start,
+        ws_vote_close,
+        ws_vote_cancel,
+        ws_countdown_save,
+        ws_countdown_delete,
+        ws_away,
+        ws_boost_start,
+        ws_boost_stop,
+        ws_shopping,
+        ws_calendar_add,
+        ws_report,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -516,6 +533,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("allowance_hour"): vol.All(int, vol.Range(min=0, max=23)),
         vol.Optional("point_value"): vol.Any(None, vol.Coerce(float)),
         vol.Optional("currency"): vol.Any(None, str),
+        vol.Optional("saving_percent"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("saving_max"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("birthday_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
         vol.Optional("family_goal"): vol.Any(
@@ -556,6 +576,7 @@ async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional(PASS): str,
         vol.Required("date"): str,
         **{vol.Optional(meal): vol.Any(None, str) for meal in model.MEALS},
+        vol.Optional("ingredients"): vol.Any(None, str),
     }
 )
 @_require_parent
@@ -753,3 +774,265 @@ async def ws_cash_out(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_cash_out_cancel(hass, connection, msg, manager) -> dict[str, Any]:
     manager.cancel_cash_out(msg["entry_id"])
     return {}
+
+
+# ---- 2.5.0: requests, dinner vote, countdowns, away, double points, more --------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/request/add",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("name"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+        vol.Optional("points"): vol.Any(None, vol.Coerce(int)),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_request_add(hass, connection, msg, manager) -> dict[str, Any]:
+    """A child asks for a reward that isn't on the list."""
+    return {
+        "request": manager.requests.ask(
+            msg["member_id"], msg["name"], msg.get("emoji"), msg.get("points")
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/request/cancel",
+        vol.Optional(PASS): str,
+        vol.Required("request_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_request_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.requests.cancel(msg["request_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/request/decide",
+        vol.Optional(PASS): str,
+        vol.Required("request_id"): str,
+        vol.Required("approved"): bool,
+        vol.Optional("points"): vol.Any(None, vol.Coerce(int)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_request_decide(hass, connection, msg, manager) -> dict[str, Any]:
+    """Yes (it becomes a reward for them, at this many points) or no."""
+    return manager.requests.decide(
+        msg["request_id"], msg["approved"], msg.get("points")
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/vote/cast",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("option"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_vote_cast(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"vote": manager.vote.cast(msg["member_id"], msg["option"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/vote/start",
+        vol.Optional(PASS): str,
+        vol.Required("options"): [str],
+        vol.Optional("date"): vol.Any(None, str),
+        vol.Optional("closes"): vol.Any(None, str),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_vote_start(hass, connection, msg, manager) -> dict[str, Any]:
+    return {
+        "vote": manager.vote.start(msg["options"], msg.get("date"), msg.get("closes"))
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/vote/close", vol.Optional(PASS): str}
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_vote_close(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"vote": manager.vote.close()}
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/vote/cancel", vol.Optional(PASS): str}
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_vote_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.vote.cancel()
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/countdown/save",
+        vol.Optional(PASS): str,
+        vol.Optional("item_id"): vol.Any(None, str),
+        vol.Required("name"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+        vol.Required("date"): str,
+        vol.Optional("member"): vol.Any(None, str),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_countdown_save(hass, connection, msg, manager) -> dict[str, Any]:
+    return {
+        "countdown": manager.countdowns.save(
+            {
+                "id": msg.get("item_id"),
+                "name": msg["name"],
+                "emoji": msg.get("emoji"),
+                "date": msg["date"],
+                "member": msg.get("member"),
+            }
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/countdown/delete",
+        vol.Optional(PASS): str,
+        vol.Required("item_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_countdown_delete(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.countdowns.delete(msg["item_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/away",
+        vol.Optional(PASS): str,
+        vol.Required("action"): vol.In(("add", "back", "remove")),
+        vol.Optional("from"): vol.Any(None, str),
+        vol.Optional("until"): vol.Any(None, str),
+        vol.Optional("period_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_away(hass, connection, msg, manager) -> dict[str, Any]:
+    """Away (vacation): add a time away, be back home, or drop a planned one."""
+    if msg["action"] == "add":
+        manager.away.add(msg.get("from"), msg.get("until"))
+    elif msg["action"] == "back":
+        manager.away.back()
+    else:
+        manager.away.remove(msg.get("period_id") or "")
+    return {"away": manager.away.snapshot()}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/boost/start",
+        vol.Optional(PASS): str,
+        vol.Optional("label"): vol.Any(None, str),
+        vol.Optional("factor"): vol.Coerce(int),
+        vol.Optional("from"): vol.Any(None, str),
+        vol.Required("until"): str,
+        vol.Optional("chores"): vol.Any(None, [str]),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_boost_start(hass, connection, msg, manager) -> dict[str, Any]:
+    """Double (or triple) points for a while."""
+    return {"boost": manager.boosts.add(msg)}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/boost/stop",
+        vol.Optional(PASS): str,
+        vol.Required("boost_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_boost_stop(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.boosts.stop(msg["boost_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/shopping",
+        vol.Optional(PASS): str,
+        vol.Required("entity_id"): str,
+        vol.Optional("days"): [str],
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_shopping(hass, connection, msg, manager) -> dict[str, Any]:
+    """Put what the coming days' meals need on a shopping list."""
+    return await async_add_to_list(manager, msg["entity_id"], msg.get("days"))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/calendar/add",
+        vol.Optional(PASS): str,
+        vol.Required("entity_id"): str,
+        vol.Required("title"): str,
+        vol.Required("date"): str,
+        vol.Optional("end_date"): vol.Any(None, str),
+        vol.Optional("start"): vol.Any(None, str),
+        vol.Optional("end"): vol.Any(None, str),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_calendar_add(hass, connection, msg, manager) -> dict[str, Any]:
+    """Add an event to one of the family's calendars."""
+    return {"event": await manager.calendar.async_add(msg)}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/report",
+        vol.Optional(PASS): str,
+        vol.Optional("weeks_ago"): vol.All(vol.Coerce(int), vol.Range(min=0, max=8)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_report(hass, connection, msg, manager) -> dict[str, Any]:
+    """A week for each family member, to print or share."""
+    return {"report": week_report(manager, msg.get("weeks_ago", 0))}

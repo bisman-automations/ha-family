@@ -111,6 +111,59 @@ class CalendarToday:
             self.events = events
             async_dispatcher_send(self.hass, SIGNAL_CHANGED)
 
+    async def async_add(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Add an event to one of the picked calendars (Parents dashboard).
+
+        All day: ``date`` (and an optional last ``end_date``). Otherwise
+        ``date`` with ``start`` and ``end`` times ("HH:MM").
+        """
+        from .manager import FamilyError  # noqa: PLC0415 - manager imports this module
+
+        entity_id = raw.get("entity_id")
+        if entity_id not in {c["entity_id"] for c in self.calendars}:
+            raise FamilyError("Pick one of the family's calendars")
+        title = model.clean_name(raw.get("title"), "What's happening")
+        day = model.clean_day(raw.get("date"), "The day")
+        if not day:
+            raise FamilyError("Pick the day")
+        first = date.fromisoformat(day)
+        data: dict[str, Any] = {"summary": title}
+        if raw.get("start"):
+            start = model.clean_time(raw.get("start"), "Starts")
+            end = model.clean_time(raw.get("end"), "Ends") or start
+            zone = dt_util.get_default_time_zone()
+            begins = datetime.combine(
+                first, datetime.strptime(start, "%H:%M").time(), tzinfo=zone
+            )
+            ends = datetime.combine(
+                first, datetime.strptime(end, "%H:%M").time(), tzinfo=zone
+            )
+            if ends <= begins:
+                ends = begins + timedelta(hours=1)
+            data.update(
+                start_date_time=begins.isoformat(), end_date_time=ends.isoformat()
+            )
+        else:
+            last = model.clean_day(raw.get("end_date"), "The last day") or day
+            if last < day:
+                raise FamilyError("The last day can't be before the first")
+            data.update(
+                start_date=day,
+                end_date=(date.fromisoformat(last) + timedelta(days=1)).isoformat(),
+            )
+        try:
+            await self.hass.services.async_call(
+                "calendar",
+                "create_event",
+                data,
+                target={"entity_id": entity_id},
+                blocking=True,
+            )
+        except Exception as err:
+            raise FamilyError(f"Couldn't add it to the calendar: {err}") from err
+        await self.async_refresh()
+        return {"title": title, **data}
+
     def on(self, day: str) -> list[dict[str, Any]]:
         """The events on one day (an ISO date)."""
         return [e for e in self.events if day in e["days"]]

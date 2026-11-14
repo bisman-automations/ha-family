@@ -135,9 +135,39 @@ const money = (points, m) => {
   return `${m.currency || ""}${amount.toFixed(amount % 1 ? 2 : 0)}`;
 };
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// "MM-DD" as "Nov 20".
+const monthDayText = (md) => {
+  if (!md) return "";
+  const [m, d] = md.split("-").map(Number);
+  return `${MONTHS[m - 1]?.slice(0, 3) || ""} ${d}`;
+};
+// "12 days", "Tomorrow", "Today!".
+const daysLeftText = (days) => (days <= 0 ? "Today!" : days === 1 ? "Tomorrow" : `${days} days`);
+// A boost's end, in words: "5:00 PM" today, else "Sat 5:00 PM".
+const untilText = (iso) => {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+};
+// A datetime-local input's value for a moment some hours from now.
+const localInput = (hours) => {
+  const d = new Date(Date.now() + hours * 3600000);
+  d.setMinutes(0, 0, 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+// Today (0), tomorrow (1)… as an ISO date in this browser's time.
+const localDayIso = (offset) => {
+  const d = new Date(Date.now() + offset * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const REPORT_WEEKS = [["0", "This week"], ["1", "Last week"], ["2", "2 weeks ago"], ["3", "3 weeks ago"], ["4", "4 weeks ago"]];
 // The Family dashboard's sections and their usual order (model.SECTIONS).
 const SECTIONS = [
   ["going", "Going for"],
+  ["countdowns", "Coming up"],
+  ["vote", "What's for dinner?"],
   ["chores", "My chores"],
   ["routines", "Routines"],
   ["grabs", "Up for grabs"],
@@ -335,10 +365,11 @@ const STYLES = `
   .person.pick { cursor: pointer; flex-direction: row; gap: 8px; padding: 8px 12px; min-width: 0; }
   .person.pick input { margin: 0; }
   .sheet textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 10px; border-radius: 10px; border: 1px solid var(--divider-color); background: var(--card-background-color, #fff); color: var(--primary-text-color); }
-  .meal-row { display: grid; grid-template-columns: 150px repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--divider-color); }
+  .meal-row { display: grid; grid-template-columns: 150px repeat(4, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--divider-color); }
   .meal-row .meal-day { align-self: center; }
   .meal-row .field { min-width: 0; }
-  .meal-row input { width: 100%; min-width: 0; box-sizing: border-box; }
+  .meal-row input, .meal-row textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+  .card textarea { font: inherit; line-height: 1.4; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color, #fff); color: var(--primary-text-color); }
   .money { color: var(--fam-muted); font-weight: 400; }
   @media (max-width: 700px) {
     .meal-row { grid-template-columns: 1fr 1fr; }
@@ -509,6 +540,25 @@ const STYLES = `
   .eligible-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--primary-color); }
   .field small.eligible-warn { color: var(--fam-bad); font-weight: 600; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .banner { margin: 0 0 10px; padding: 10px 14px; border-radius: 12px; font-size: 16px; }
+  .banner.away { background: color-mix(in srgb, var(--info-color, #039be5) 16%, transparent); }
+  .banner.boost { background: color-mix(in srgb, var(--warning-color, #f4b400) 22%, transparent); }
+  .banner.birthday { background: color-mix(in srgb, #e91e63 16%, transparent); }
+  .boost-tag { color: var(--warning-color, #e09b00); font-weight: 600; }
+  .tile.won { border-color: var(--success-color, #43a047); }
+  .tile.countdown .worth { font-size: 20px; }
+  .tile.request { position: relative; }
+  .tile.request.approved { border-color: var(--success-color, #43a047); }
+  .tile.request.declined { opacity: .65; }
+  .tiles.requests { margin-bottom: 10px; }
+  .tile.ask { border-style: dashed; }
+  .tile.vote .worth { font-size: 20px; }
+  .sheet.wide { max-width: 720px; width: calc(100% - 32px); max-height: 85vh; overflow: auto; }
+  .report h3 { margin: 0 0 12px; }
+  .report-person { border-left: 6px solid var(--c); padding: 4px 12px; margin: 0 0 14px; }
+  .report-person h4 { margin: 0 0 4px; font-size: 18px; }
+  .report-person p { margin: 2px 0; }
+  .report-nums { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 4px; }
   .hold-note { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning-color, #f4b400) 18%, transparent); }
   .hold-tag { font-size: 0.9em; color: var(--warning-color, #b07d00); }
   .hold-form { flex-basis: 100%; }
@@ -987,10 +1037,286 @@ class FamilyPanel extends HTMLElement {
 
   // History, narrowed to one person and/or what was done. The list redraws
   // on its own as a parent types, so the search box keeps its focus.
+  // A day of the year (no year): month and day pickers named <prefix>_month
+  // and <prefix>_day, filled from "MM-DD".
+  _monthDay(prefix, value, label) {
+    const [m, d] = (value || "").split("-");
+    return `<select name="${prefix}_month" aria-label="${esc(label)}: month"><option value="">Month</option>${MONTHS.map((name, i) => {
+      const v = String(i + 1).padStart(2, "0");
+      return `<option value="${v}" ${v === m ? "selected" : ""}>${name}</option>`;
+    }).join("")}</select>
+      <select name="${prefix}_day" aria-label="${esc(label)}: day"><option value="">Day</option>${Array.from({ length: 31 }, (_v, i) => {
+        const v = String(i + 1).padStart(2, "0");
+        return `<option value="${v}" ${v === d ? "selected" : ""}>${i + 1}</option>`;
+      }).join("")}</select>`;
+  }
+
+  _requestsCard() {
+    const pending = (this._data.requests || []).filter((r) => r.status === "pending");
+    if (!pending.length) return "";
+    return `<div class="card"><h2>Rewards they asked for</h2>
+      <p class="muted"><b>Yes</b> adds it to their rewards (just for them) at the points you set. <b>No</b> lets them know it's not this time.</p>
+      <ul class="rows">${pending
+        .map((r) => {
+          const m = this._memberById(r.member);
+          return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: ${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b><small>${esc(whenText(r.at))}${r.points != null ? ` · they think ${pts(r.points)}` : ""}</small></span>
+            <input type="number" min="0" max="10000" data-request-points="${esc(r.id)}" value="${esc(r.points ?? "")}" placeholder="Points" aria-label="What ${esc(r.name)} costs" style="width:100px">
+            <button class="btn good" data-request-decide="${esc(r.id)}" data-yes="1">Yes</button>
+            <button class="btn bad" data-request-decide="${esc(r.id)}" data-yes="0">No</button></li>`;
+        })
+        .join("")}</ul></div>`;
+  }
+
+  _boostCard() {
+    const boosts = this._data.boosts || [];
+    const name = (id) => this._data.all_chores.find((c) => c.id === id)?.name || "a chore";
+    const rows = boosts.length
+      ? `<ul class="rows">${boosts
+          .map((b) => `<li><span class="grow">⚡ <b>${esc(b.label)}</b>: ${b.factor}× points<small>${b.on ? "On now" : `From ${esc(holdText(b.from))}`} until ${esc(holdText(b.until))} · ${b.chores?.length ? esc(namesText(b.chores.map(name))) : "every chore"}</small></span>
+            <button class="btn bad" data-boost-stop="${esc(b.id)}">Stop</button></li>`)
+          .join("")}</ul>`
+      : "";
+    const chores = this._data.all_chores.filter((c) => c.enabled);
+    return `<div class="card"><h2>Double points</h2>
+      <p class="muted">For a while, chores are worth two or three times their points: a Saturday cleanup, a busy week. The Family dashboard shows it at the top and on each chore.</p>
+      ${rows}
+      <form class="edit" data-boost-form>
+        <div class="inline">
+          <label class="field grow"><span>Call it (optional)</span><input type="text" name="label" maxlength="60" placeholder="Saturday cleanup"></label>
+          <label class="field"><span>Points</span><select name="factor"><option value="2">Double</option><option value="3">Triple</option></select></label>
+          <label class="field"><span>Until</span><input type="datetime-local" name="until" value="${esc(localInput(3))}" required></label>
+        </div>
+        ${chores.length ? `<div class="field"><span>Only these chores (none ticked: every chore, to-do items too)</span><div class="inline">${chores.map((c) => `<label class="check"><input type="checkbox" name="chores" value="${esc(c.id)}"> ${esc(c.name)}</label>`).join("")}</div></div>` : ""}
+        <div class="form-actions"><button class="btn primary" type="submit">Start now</button></div>
+      </form></div>`;
+  }
+
+  _shoppingCard() {
+    const lists = this._choices?.todo_lists || [];
+    const current = this._data.settings?.shopping_list || lists.find((l) => /shopping/i.test(l.entity_id))?.entity_id || "";
+    const body = lists.length
+      ? `<div class="inline"><label class="field"><span>Shopping list</span><select data-shopping-list>${lists.map((l) => `<option value="${esc(l.entity_id)}" ${l.entity_id === current ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+          <button class="btn primary" data-shopping style="align-self:end" ${this._busy ? "disabled" : ""}>Add to the shopping list</button></div>`
+      : `<p class="empty">No to-do lists in Home Assistant yet. The Shopping List integration adds one.</p>`;
+    return `<div class="card"><h2>Shopping list</h2>
+      <p class="muted">Fill in <b>To buy</b> on the days above (one per line, or with commas). This puts everything today and the next days need on the list, leaving out what's already on it.</p>${body}</div>`;
+  }
+
+  async _shopping() {
+    const entity = this.shadowRoot.querySelector("[data-shopping-list]")?.value;
+    if (!entity || this._busy) return;
+    this._busy = true;
+    try {
+      const res = await this._ws({ type: `${DOMAIN}/shopping`, entity_id: entity });
+      const added = res.added.length ? `Added ${namesText(res.added)}.` : "Nothing new to add.";
+      this._toast(res.skipped.length ? `${added} Already on it: ${namesText(res.skipped)}.` : added);
+      await this._load();
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  _voteCard() {
+    const vote = this._data.vote;
+    if (vote && vote.status === "open") {
+      const rows = vote.options.map((name, i) => `<li><span class="grow"><b>${esc(name)}</b></span><span>${vote.counts?.[i] || 0} ${vote.counts?.[i] === 1 ? "vote" : "votes"}</span></li>`).join("");
+      return `<div class="card"><h2>Dinner vote</h2>
+        <p class="muted">For ${vote.day === localDayIso(0) ? "today" : esc(dayText(vote.day, -1))}${vote.closes ? `, closes at ${esc(timeText(vote.closes))}` : ""}. The winner goes on the meal plan as dinner.</p>
+        <ul class="rows">${rows}</ul>
+        <div class="form-actions"><button class="btn primary" data-vote-close>Close the vote now</button><button class="btn bad" data-vote-cancel>Take it down</button></div></div>`;
+    }
+    const done = vote && vote.winner != null ? `<p class="muted">Last vote: <b>${esc(vote.options[vote.winner])}</b> won for ${esc(dayText(vote.day, -1))}.</p>` : "";
+    return `<div class="card"><h2>Dinner vote</h2>
+      <p class="muted">Give two to six choices; everyone taps one on the Family dashboard. When it closes, the most votes wins (a tie: the first listed) and goes on the meal plan as dinner.</p>${done}
+      <form class="edit" data-vote-form>
+        <label class="field"><span>Choices, one per line</span><textarea name="options" rows="4" required placeholder="Tacos&#10;Pizza&#10;Spaghetti"></textarea></label>
+        <div class="inline">
+          <label class="field"><span>For</span><input type="date" name="date" value="${esc(localDayIso(0))}" min="${esc(localDayIso(0))}"></label>
+          <label class="field"><span>Voting closes at (optional)</span><input type="time" name="closes" value="16:00"></label>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Start the vote</button></div>
+      </form></div>`;
+  }
+
+  _countdownCard() {
+    const d = this._data;
+    const rows = (d.countdowns || []).length
+      ? `<ul class="rows">${d.countdowns
+          .map((c) => {
+            const m = this._memberById(c.member);
+            return `<li><span class="grow">${esc(c.emoji || "📅")} <b>${esc(c.name)}</b><small>${esc(dayText(c.date, -1))} · ${esc(daysLeftText(c.days))}${m && !c.birthday ? ` · for ${esc(m.name)}` : ""}${c.birthday ? " · from their birthday" : ""}</small></span>
+              ${c.birthday ? "" : `<button class="btn bad" data-countdown-delete="${esc(c.id)}">Remove</button>`}</li>`;
+          })
+          .join("")}</ul>`
+      : `<p class="empty">No countdowns yet.</p>`;
+    return `<div class="card"><h2>Countdowns</h2>
+      <p class="muted">"12 days to the beach" on the Family dashboard. Birthdays set under Family count down by themselves, from a month before.</p>
+      ${rows}
+      <form class="edit" data-countdown-form>
+        <div class="inline">
+          <label class="field grow"><span>Counting down to</span><input type="text" name="name" maxlength="60" required placeholder="Beach trip"></label>
+          <label class="field"><span>Emoji</span><input type="text" name="emoji" size="3" placeholder="🏖️"></label>
+          <label class="field"><span>Day</span><input type="date" name="date" min="${esc(localDayIso(0))}" required></label>
+          <label class="field"><span>For</span><select name="member"><option value="">Everyone</option>${d.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Add countdown</button></div>
+      </form></div>`;
+  }
+
+  _calendarAddCard() {
+    const picked = this._data.settings?.calendars || [];
+    if (!picked.length) return "";
+    const name = (id) => this._choices?.calendars?.find((c) => c.entity_id === id)?.name || id;
+    return `<div class="card"><h2>Add to the calendar</h2>
+      <p class="muted">Put an event on one of the family's calendars. Leave the times empty for an all-day event.</p>
+      <form class="edit" data-calendar-add>
+        <div class="inline">
+          <label class="field grow"><span>What</span><input type="text" name="title" maxlength="80" required placeholder="Dentist"></label>
+          <label class="field"><span>Calendar</span><select name="entity_id">${picked.map((c) => `<option value="${esc(c.entity_id)}">${esc(name(c.entity_id))}</option>`).join("")}</select></label>
+        </div>
+        <div class="inline">
+          <label class="field"><span>Day</span><input type="date" name="date" value="${esc(localDayIso(0))}" required></label>
+          <label class="field"><span>From</span><input type="time" name="start"></label>
+          <label class="field"><span>To</span><input type="time" name="end"></label>
+          <label class="field"><span>Or all day, through</span><input type="date" name="end_date"></label>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Add</button></div>
+      </form></div>`;
+  }
+
+  _awayCard() {
+    const away = this._data.away || {};
+    const now = away.now
+      ? `<p class="hold-note">🏖️ Away since ${esc(dayText(away.now.from, -1))}${away.now.until ? `, until ${esc(dayText(away.now.until, -1))}` : ""}.</p>
+        <button class="btn primary" data-away-back>We're back home</button>`
+      : "";
+    const planned = (away.planned || []).length
+      ? `<ul class="rows">${away.planned
+          .map((p) => `<li><span class="grow">🧳 ${esc(dayText(p.from, -1))}${p.until ? ` to ${esc(dayText(p.until, -1))}` : " until you're back"}</span>
+            <button class="btn bad" data-away-remove="${esc(p.id)}">Remove</button></li>`)
+          .join("")}</ul>`
+      : "";
+    return `<div class="card"><h2>Away</h2>
+      <p class="muted">While the family is away, chores and routines are off, nothing counts as missed, streaks skip those days, and the weekly allowance isn't given. Points and rewards still work.</p>
+      ${now}${planned}
+      ${away.now ? "" : `<form class="edit" data-away-form><div class="inline">
+          <label class="field"><span>From</span><input type="date" name="from" value="${esc(localDayIso(0))}" min="${esc(localDayIso(0))}"></label>
+          <label class="field"><span>Back home on (optional)</span><input type="date" name="until" min="${esc(localDayIso(0))}"></label>
+        </div><small class="muted">Back home on is the last day away. Leave it empty to turn it off yourself.</small>
+        <div class="form-actions"><button class="btn primary" type="submit">Set away</button></div></form>`}</div>`;
+  }
+
+  _savingCard() {
+    const st = this._data.settings || {};
+    return `<div class="card"><h2>Saving and birthday bonuses</h2>
+      <form class="edit" data-saving-form>
+        <div class="field"><span>Saving bonus</span>
+          <span class="inline"><input type="number" name="saving_percent" min="0" max="50" value="${esc(st.saving_percent || 0)}" style="width:80px" aria-label="Percent"> % of the points kept all week, at most
+          <input type="number" name="saving_max" min="0" max="10000" value="${esc(st.saving_max || 0)}" style="width:90px" aria-label="Most a week"> points <small>(0: no limit)</small></span>
+          <small>Given with the allowance, on the same day and hour. "Kept" is the lower of their points now and a week ago, so spending lowers it and this week's points don't count yet. 0% turns it off.</small></div>
+        <label class="field"><span>Birthday points</span>
+          <span><input type="number" name="birthday_points" min="0" max="10000" value="${esc(st.birthday_points || 0)}" style="width:100px"> points on their birthday</span>
+          <small>Set each person's birthday when you edit them. The Family dashboard wishes them a happy birthday either way.</small></label>
+        <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
+      </form></div>`;
+  }
+
+  _reportCard() {
+    return `<div class="card"><h2>Weekly report</h2>
+      <p class="muted">A week for everyone, Monday to Sunday: chores done, points earned and spent, rewards and badges. Print it for the fridge or share it.</p>
+      <form class="inline" data-report-form>
+        <label class="field"><span>Week</span><select name="weeks_ago">${REPORT_WEEKS.map(([v, label]) => `<option value="${v}">${label}</option>`).join("")}</select></label>
+        <button class="btn primary" type="submit" style="align-self:end">Show the report</button></form></div>`;
+  }
+
+  async _openReport(weeksAgo) {
+    this._sheet = { type: "report", report: null };
+    this._renderOverlay();
+    try {
+      const res = await this._ws({ type: `${DOMAIN}/report`, weeks_ago: weeksAgo });
+      if (this._sheet?.type === "report") this._sheet.report = res.report;
+    } catch (err) {
+      this._sheet = null;
+      this._toast(err?.message || String(err), true);
+    }
+    this._renderOverlay();
+  }
+
+  _reportTitle(r) {
+    const fmt = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
+    return `Family week: ${fmt(r.from)} to ${fmt(r.until)}`;
+  }
+
+  _reportBody(r) {
+    const people = r.members
+      .map((m) => {
+        const chores = m.top_chores.map((c) => `${esc(c.name)}${c.times > 1 ? ` ×${c.times}` : ""}`).join(", ");
+        const cash = r.money ? ` (${esc(money(m.points, r.money))})` : "";
+        return `<section class="report-person" style="--c:${esc(m.color || "#3F51B5")}">
+          <h4>${esc(m.emoji || "")} ${esc(m.name)}</h4>
+          <div class="report-nums"><span><b>${m.chores}</b> chores</span><span><b>+${m.earned}</b> earned</span><span><b>${m.spent}</b> spent</span><span><b>${m.points}</b> now${cash}</span><span>🔥 <b>${m.streak}</b> in a row</span></div>
+          ${chores ? `<p>Chores: ${chores}</p>` : ""}
+          ${m.all_done_days ? `<p>All done on ${m.all_done_days} ${m.all_done_days === 1 ? "day" : "days"}.</p>` : ""}
+          ${m.rewards.length ? `<p>Got: ${m.rewards.map(esc).join(", ")}</p>` : ""}
+          ${m.badges.length ? `<p>New badges: ${m.badges.map((b) => `${esc(b.emoji)} ${esc(b.name)}`).join(", ")}</p>` : ""}
+        </section>`;
+      })
+      .join("");
+    return `<div class="report"><h3>${esc(this._reportTitle(r))}</h3>${r.days_away ? `<p class="muted">Away ${r.days_away} ${r.days_away === 1 ? "day" : "days"} this week.</p>` : ""}${people || `<p class="empty">No family members yet.</p>`}</div>`;
+  }
+
+  _reportText(r) {
+    const lines = [this._reportTitle(r)];
+    for (const m of r.members) {
+      lines.push("", `${m.name}: ${m.chores} chores, +${m.earned} earned, ${m.spent} spent, ${m.points} now, ${m.streak} days in a row`);
+      if (m.top_chores.length) lines.push(`Chores: ${m.top_chores.map((c) => `${c.name}${c.times > 1 ? ` ×${c.times}` : ""}`).join(", ")}`);
+      if (m.rewards.length) lines.push(`Got: ${m.rewards.join(", ")}`);
+      if (m.badges.length) lines.push(`New badges: ${m.badges.map((b) => `${b.emoji} ${b.name}`).join(", ")}`);
+    }
+    return lines.join("\n");
+  }
+
+  // Printed from a window of its own, so only the report is on the page.
+  _printReport() {
+    const r = this._sheet?.report;
+    if (!r) return;
+    const w = window.open("", "_blank");
+    if (!w) {
+      this._toast("Allow pop-ups for Home Assistant to print the report.", true);
+      return;
+    }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(this._reportTitle(r))}</title>
+      <style>body{font-family:system-ui,sans-serif;margin:24px;color:#222}h3{margin:0 0 12px}.report-person{border-left:6px solid var(--c);padding:4px 12px;margin:0 0 14px;break-inside:avoid}
+      h4{margin:0 0 4px;font-size:18px}.report-nums{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 4px}p{margin:2px 0}.muted{color:#666}</style></head>
+      <body>${this._reportBody(r)}</body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
+
+  async _shareReport() {
+    const r = this._sheet?.report;
+    if (!r) return;
+    const text = this._reportText(r);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: this._reportTitle(r), text });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      this._toast("Copied. Paste it into a message.");
+    } catch (err) {
+      if (err?.name !== "AbortError") this._toast("Couldn't share it from here. Try Print instead.", true);
+    }
+  }
+
   _renderHistory() {
     const f = (this._historyFilter ||= { member: "", text: "" });
     const people = this._data.members.map((m) => `<option value="${esc(m.id)}" ${f.member === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("");
-    return `${this._weeksCard()}<div class="card"><div class="history-filter inline">
+    return `${this._reportCard()}${this._weeksCard()}<div class="card"><div class="history-filter inline">
         <label class="field"><span>Who</span><select data-history-member aria-label="Who"><option value="">Everyone</option>${people}</select></label>
         <label class="field grow"><span>Search</span><input type="search" data-history-text value="${esc(f.text)}" placeholder="A chore, reward or bonus" aria-label="Search history"></label>
       </div><div data-history-list>${this._historyList()}</div></div>`;
@@ -1036,7 +1362,7 @@ class FamilyPanel extends HTMLElement {
         const m = this._memberById(e.member);
         const gone = e.review === "rejected";
         const cls = gone ? "gone" : e.points >= 0 ? "plus" : "minus";
-        const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : e.kind === "bonus" ? `earned a bonus: <b>${esc(e.title)}</b>` : e.kind === "penalty" ? `lost points: <b>${esc(e.title)}</b> didn't happen` : e.kind === "allowance" ? "got their <b>weekly allowance</b>" : `<b>${esc(e.title)}</b>`;
+        const what = e.kind === "chore" ? `did <b>${esc(e.title)}</b>` : e.kind === "reward" ? `got <b>${esc(e.title)}</b>` : e.kind === "bonus" ? `earned a bonus: <b>${esc(e.title)}</b>` : e.kind === "penalty" ? `lost points: <b>${esc(e.title)}</b> didn't happen` : e.kind === "allowance" ? "got their <b>weekly allowance</b>" : e.kind === "saving" ? `earned a <b>saving bonus</b>` : e.kind === "birthday" ? "got <b>birthday points</b> 🎂" : `<b>${esc(e.title)}</b>`;
         const note = gone ? " · didn't happen" : e.review === "pending" ? " · to check" : e.auto ? " · checked automatically" : e.given === "to_give" ? " · to hand out" : e.given === "to_approve" ? " · waiting for a parent to say yes" : "";
         return `<li>${m ? this._avatar(m, true) : ""}<span class="what">${esc(m?.name || "Someone")} ${what}<br><small class="muted">${esc(whenText(e.at))}${note}</small></span>
           <span class="amount ${cls}">${signed(e.points)}</span>${review && e.kind === "chore" && !gone ? `<button class="btn bad" data-review="${esc(e.id)}" data-approved="0">Didn't happen</button>` : ""}</li>`;
@@ -1093,7 +1419,7 @@ class FamilyPanel extends HTMLElement {
     const undo = t?.undo ? `<button class="undo" data-undo="${esc(t.undo)}">Undo</button>` : "";
     const toast = t ? `<div class="toast${t.bad ? " bad" : ""}" role="status"><span>${esc(t.text)}</span>${undo}</div>` : "";
     // Don't wipe a note someone is typing: only the toast changes then.
-    if (this._sheet?.type === "note" && overlay.querySelector("[data-note-form]")) {
+    if ((this._sheet?.type === "note" && overlay.querySelector("[data-note-form]")) || (this._sheet?.type === "ask" && overlay.querySelector("[data-ask-form]"))) {
       overlay.querySelector(".toast")?.remove();
       if (toast) overlay.insertAdjacentHTML("beforeend", toast);
       return;
@@ -1128,7 +1454,7 @@ class FamilyPanel extends HTMLElement {
               <span class="label">${esc(c.name)}</span>
               ${(c.list || c.on_list) && !own ? `<span class="sub">${esc(c.list || c.on_list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               ${c.traded ? `<span class="sub">Traded from ${esc(this._tradeFrom(c.traded))}</span>` : ""}
-              <span class="worth">+${pts(c.points)}</span>
+              <span class="worth">+${pts(c.points)}</span>${c.boost ? `<span class="sub boost-tag">⚡ ${c.boost}× points</span>` : ""}
               ${member && fit === "chores" && c.source !== "todo" && !c.list && !c.traded && !this._offered(c.id, member.id) ? `<button class="trade-btn" data-trade-offer="${esc(c.id)}" aria-label="Trade ${esc(c.name)}" title="Trade">⇄</button>` : ""}
               <button class="check" data-chore="${esc(c.id)}" aria-label="${esc(c.name)} is done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>`;
           })
@@ -1200,7 +1526,11 @@ class FamilyPanel extends HTMLElement {
     // A parent can leave out sections with nothing in them. Notes stays: it
     // holds the Add a note button.
     const hide = !!d.hide_empty_sections;
+    const countdowns = (d.countdowns || []).filter((c) => !member || !c.member || c.member === member.id);
+    const vote = d.vote && (d.vote.status === "open" || d.vote.winner != null) ? d.vote : null;
     const sections = {
+      countdowns: countdowns.length ? this._section("countdowns", "Coming up", `<div class="tiles" data-fit="countdowns">${countdowns.map((c) => this._countdownTile(c)).join("")}</div>`, countdowns.length) : "",
+      vote: vote ? this._section("vote", vote.status === "open" ? "What's for dinner?" : "Dinner", this._voteBody(vote, member)) : "",
       going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
       chores: member && (mine.length || (own.total && !hide) || this._tradesFor(member).length) ? this._section("chores", "My chores", mineBody, mine.length) : "",
       grabs: grabs.length || (!member && !hide) ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
@@ -1209,16 +1539,71 @@ class FamilyPanel extends HTMLElement {
       today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
       meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
       done: done.length ? this._section("done", "Done today", doneTiles, done.length) : "",
-      rewards: visibleRewards.length || cashTile || !hide ? this._section("rewards", "Rewards", (member?.held_until ? `<p class="hold-note">⏸ Rewards are on hold until ${esc(holdText(member.held_until))}${member.hold_reason ? ` · ${esc(member.hold_reason)}` : ""}. Chores still earn points.</p>` : "") + (cashTile && visibleRewards.length ? rewardTiles.replace('data-fit="rewards">', `data-fit="rewards">${cashTile}`) : cashTile ? `<div class="tiles" data-fit="rewards">${cashTile}</div>` : rewardTiles), visibleRewards.length) : "",
+      rewards: visibleRewards.length || cashTile || member || !hide ? this._section("rewards", "Rewards", this._requestTiles(member) + (member?.held_until ? `<p class="hold-note">⏸ Rewards are on hold until ${esc(holdText(member.held_until))}${member.hold_reason ? ` · ${esc(member.hold_reason)}` : ""}. Chores still earn points.</p>` : "") + (cashTile && visibleRewards.length ? rewardTiles.replace('data-fit="rewards">', `data-fit="rewards">${cashTile}`) : cashTile ? `<div class="tiles" data-fit="rewards">${cashTile}</div>` : rewardTiles), visibleRewards.length) : "",
       home,
       lately: feed.length || !hide ? this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`) : "",
     };
     const badges = member && (member.badges || []).length
       ? `<div class="badges" aria-label="Badges">${member.badges.map((b) => `<span class="badge-pill" title="${esc(b.text)}">${esc(b.emoji)} ${esc(b.name)}</span>`).join("")}</div>`
       : "";
-    return `<h2>${member ? `Hi ${esc(member.name)}!${cash}` : "Who's here?"}</h2>${badges}
+    return `${this._banners(member)}<h2>${member ? `${member.birthday_today ? `Happy birthday, ${esc(member.name)}! 🎂` : `Hi ${esc(member.name)}!`}${cash}` : "Who's here?"}</h2>${badges}
       ${this._people(this._pinnedMember() ? [this._pinnedMember()] : d.members, "data-member", this._member)}
       ${sectionOrder(d.section_order).map((key) => sections[key] || "").join("")}`;
+  }
+
+  // Away, double points and birthdays, across the top of the Family page.
+  _banners(member) {
+    const d = this._data;
+    const rows = [];
+    const away = d.away?.now;
+    if (away) rows.push(`<p class="banner away">🏖️ The family is away${away.until ? ` until ${esc(dayText(away.until, -1))}` : ""}. Chores are off: enjoy it!</p>`);
+    for (const b of (d.boosts || []).filter((x) => x.on)) {
+      const which = b.chores?.length ? "on some chores" : "on every chore";
+      rows.push(`<p class="banner boost">⚡ <b>${esc(b.label)}</b>: ${b.factor}× points ${which} until ${esc(untilText(b.until))}</p>`);
+    }
+    const birthdays = d.members.filter((m) => m.birthday_today && (!member || m.id !== member.id));
+    if (birthdays.length) rows.push(`<p class="banner birthday">🎂 Happy birthday, ${esc(namesText(birthdays.map((m) => m.name)))}!</p>`);
+    return rows.join("");
+  }
+
+  _countdownTile(c) {
+    const m = this._memberById(c.member);
+    return `<div class="tile countdown${c.days <= 0 ? " won" : ""}"${m ? ` style="--c:${esc(m.color)}"` : ""}>
+      <span class="emoji">${esc(c.emoji || "📅")}</span><span class="label">${esc(c.name)}</span>
+      <span class="worth">${esc(daysLeftText(c.days))}</span>
+      <span class="sub">${esc(dayText(c.date, -1))}</span></div>`;
+  }
+
+  // The dinner vote: tap a choice (on everyone's page, then who's voting).
+  _voteBody(vote, member) {
+    const day = vote.day === localDayIso(0) ? "tonight" : `on ${dayText(vote.day, -1)}`;
+    if (vote.status !== "open") {
+      return `<div class="tiles"><div class="tile won"><span class="emoji">🍽️</span><span class="label">${esc(vote.options[vote.winner])}</span><span class="sub">Dinner ${esc(day)}: it won the vote</span></div></div>`;
+    }
+    const mine = member ? vote.votes?.[member.id] : undefined;
+    const total = (vote.counts || []).reduce((a, b) => a + b, 0);
+    return `<p class="muted">${esc(`Vote for dinner ${day}`)}${vote.closes ? `, until ${esc(timeText(vote.closes))}` : ""}. ${total} ${total === 1 ? "vote" : "votes"} so far.</p>
+      <div class="tiles" data-fit="vote">${vote.options
+        .map((name, i) => {
+          const who = Object.entries(vote.votes || {}).filter(([, o]) => o === i).map(([id]) => this._memberById(id)).filter(Boolean);
+          return `<button class="tile vote${mine === i ? " goal" : ""}" data-vote-option="${i}">
+            ${mine === i ? `<span class="sub goal-tag">✓ Your vote</span>` : ""}<span class="label">${esc(name)}</span>
+            <span class="worth">${vote.counts?.[i] || 0}</span>${who.length ? `<span class="who">${who.map((m) => this._avatar(m, true)).join("")}</span>` : ""}</button>`;
+        })
+        .join("")}</div>`;
+  }
+
+  // Someone's own page: ask for a reward that isn't on the list, and how
+  // their asks are going.
+  _requestTiles(member) {
+    if (!member) return "";
+    const mine = (this._data.requests || []).filter((r) => r.member === member.id);
+    const tiles = mine.map((r) => {
+      const status = r.status === "pending" ? "Waiting for a parent" : r.status === "approved" ? `Yes! ${pts(r.points)}, in your rewards` : "Not this time";
+      return `<div class="tile request ${esc(r.status)}"><span class="emoji">${esc(r.emoji || "🙏")}</span><span class="label">${esc(r.name)}</span>
+        <span class="sub">${esc(status)}</span>${r.status === "pending" ? `<button class="note-x" data-request-cancel="${esc(r.id)}" aria-label="Take back ${esc(r.name)}">✕</button>` : ""}</div>`;
+    });
+    return `<div class="tiles requests"><button class="tile ask" data-ask><span class="emoji">🙏</span><span class="label">Ask for something</span><span class="sub">A parent says yes or no</span></button>${tiles.join("")}</div>`;
   }
 
   _badgeToast(member, badges) {
@@ -1565,6 +1950,34 @@ class FamilyPanel extends HTMLElement {
           <button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Cash out</button></div>
         </form></div></div>`;
     }
+    if (s.type === "ask") {
+      const member = this._memberById(s.member);
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Ask for something">
+        <h3>What would you like, ${esc(member?.name || "")}?</h3>
+        <form data-ask-form>
+          <div class="inline"><label class="field grow"><span>What</span><input type="text" name="name" maxlength="60" required placeholder="A sleepover"></label>
+          <label class="field"><span>Emoji</span><input type="text" name="emoji" size="3" placeholder="🏕️"></label></div>
+          <label class="field"><span>How many points do you think it's worth? (optional)</span><input type="number" name="points" min="0" max="10000" inputmode="numeric"></label>
+          <p class="muted">A parent says yes (and how many points it costs) or no. A yes puts it in your rewards.</p>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button>
+          <button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Ask</button></div>
+        </form></div></div>`;
+    }
+    if (s.type === "vote") {
+      const vote = d.vote;
+      const name = vote?.options?.[s.option] || "";
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who's voting">
+        <h3>Who's voting for ${esc(name)}?</h3>
+        <div class="people small-people">${d.members.map((m) => `<button class="person pick" style="--c:${esc(m.color)}" data-vote-who="${esc(m.id)}">${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></button>`).join("")}</div>
+        <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
+    }
+    if (s.type === "report") {
+      return `<div class="sheet-bg" data-close><div class="sheet wide" role="dialog" aria-modal="true" aria-label="Weekly report">
+        ${s.report ? this._reportBody(s.report) : `<p class="muted">Loading…</p>`}
+        <div class="actions"><button class="big" data-close>Close</button>
+        <button class="big" data-report-share ${s.report ? "" : "disabled"}>Share</button>
+        <button class="big primary" data-report-print ${s.report ? "" : "disabled"}>Print</button></div></div></div>`;
+    }
     if (s.type === "pin") {
       const dots = Array.from({ length: Math.max(4, s.pin.length) }, (_v, i) => `<span class="pin-dot${i < s.pin.length ? " on" : ""}"></span>`).join("");
       const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"]
@@ -1814,7 +2227,7 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul></div>`
       : "";
     const auto = d.settings?.auto_check || "";
-    return `${this._quickCard()}${approve}${trades}<div class="card"><h2>Chores to check</h2>
+    return `${this._quickCard()}${this._requestsCard()}${approve}${trades}<div class="card"><h2>Chores to check</h2>
         <p class="muted">Points are given as soon as a chore is marked done. <b>Didn't happen</b> takes them back${d.todo_lists.length ? " and puts a to-do item back on its list" : ""}, and takes the penalty in the box next to it: the chore's own penalty, or the family's. Type a number to change it this time.</p>${check}
         <form class="inline penalty-setting" data-penalty-setting>
           <label class="field"><span>When a chore didn't happen, also take away</span>
@@ -1918,7 +2331,7 @@ class FamilyPanel extends HTMLElement {
     const chores = d.all_chores.length
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${esc(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
-              <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
+              <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""}${c.from_date ? ` · ${esc(monthDayText(c.from_date))} to ${esc(monthDayText(c.until_date))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
           .join("")}</ul>`
@@ -1936,7 +2349,7 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
     const listForm = edit?.collection === "todo_lists" ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
-    return `${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>
+    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>
       <div class="card"><h2>Chores from to-do lists</h2>
         <p class="muted">Every open item on these lists is a chore. Put the points at the end of an item to change them, like <b>Feed the dog [5]</b>. When it's marked done, the item is ticked off its list.</p>
         ${lists}${listForm}</div>`;
@@ -2013,6 +2426,9 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Until</span><input type="time" name="until_time" value="${esc(c.until_time || "")}"></label>
         <small style="align-self:end">Empty: all day. For a morning or bedtime chore, such as 6:00 AM to 9:00 AM.</small>
       </div>
+      <div class="field"><span>Season</span><div class="inline">
+        ${this._monthDay("from", c.from_date, "From")} ${this._monthDay("until", c.until_date, "until")}</div>
+        <small>Only between these days, every year (they can wrap past New Year: December to March). Empty: all year. Rake leaves in the fall, shovel the walk in the winter.</small></div>
       ${this._remindField(c)}
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
       ${this._grabField(c.grab)}
@@ -2255,12 +2671,13 @@ class FamilyPanel extends HTMLElement {
         return `<form class="meal-row" data-meals="${esc(day.date)}">
           <b class="meal-day">${esc(label)}</b>
           ${MEALS.map(([k, name]) => `<label class="field"><span>${name}</span><input type="text" name="${k}" maxlength="80" value="${esc(day[k] || "")}"></label>`).join("")}
+          <label class="field"><span>To buy</span><textarea name="ingredients" rows="2" maxlength="500" placeholder="${i ? "" : "Tortillas, cheese, salsa"}">${esc(day.ingredients || "")}</textarea></label>
           <button class="btn" type="submit">Save</button></form>`;
       })
       .join("");
     return `<div class="card"><h2>Meals for the week</h2>
       <p class="muted">What's for breakfast, lunch and dinner. Today's and tomorrow's show on the Family dashboard. Leave a meal empty to leave it out.</p>
-      ${rows}</div>`;
+      ${rows}</div>${this._shoppingCard()}${this._voteCard()}`;
   }
 
   _renderNotes() {
@@ -2286,7 +2703,7 @@ class FamilyPanel extends HTMLElement {
           <label class="field"><span>Show until (optional)</span><input type="date" name="until"></label>
         </div>
         <div class="form-actions"><button class="btn primary" type="submit">Put it up</button></div>
-      </form></div>`;
+      </form></div>${this._countdownCard()}${this._calendarAddCard()}`;
   }
 
   _allowanceCard() {
@@ -2371,7 +2788,9 @@ class FamilyPanel extends HTMLElement {
     return `<div class="card"><h2>Family</h2>
       <p class="muted">Link someone to their Home Assistant person to use its picture. If they log in to Home Assistant, the Family dashboard opens on their own page.</p>
       ${rows}${form}</div>
+      ${this._awayCard()}
       ${this._allowanceCard()}
+      ${this._savingCard()}
       ${this._calendarCard()}
       ${this._voiceCard()}
       ${this._sectionsCard()}
@@ -2539,6 +2958,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(m.emoji || "")}" size="3" placeholder="🦖"></label>
         <label class="field"><span>Color</span><input type="color" name="color" value="${esc(m.color || "#3F51B5")}"></label>
         <label class="field"><span>Allowance (points a week)</span><input type="number" name="allowance" min="0" max="10000" value="${esc(m.allowance || 0)}" style="width:100px"></label>
+        <div class="field"><span>Birthday (no year needed)</span><div class="inline">${this._monthDay("birthday", m.birthday, "Birthday")}</div></div>
         <label class="field"><span>Home Assistant person</span><select name="person" data-person><option value="">None</option>${people.map((p) => `<option value="${esc(p.entity_id)}" ${p.entity_id === m.person ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div>
@@ -2604,6 +3024,80 @@ class FamilyPanel extends HTMLElement {
     if ("pinClear" in ds) {
       const own = ds.pinClear === "1";
       this._call({ type: `${DOMAIN}/pin`, pin: null, own }, own ? "Your PIN is removed." : "Family PIN removed.");
+      return;
+    }
+    if ("ask" in ds) {
+      this._sheet = { type: "ask", member: this._member };
+      this._renderOverlay();
+      return;
+    }
+    if (ds.requestCancel) {
+      this._call({ type: `${DOMAIN}/request/cancel`, request_id: ds.requestCancel }, "Taken back.");
+      return;
+    }
+    if (ds.requestDecide) {
+      const yes = ds.yes === "1";
+      const box = this.shadowRoot.querySelector(`[data-request-points="${CSS.escape(ds.requestDecide)}"]`);
+      const msg = { type: `${DOMAIN}/request/decide`, request_id: ds.requestDecide, approved: yes };
+      if (yes) {
+        const value = box?.value.trim();
+        if (!value) return this._toast("Say how many points it costs.", true);
+        msg.points = Math.max(0, Math.round(Number(value) || 0));
+      }
+      this._call(msg, yes ? "Said yes: it's in their rewards." : "Said no.");
+      return;
+    }
+    if (ds.voteOption !== undefined) {
+      const option = Number(ds.voteOption);
+      if (this._member) {
+        this._call({ type: `${DOMAIN}/vote/cast`, member_id: this._member, option }, "Voted!");
+      } else {
+        this._sheet = { type: "vote", option };
+        this._renderOverlay();
+      }
+      return;
+    }
+    if (ds.voteWho && this._sheet?.type === "vote") {
+      const option = this._sheet.option;
+      this._sheet = null;
+      this._call({ type: `${DOMAIN}/vote/cast`, member_id: ds.voteWho, option }, `${this._memberById(ds.voteWho)?.name || "Someone"} voted!`);
+      return;
+    }
+    if ("voteClose" in ds) {
+      this._call({ type: `${DOMAIN}/vote/close` }, "Vote closed. The winner is on the meal plan.");
+      return;
+    }
+    if ("voteCancel" in ds) {
+      if (!window.confirm("Take the vote down without picking a winner?")) return;
+      this._call({ type: `${DOMAIN}/vote/cancel` }, "Vote taken down.");
+      return;
+    }
+    if (ds.countdownDelete) {
+      this._call({ type: `${DOMAIN}/countdown/delete`, item_id: ds.countdownDelete }, "Countdown removed.");
+      return;
+    }
+    if ("awayBack" in ds) {
+      this._call({ type: `${DOMAIN}/away`, action: "back" }, "Welcome home! Chores are back on from today.");
+      return;
+    }
+    if (ds.awayRemove) {
+      this._call({ type: `${DOMAIN}/away`, action: "remove", period_id: ds.awayRemove }, "Trip removed.");
+      return;
+    }
+    if (ds.boostStop) {
+      this._call({ type: `${DOMAIN}/boost/stop`, boost_id: ds.boostStop }, "Stopped.");
+      return;
+    }
+    if ("shopping" in ds) {
+      this._shopping();
+      return;
+    }
+    if ("reportPrint" in ds) {
+      this._printReport();
+      return;
+    }
+    if ("reportShare" in ds) {
+      this._shareReport();
       return;
     }
     if (ds.member) {
@@ -2839,7 +3333,7 @@ class FamilyPanel extends HTMLElement {
     const data = new FormData(form);
     const out = {};
     for (const [key, value] of data.entries()) {
-      if (key === "members" || key === "days" || key === "notify_targets" || key === "remind_speakers") (out[key] ||= []).push(value);
+      if (key === "members" || key === "days" || key === "notify_targets" || key === "remind_speakers" || key === "chores") (out[key] ||= []).push(value);
       else out[key] = value;
     }
     return out;
@@ -2924,7 +3418,62 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.dataset.meals) {
       const v = this._formValues(form);
-      return this._call({ type: `${DOMAIN}/meals`, date: form.dataset.meals, breakfast: v.breakfast || "", lunch: v.lunch || "", dinner: v.dinner || "" }, "Meals saved.");
+      return this._call({ type: `${DOMAIN}/meals`, date: form.dataset.meals, breakfast: v.breakfast || "", lunch: v.lunch || "", dinner: v.dinner || "", ingredients: v.ingredients || "" }, "Meals saved.");
+    }
+    if (form.matches("[data-ask-form]")) {
+      const v = this._formValues(form);
+      const member = this._memberById(this._sheet?.member);
+      if (!member || this._busy || !String(v.name || "").trim()) return;
+      this._busy = true;
+      try {
+        await this._ws({ type: `${DOMAIN}/request/add`, member_id: member.id, name: v.name, emoji: v.emoji || null, points: v.points === "" ? null : Number(v.points) });
+        this._sheet = null;
+        this._toast(`Asked! A parent will say yes or no, ${member.name}.`);
+        await this._load();
+      } catch (err) {
+        this._toast(err?.message || String(err), true);
+      } finally {
+        this._busy = false;
+        this._renderOverlay();
+      }
+      return;
+    }
+    if (form.dataset.voteForm !== undefined) {
+      const v = this._formValues(form);
+      const options = String(v.options || "").split("\n").map((x) => x.trim()).filter(Boolean);
+      return this._call({ type: `${DOMAIN}/vote/start`, options, date: v.date || null, closes: v.closes || null }, "Vote started. It's on the Family dashboard.");
+    }
+    if (form.dataset.countdownForm !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/countdown/save`, name: v.name, emoji: v.emoji || null, date: v.date, member: v.member || null }, "Countdown added.");
+    }
+    if (form.dataset.awayForm !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/away`, action: "add", from: v.from || null, until: v.until || null }, v.from && v.from > localDayIso(0) ? "Trip planned." : "Away: chores are off.");
+    }
+    if (form.dataset.boostForm !== undefined) {
+      const v = this._formValues(form);
+      if (!v.until) return this._toast("Pick when it ends.", true);
+      return this._call({ type: `${DOMAIN}/boost/start`, label: v.label || null, factor: Number(v.factor || 2), until: v.until, chores: v.chores?.length ? v.chores : null }, "Double points on!");
+    }
+    if (form.dataset.calendarAdd !== undefined) {
+      const v = this._formValues(form);
+      const msg = { type: `${DOMAIN}/calendar/add`, entity_id: v.entity_id, title: v.title, date: v.date };
+      if (v.start) Object.assign(msg, { start: v.start, end: v.end || null });
+      else if (v.end_date) msg.end_date = v.end_date;
+      const ok = await this._call(msg, "Added to the calendar.");
+      if (ok) form.reset();
+      return;
+    }
+    if (form.dataset.savingForm !== undefined) {
+      const v = this._formValues(form);
+      const number = (x) => Math.max(0, Math.round(Number(x) || 0));
+      return this._call({ type: `${DOMAIN}/settings`, saving_percent: number(v.saving_percent), saving_max: number(v.saving_max), birthday_points: number(v.birthday_points) }, "Saved.");
+    }
+    if (form.dataset.reportForm !== undefined) {
+      const v = this._formValues(form);
+      this._openReport(Number(v.weeks_ago || 0));
+      return;
     }
     if (form.dataset.allowance !== undefined) {
       const v = this._formValues(form);
@@ -2961,7 +3510,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null };
+      item = { remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null, from_date: v.from_month && v.from_day ? `${v.from_month}-${v.from_day}` : null, until_date: v.until_month && v.until_day ? `${v.until_month}-${v.until_day}` : null };
     } else if (collection === "routines") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), members: v.members || [], steps: (v.steps || "").split("\n").map((x) => x.trim()).filter(Boolean), days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, enabled: !!v.enabled };
     } else if (collection === "rewards") {
@@ -2971,7 +3520,7 @@ class FamilyPanel extends HTMLElement {
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {
-      item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)) };
+      item = { name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)), birthday: v.birthday_month && v.birthday_day ? `${v.birthday_month}-${v.birthday_day}` : null };
     } else {
       item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [], grab: !!v.grab, due_only: !!v.due_only };
       const itemPoints = {};

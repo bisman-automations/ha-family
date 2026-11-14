@@ -116,7 +116,7 @@ let settings = { auto_check: null, penalty: 2, notify_targets: ["mobile_app_pare
 members[0].allowance = 10; members[1].allowance = 5;
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const dayIso = (n) => iso(new Date(now + n * 86400000));
-let meals = { [dayIso(0)]: { breakfast: "Pancakes", dinner: "Tacos" }, [dayIso(1)]: { lunch: "Leftover tacos", dinner: "Spaghetti" } };
+let meals = { [dayIso(0)]: { breakfast: "Pancakes", dinner: "Tacos", ingredients: "Tortillas\nCheese\nSalsa" }, [dayIso(1)]: { lunch: "Leftover tacos", dinner: "Spaghetti" } };
 let notes = [
   { id: "n1", text: "Dentist at 4:00. Don't forget your shoes!", member: "a", until: dayIso(0), at: ago(60), parent: true, by: "Parent" },
   { id: "n2", text: "Library books go back on Friday", member: null, until: null, at: ago(300), parent: true, by: "Parent" },
@@ -162,16 +162,48 @@ const routinesToday = () => routines.filter((r) => r.enabled !== false).map((r) 
   const who = r.members.length ? r.members : members.map((x) => x.id);
   return { ...r, who, ticked: Object.fromEntries(who.map((id) => [id, [...((routineSteps[r.id] || {})[id] || [])]])), finished: who.filter((id) => routineFinished(r.id, id)) };
 });
-const SECTION_KEYS = ["going", "chores", "routines", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
+const SECTION_KEYS = ["going", "countdowns", "vote", "chores", "routines", "grabs", "notes", "today", "meals", "done", "rewards", "home", "lately"];
 const sectionList = (order) => { const out = (order || []).filter((k, i, all) => SECTION_KEYS.includes(k) && all.indexOf(k) === i); return [...out, ...SECTION_KEYS.filter((k) => !out.includes(k))]; };
 const IS_ADMIN = params.get("admin") !== "0";
+// 2.5.0: countdowns, the dinner vote, reward requests, double points, away, birthdays.
+members[2].birthday = iso(new Date()).slice(5);
+members[0].birthday = dayIso(9).slice(5);
+let countdowns = [{ id: "cd1", name: "Beach trip", emoji: "🏖️", date: dayIso(12), member: null }];
+let vote = { id: "v1", day: dayIso(0), options: ["Tacos", "Pizza", "Spaghetti"], votes: { a: 1, b: 1, c: 0 }, closes: "16:30", status: "open", winner: null };
+let requests = [
+  { id: "rq1", member: "a", name: "Sleepover", emoji: "🏕️", points: 150, at: ago(40), status: "pending" },
+  { id: "rq2", member: "a", name: "New bike", emoji: "🚲", points: null, at: ago(3000), status: "declined", answered_at: ago(2000) },
+];
+const inHours = (h) => new Date(now + h * 3600000).toISOString();
+let boosts = [{ id: "bo1", label: "Saturday cleanup", factor: 2, from: ago(30), until: inHours(3), chores: ["bed", "room"] }];
+let away = params.get("away") === "1" ? [{ id: "aw1", from: dayIso(0), until: dayIso(4) }] : [{ id: "aw2", from: dayIso(20), until: dayIso(27) }];
+const awayNow = () => away.find((p) => p.from <= dayIso(0) && (!p.until || dayIso(0) <= p.until)) || null;
+const boostFor = (id) => Math.max(1, ...boosts.filter((b) => new Date(b.from) <= new Date() && new Date() < new Date(b.until) && (!b.chores?.length || b.chores.includes(id))).map((b) => b.factor));
+const countdownRows = () => {
+  const out = countdowns.filter((c) => c.date >= dayIso(0)).map((c) => ({ ...c, days: Math.round((new Date(c.date + "T12:00:00") - new Date(dayIso(0) + "T12:00:00")) / 86400000) }));
+  for (const m of members) {
+    if (!m.birthday) continue;
+    let when = `${new Date().getFullYear()}-${m.birthday}`;
+    if (when < dayIso(0)) when = `${new Date().getFullYear() + 1}-${m.birthday}`;
+    const days = Math.round((new Date(when + "T12:00:00") - new Date(dayIso(0) + "T12:00:00")) / 86400000);
+    if (days <= 30) out.push({ id: "birthday:" + m.id, name: `${m.name}'s birthday`, emoji: "🎂", date: when, member: m.id, days, birthday: true });
+  }
+  return out.sort((x, y) => x.days - y.days || x.name.localeCompare(y.name));
+};
+const extras = () => ({
+  countdowns: countdownRows(),
+  vote: vote && { ...vote, counts: vote.options.map((_o, i) => Object.values(vote.votes).filter((v) => v === i).length) },
+  requests,
+  boosts: boosts.filter((b) => new Date(b.until) > new Date()).map((b) => ({ ...b, on: new Date(b.from) <= new Date() })),
+  away: { now: awayNow(), planned: away.filter((p) => p.from > dayIso(0)) },
+});
 let familyPin = params.get("pin") !== "0" ? "2468" : null;
 let ownPins = params.get("pin") !== "0" ? { parent: { pin: "1357", name: "Dana" } } : {};
 const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["hold", "trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const PARENT_ONLY = ["request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 // Trades for today (like trades.py): offered, taken, approved.
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
@@ -199,7 +231,12 @@ window.hass = {
     if (msg.type === "lovelace/config/save") { window.savedDashboard = msg; return null; }
     if (msg.type === "lovelace/config") { if (!window.savedDashboard) throw { code: "config_not_found", message: "No config found." }; return structuredClone(window.savedDashboard.config); }
     const t = msg.type.replace("family/", "");
-    if (t === "state") { const st = state(); st.parent = isParent(msg); if (!st.parent) { delete st.settings; delete st.weeks; } return st; }
+    if (t === "state") {
+      const st = Object.assign(state(), extras());
+      st.members = st.members.map((x) => ({ ...x, birthday_today: x.birthday === dayIso(0).slice(5) }));
+      if (awayNow()) { st.chores = []; st.routines = []; st.members = st.members.map((x) => ({ ...x, own_today: { total: 0, left: 0, done: false } })); }
+      st.chores = st.chores.map((c) => { const f = boostFor(c.id); return f > 1 ? { ...c, boost: f, base_points: c.points, points: c.points * f } : c; });
+      st.parent = isParent(msg); if (!st.parent) { delete st.settings; delete st.weeks; } return st; }
     if (t === "trade/offer") { if (trades.some((x) => x.chore_id === msg.chore_id && x.from === msg.member_id)) throw { message: "You've already offered that one" }; const c = chores().find((x) => x.id === msg.chore_id); const from = members.find((x) => x.id === msg.member_id); const tr = { id: "t" + Date.now(), chore_id: c.id, chore: c.name, emoji: c.emoji, points: c.points, from: from.id, from_name: from.name, to: msg.to || null, day: "today", status: "offered", at: new Date().toISOString() }; trades.push(tr); return { trade: tr }; }
     if (t === "trade/take") { const tr = trades.find((x) => x.id === msg.trade_id); if (!tr || tr.status !== "offered") throw { message: "Someone already took that one" }; if (tr.from === msg.member_id) throw { message: "That's your own chore" }; if ((chores().find((c) => c.id === tr.chore_id)?.members || []).includes(msg.member_id)) throw { message: "You already have that chore today" }; tr.to = msg.member_id; tr.status = "taken"; return { trade: tr }; }
     if (t === "trade/cancel") { trades = trades.filter((x) => x.id !== msg.trade_id); return {}; }
@@ -222,10 +259,42 @@ window.hass = {
       parentPass = null; return { pin_set: pinSet() };
     }
     if (PARENT_ONLY.includes(t) && !isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" };
+    if (t === "request/add") {
+      if (!msg.name.trim()) throw { message: "What you'd like needs a name" };
+      if (requests.filter((r) => r.member === msg.member_id && r.status === "pending").length >= 5) throw { message: "Already asked for 5 things. Wait for a parent to answer those." };
+      const r = { id: "rq" + Date.now(), member: msg.member_id, name: msg.name.trim(), emoji: msg.emoji || null, points: msg.points ?? null, at: new Date().toISOString(), status: "pending" };
+      requests.push(r); return { request: r };
+    }
+    if (t === "request/cancel") { const r = requests.find((x) => x.id === msg.request_id); if (!r || r.status !== "pending") throw { message: "A parent already answered that" }; requests = requests.filter((x) => x !== r); return {}; }
+    if (t === "request/decide") {
+      const r = requests.find((x) => x.id === msg.request_id);
+      if (!r || r.status !== "pending") throw { message: "That request was already answered" };
+      let reward = null;
+      if (msg.approved) { const cost = msg.points ?? r.points; if (cost == null) throw { message: "What it costs needs a number" }; reward = { id: "rw" + Date.now(), name: r.name, emoji: r.emoji, points: cost, kind: "custom", members: [r.member] }; rewards.push(reward); r.points = cost; r.reward_id = reward.id; }
+      r.status = msg.approved ? "approved" : "declined"; r.answered_at = new Date().toISOString();
+      return { request: r, reward };
+    }
+    if (t === "vote/cast") { if (!vote || vote.status !== "open") throw { message: "There's no vote going on" }; vote.votes[msg.member_id] = msg.option; return { vote }; }
+    if (t === "vote/start") { const opts = [...new Set(msg.options.map((o) => o.trim()).filter(Boolean))]; if (opts.length < 2) throw { message: "Give at least two choices" }; if (vote?.status === "open") throw { message: "A vote is already going. Close it first." }; vote = { id: "v" + Date.now(), day: msg.date || dayIso(0), options: opts, votes: {}, closes: msg.closes || null, status: "open", winner: null }; return { vote }; }
+    if (t === "vote/close") { if (!vote || vote.status !== "open") throw { message: "There's no vote going on" }; const counts = vote.options.map((_o, i) => Object.values(vote.votes).filter((v) => v === i).length); vote.status = "closed"; vote.winner = Math.max(...counts) ? counts.indexOf(Math.max(...counts)) : null; if (vote.winner != null) meals[vote.day] = { ...(meals[vote.day] || {}), dinner: vote.options[vote.winner] }; return { vote }; }
+    if (t === "vote/cancel") { vote = null; return {}; }
+    if (t === "countdown/save") { if (!msg.date || msg.date < dayIso(0)) throw { message: "Pick a day that hasn't passed" }; const c = { id: msg.item_id || "cd" + Date.now(), name: msg.name.trim(), emoji: msg.emoji || null, date: msg.date, member: msg.member || null }; countdowns = [...countdowns.filter((x) => x.id !== c.id), c]; return { countdown: c }; }
+    if (t === "countdown/delete") { countdowns = countdowns.filter((x) => x.id !== msg.item_id); return {}; }
+    if (t === "away") {
+      if (msg.action === "add") { const first = msg.from || dayIso(0); if (msg.until && msg.until < first) throw { message: "The last day away can't be before the first" }; away.push({ id: "aw" + Date.now(), from: first, until: msg.until || null }); }
+      else if (msg.action === "back") { const p = awayNow(); if (!p) throw { message: "The family isn't away" }; away = away.filter((x) => x !== p); }
+      else away = away.filter((x) => x.id !== msg.period_id);
+      return { away: extras().away };
+    }
+    if (t === "boost/start") { if (![2, 3].includes(msg.factor)) throw { message: "Pick double or triple points" }; const end = new Date(msg.until); if (!(end > new Date())) throw { message: "Pick an end after it starts, and after now" }; const b = { id: "bo" + Date.now(), label: msg.label || (msg.factor === 2 ? "Double points" : "Triple points"), factor: msg.factor, from: new Date().toISOString(), until: end.toISOString(), chores: msg.chores }; boosts.push(b); return { boost: b }; }
+    if (t === "boost/stop") { boosts = boosts.filter((b) => b.id !== msg.boost_id); return {}; }
+    if (t === "shopping") { const want = [...new Set(Array.from({ length: 7 }, (_v, i) => meals[dayIso(i)]?.ingredients || "").join("\n").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (!want.length) throw { message: "No meals in the coming days list anything to buy" }; settings.shopping_list = msg.entity_id; return { added: want.filter((x) => x.toLowerCase() !== "milk"), skipped: want.filter((x) => x.toLowerCase() === "milk") }; }
+    if (t === "calendar/add") { if (!settings.calendars.some((c) => c.entity_id === msg.entity_id)) throw { message: "Pick one of the family's calendars" }; return { event: { title: msg.title } }; }
+    if (t === "report") return { report: { from: dayIso(-((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), until: dayIso(6 - ((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), weeks_ago: msg.weeks_ago || 0, days_away: 0, money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null, members: members.map((x, i) => ({ id: x.id, name: x.name, emoji: x.emoji, color: x.color, chores: 12 - i * 3, top_chores: [{ name: "Make your bed", times: 6 - i }, { name: "Set the table", times: 3 }], earned: 60 - i * 15, spent: 25 - i * 5, bonuses: 10, rewards: i ? [] : ["Ice cream", "15 minutes of TV"], all_done_days: 4 - i, badges: i ? [] : [{ key: "streak7", emoji: "🔥", name: "A week in a row", text: "" }], points: x.points, streak: x.streak || 0 })) } };
     if (t === "choices") return { voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
     if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: isParent(msg), by: null }; notes.push(n); return { note: n }; }
     if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && !IS_ADMIN) throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
-    if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
+    if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); const buy = [...new Set((msg.ingredients || "").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (buy.length) day.ingredients = buy.join("\n"); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
     if (t === "control") {
       const c = controlList().find((x) => x.id === msg.control_id);
       if (!c) throw { message: "That isn't on the dashboard any more" };
@@ -274,7 +343,7 @@ window.hass = {
           settings.family_goal = { name: g.name.trim(), emoji: g.emoji || null, target: g.target, since: old && !msg.restart_goal ? old.since : new Date().toISOString() };
         }
       }
-      for (const key of ["section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "live_activity", "live_per_child", "live_from", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
+      for (const key of ["saving_percent", "saving_max", "birthday_points", "section_order", "hide_empty_sections", "quick_points", "notify_targets", "notify_done", "notify_rewards", "weekly_summary", "live_activity", "live_per_child", "live_from", "allowance_day", "allowance_hour", "currency", "calendars"]) if (key in msg) settings[key] = msg[key];
       if (msg.quick_points) settings.quick_points = msg.quick_points.filter((b) => b.label && b.points).map((b) => {
         const ids = members.map((m) => m.id);
         const picked = Array.isArray(b.members) ? b.members.filter((id) => ids.includes(id)) : null;

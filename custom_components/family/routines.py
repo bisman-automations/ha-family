@@ -107,6 +107,8 @@ class Routines:
     def today(self) -> list[dict[str, Any]]:
         """Routines to do now, with each person's ticked steps."""
         now = dt_util.now()
+        if self.manager.away.on(now.date()):
+            return []  # away: nothing to do
         steps = self._today(now)
         result = []
         for routine in self.items:
@@ -142,7 +144,11 @@ class Routines:
         member = manager.member(member_id)
         routine = self.routine(routine_id)
         now = dt_util.now()
-        if not routine.get("enabled", True) or not model.available(routine, now):
+        if (
+            not routine.get("enabled", True)
+            or not model.available(routine, now)
+            or manager.away.on(now.date())
+        ):
             raise ValueError(f"{routine['name']} isn't for right now")
         if member_id not in self._who(routine):
             raise ValueError(f"{routine['name']} isn't {member['name']}'s")

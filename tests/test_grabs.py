@@ -278,6 +278,8 @@ async def test_section_order(hass: HomeAssistant, client):
     assert sorted(order) == sorted(
         [
             "going",
+            "countdowns",
+            "vote",
             "chores",
             "routines",
             "grabs",

@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-11-14
+
+### Added
+
+- **Countdowns.** "12 days to the beach" on the Family dashboard, under a new **Coming up** section. Parents add them under **Notes**, for everyone or for one person. Birthdays count down by themselves from a month before.
+- **Ask for a reward.** On their own page, a child can ask for something that isn't on the list (with how many points they think it's worth). Parents see it at the top of **To check**, with a phone notification, and say yes with what it costs (it becomes a reward just for that child) or no.
+- **Vote on dinner.** Parents give two to six choices under **Meals**; everyone taps one on the Family dashboard. When it closes, by its time or by hand, the winner goes on the meal plan as dinner.
+- **Away.** Under **Family**, set when the family is away. Chores and routines are off, nothing counts as missed, streaks skip those days, and the weekly allowance isn't given. **We're back home** turns it off.
+- **Double points.** Under **Chores**, make chores worth two or three times their points until a time you pick, for every chore or just some. The Family dashboard shows it at the top and on each chore.
+- **Seasonal chores.** A chore can show only between two days of the year, such as raking leaves in the fall or shoveling the walk December to March.
+- **Shopping list from the meal plan.** Add what each day needs under **To buy**, then put everything the coming week needs on a Home Assistant to-do list in one tap. What's already on the list isn't added again.
+- **Saving bonus.** A percent of the points each person kept all week, given with the allowance, with an optional limit.
+- **Birthdays.** Set each person's birthday: the Family dashboard wishes them a happy birthday, and they can get birthday points.
+- **Add calendar events** from the parent controls, under **Notes**, to any of the family's calendars.
+- **Weekly report.** Under **History**, a week for everyone (chores, points, rewards, badges, streaks) to print or share.
+
+### Changed
+
+- The Family dashboard has two new sections, **Coming up** and **What's for dinner?**. If you set your own section order, they're added at the end; move them under **Family** → **Family dashboard sections**.
+
 ## [2.4.0] - 2026-11-14
 
 ### Added
@@ -317,6 +337,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.5.0]: https://github.com/bisman-automations/ha-family/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/bisman-automations/ha-family/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bisman-automations/ha-family/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/bisman-automations/ha-family/compare/v2.1.0...v2.2.0

@@ -55,6 +55,8 @@ GIVEN_DONE = "given"
 # The Family dashboard's sections, in their usual order.
 SECTIONS = (
     "going",
+    "countdowns",
+    "vote",
     "chores",
     "routines",
     "grabs",
@@ -236,10 +238,39 @@ def clean_days(value: Any) -> list[int]:
     return [] if len(days) == 7 else days
 
 
+def clean_month_day(value: Any, label: str) -> str | None:
+    """'MM-DD' (a day of the year, any year), or None when empty."""
+    if value is None or value == "":
+        return None
+    text = str(value).strip()
+    # A full date from a date picker: the year doesn't matter.
+    if len(text) == 10 and text[4] == "-":
+        text = text[5:]
+    try:
+        month, day = (int(x) for x in text.split("-"))
+        date(2024, month, day)  # a leap year, so 02-29 is allowed
+    except ValueError as err:
+        raise ValueError(f"{label} needs a month and day") from err
+    return f"{month:02d}-{day:02d}"
+
+
+def in_season(item: dict[str, Any], day: date) -> bool:
+    """Whether ``day`` is between the item's ``from_date`` and ``until_date``
+    ('MM-DD', both included; may wrap past New Year). Neither: all year."""
+    start, end = item.get("from_date"), item.get("until_date")
+    if not start or not end:
+        return True
+    today = day.strftime("%m-%d")
+    if start <= end:
+        return start <= today <= end
+    return today >= start or today <= end
+
+
 def on_day(chore: dict[str, Any], day: date) -> bool:
-    """Whether the chore is on this day (no days picked: every day)."""
+    """Whether the chore is on this day: in its season, on one of its days
+    (no days picked: every day)."""
     days = chore.get("days") or []
-    return not days or day.weekday() in days
+    return in_season(chore, day) and (not days or day.weekday() in days)
 
 
 def available(chore: dict[str, Any], now: datetime) -> bool:
@@ -776,6 +807,8 @@ def week_summary(
 # ---- allowance and money ---------------------------------------------------------------
 
 KIND_ALLOWANCE = "allowance"
+KIND_SAVING = "saving"  # the weekly bonus on points kept
+KIND_BIRTHDAY = "birthday"
 DEFAULT_ALLOWANCE_DAY = 6  # Sunday
 DEFAULT_ALLOWANCE_HOUR = 8
 MAX_POINT_VALUE = 100.0
@@ -825,6 +858,8 @@ def clean_point_value(value: Any) -> float | None:
 
 MEALS = ("breakfast", "lunch", "dinner")
 MAX_MEAL_LENGTH = 80
+# What a day's meals need, for the shopping list: one per line or comma.
+MAX_INGREDIENTS_LENGTH = 500
 MAX_NOTE_LENGTH = 200
 MAX_NOTES = 30
 KEEP_MEAL_DAYS = 7  # past days kept, so last week's dinners can be looked back on
@@ -840,7 +875,28 @@ def clean_meals(raw: Any) -> dict[str, str]:
             raise ValueError(f"Keep {meal} under {MAX_MEAL_LENGTH} characters")
         if text:
             meals[meal] = text
+    ingredients = ingredient_list(raw.get("ingredients"))
+    if ingredients:
+        text = "\n".join(ingredients)
+        if len(text) > MAX_INGREDIENTS_LENGTH:
+            raise ValueError(
+                f"Keep the shopping list under {MAX_INGREDIENTS_LENGTH} characters"
+            )
+        meals["ingredients"] = text
     return meals
+
+
+def ingredient_list(value: Any) -> list[str]:
+    """Things to buy, from text with one per line or separated by commas.
+    Trimmed, empty ones left out, each once (case ignored)."""
+    seen: set[str] = set()
+    result = []
+    for part in re.split(r"[\n,;]+", str(value or "")):
+        item = " ".join(part.split())
+        if item and item.casefold() not in seen:
+            seen.add(item.casefold())
+            result.append(item)
+    return result
 
 
 def clean_note(value: Any) -> str:
@@ -1159,3 +1215,117 @@ def cashout_points(points: Any, balance: int) -> int:
     if value > balance:
         raise ValueError(f"Only {balance} points to cash out")
     return value
+
+
+# ---- saving bonus --------------------------------------------------------------------
+
+MAX_SAVING_PERCENT = 50
+
+
+def saving_bonus(kept: int, percent: int, most: int) -> int:
+    """The weekly bonus on points kept: ``percent`` of them, rounded down,
+    at most ``most`` (0: no limit)."""
+    if kept <= 0 or percent <= 0:
+        return 0
+    bonus = kept * percent // 100
+    return min(bonus, most) if most > 0 else bonus
+
+
+def balance_before(
+    entries: Iterable[dict[str, Any]], member_id: str, before: datetime
+) -> int:
+    """A member's points from entries before ``before`` (not counting what
+    was carried over from old history)."""
+    return sum(
+        int(e.get("points", 0))
+        for e in entries
+        if e.get("member") == member_id
+        and e.get("review") != REVIEW_REJECTED
+        and datetime.fromisoformat(e["at"]) < before
+    )
+
+
+# ---- birthdays and countdowns --------------------------------------------------------
+
+
+def birthday_on(birthday: str | None, day: date) -> bool:
+    """Whether ``day`` is this birthday ('MM-DD'). February 29 is kept on
+    February 28 in other years."""
+    if not birthday:
+        return False
+    if birthday == "02-29" and not _leap(day.year):
+        return day.strftime("%m-%d") == "02-28"
+    return day.strftime("%m-%d") == birthday
+
+
+def _leap(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+def next_birthday(birthday: str, today: date) -> date:
+    """The next day this birthday falls on, today included."""
+    for year in (today.year, today.year + 1):
+        month, day = (int(x) for x in birthday.split("-"))
+        if (month, day) == (2, 29) and not _leap(year):
+            day = 28
+        when = date(year, month, day)
+        if when >= today:
+            return when
+    return today  # not reached
+
+
+# ---- double points -------------------------------------------------------------------
+
+BOOST_FACTORS = (2, 3)
+
+
+def boost_factor(boosts: Iterable[dict[str, Any]], chore_id: str, now: datetime) -> int:
+    """How many times its points a chore is worth right now (1: as usual).
+
+    A boost with no chores picked covers every chore, to-do items too."""
+    factor = 1
+    for boost in boosts:
+        try:
+            start = datetime.fromisoformat(boost["from"])
+            end = datetime.fromisoformat(boost["until"])
+        except KeyError, TypeError, ValueError:
+            continue
+        if not start <= now < end:
+            continue
+        chores = boost.get("chores")
+        if chores and chore_id not in chores:
+            continue
+        factor = max(factor, int(boost.get("factor") or 1))
+    return factor
+
+
+# ---- away ----------------------------------------------------------------------------
+
+
+def away_on(periods: Iterable[dict[str, Any]], day: date) -> bool:
+    """Whether the family is away on ``day``: inside a period from its first
+    day through its last (no last day: until it's turned off)."""
+    text = day.isoformat()
+    for period in periods:
+        start = period.get("from")
+        end = period.get("until")
+        if start and start <= text and (not end or text <= end):
+            return True
+    return False
+
+
+# ---- dinner vote ---------------------------------------------------------------------
+
+MAX_VOTE_OPTIONS = 6
+
+
+def vote_winner(options: list[str], votes: dict[str, int]) -> int | None:
+    """The option with the most votes; a tie goes to the one listed first.
+    None when nobody voted."""
+    counts = [0] * len(options)
+    for choice in votes.values():
+        if 0 <= int(choice) < len(options):
+            counts[int(choice)] += 1
+    if not any(counts):
+        return None
+    return counts.index(max(counts))

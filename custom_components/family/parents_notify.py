@@ -126,6 +126,25 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_trade")
 
     @callback
+    def reward_requested(self, request: dict[str, Any], member: dict[str, Any]) -> None:
+        """A child asked for a reward that isn't on the list."""
+        if not self._settings.get("notify_rewards") or not self.targets():
+            return
+        asked = request.get("points")
+        data = {
+            "title": f"{member['name']} asked for {request['name']}",
+            "message": (f"They think it's worth {asked} points. " if asked else "")
+            + "Say yes or no under To check.",
+            "data": {
+                "tag": tag_for(request["id"]),
+                "group": "family",
+                "url": PARENTS_PATH,
+                "clickAction": PARENTS_PATH,
+            },
+        }
+        self._spawn(self._send(data), "family_notify_request")
+
+    @callback
     def pin_locked(self) -> None:
         """Someone got the parent PIN wrong too many times on the shared screen."""
         if not self.targets():

@@ -36,6 +36,7 @@ from .const import (
     EVENT_CHORE_REVIEWED,
     EVENT_GOAL_REACHED,
     EVENT_REWARD_REDEEMED,
+    EVENT_REWARDS_HELD,
     KEEP_HISTORY_DAYS,
     MEDIA_MGMT_DOMAIN,
     MEDIA_MGMT_GRANT,
@@ -1100,6 +1101,55 @@ class FamilyManager:
             return "everyone"
         return [self._member_name(member_id) for member_id in members]
 
+    def _require_not_held(self, member: dict[str, Any]) -> None:
+        """Refuse a redeem or a cash out while a parent has put rewards on hold."""
+        until = model.held_until(member, dt_util.now())
+        if until is None:
+            return
+        when = dt_util.as_local(until).strftime("%a %-d %b, %-I:%M %p")
+        reason = f" ({member['hold_reason']})" if member.get("hold_reason") else ""
+        raise FamilyError(
+            f"{member['name']}'s rewards are on hold until {when}{reason}"
+        )
+
+    @callback
+    def hold_rewards(
+        self,
+        member_id: str,
+        *,
+        days: int | None = None,
+        until: str | None = None,
+        reason: str | None = None,
+        lift: bool = False,
+    ) -> dict[str, Any]:
+        """Put a hold on someone's rewards (and cashing out) for a while, or lift it.
+
+        Chores still earn points and they can still save up; only spending waits.
+        """
+        member = self.member(member_id)
+        if lift:
+            member["rewards_held_until"] = None
+            member["hold_reason"] = None
+        else:
+            try:
+                day = date.fromisoformat(until) if until else None
+                end = model.hold_end(dt_util.now(), days, day)
+            except ValueError as err:
+                raise FamilyError(str(err)) from err
+            member["rewards_held_until"] = end.isoformat()
+            member["hold_reason"] = (reason or "").strip()[:80] or None
+        self._changed()
+        self.hass.bus.async_fire(
+            EVENT_REWARDS_HELD,
+            {
+                "member_id": member_id,
+                "member": member["name"],
+                "until": member["rewards_held_until"],
+                "reason": member["hold_reason"],
+            },
+        )
+        return member
+
     def _require_eligible(self, member: dict[str, Any], reward: dict[str, Any]) -> None:
         """Refuse a redeem or a goal when this reward isn't for them."""
         if model.reward_for(reward, member["id"]):
@@ -1156,6 +1206,7 @@ class FamilyManager:
         member = self.member(member_id)
         reward = self.reward(reward_id)
         self._require_eligible(member, reward)
+        self._require_not_held(member)
         cost = int(reward.get("points", 0))
         if self.points(member_id) < cost:
             raise FamilyError(
@@ -1218,6 +1269,7 @@ class FamilyManager:
         reward = self.reward(reward_id)
         for member in members:
             self._require_eligible(member, reward)
+            self._require_not_held(member)
         cost = int(reward.get("points", 0))
         used = model.reward_used_by(reward, self.entries, dt_util.now())
         for member in members:
@@ -1441,6 +1493,7 @@ class FamilyManager:
         it **Paid**, or cancels it and gives the points back.
         """
         member = self.member(member_id)
+        self._require_not_held(member)
         value = self.settings.get("point_value")
         if not value:
             raise FamilyError(
@@ -1555,6 +1608,13 @@ class FamilyManager:
                 (m.get("badges") for m in self.members if m["id"] == member_id), None
             )
             or {},
+            # Set with Hold rewards, not here: kept as they are.
+            **{
+                key: next(
+                    (m.get(key) for m in self.members if m["id"] == member_id), None
+                )
+                for key in ("rewards_held_until", "hold_reason")
+            },
         }
         new = self._upsert(self.members, member)
         self._changed(members=new)
@@ -1981,6 +2041,12 @@ class FamilyManager:
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
                 "badges": model.badge_list(m.get("badges")),
+                # While rewards are on hold: when that ends (None: not held).
+                "held_until": (
+                    held.isoformat()
+                    if (held := model.held_until(m, dt_util.now()))
+                    else None
+                ),
                 "to_check": sum(
                     1
                     for e in self.entries

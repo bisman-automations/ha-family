@@ -24,6 +24,7 @@ EVENT_REWARD_REDEEMED = "family_reward_redeemed"
 EVENT_BONUS = "family_bonus_given"
 EVENT_GOAL_REACHED = "family_goal_reached"
 EVENT_BADGE_EARNED = "family_badge_earned"
+EVENT_REWARDS_HELD = "family_rewards_held"
 
 # Actions
 SERVICE_ADD_POINTS = "add_points"

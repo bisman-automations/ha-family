@@ -163,6 +163,7 @@ Links to the old **Parents** page (`/family-parents`), including the ones in the
 
 Every card in the parent controls folds away: tap its title. A folded card stays folded until you tap it again, and each device remembers which cards are folded.
 
+- **Hold rewards** (on **Family**, next to each person). Puts their rewards on hold for the rest of today, 1, 2 or 3 days, a week, or through a day you pick, with an optional reason they'll see. While it lasts they can't get a reward (alone or together) or cash out; chores still earn points, and rewards they can't afford yet can still be saved for. Their Rewards section says until when. **Lift the hold** ends it early.
 - **Quick points** (top of **To check**). Buttons for the things you want to notice, good and not so good, such as "💛 Kind to a sibling +2" or "🙉 Not listening −1". One tap next to someone gives or takes the points straight away, and it shows in History. Tap **Change the buttons** to set your own (up to 12; use a minus for points taken away). Each button is for everyone unless you untick people in its list; it then shows only next to whoever is still ticked.
 - **To check.** Chores the kids marked done. **Done right** keeps the points; **Didn't happen** takes them back (and puts a to-do item back on its list). Above them are rewards the kids want to get together: **Yes** gives the reward (TV and music time straight away), **No** gives everyone their points back. Below are rewards still to hand out; mark them **Handed out**. To keep the list short, pick **Count chores nobody checked as done right** after a day or a week; those show as "checked automatically" in History.
 - **Who does what** (top of **Chores**). Every chore shown on the Family dashboard lined up against each person: ● their own, ↻ taking turns (with whose turn it is now), ○ up for grabs, grouped by kind, with how many of their own chores each person has done today.
@@ -224,6 +225,7 @@ For automations, for example to send a message or play a sound:
 | `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
 | `family_goal_reached` | The family goal was reached. | `name`, `target` |
 | `family_badge_earned` | Someone earned a badge. | `member`, `member_id`, `badge` (its key, such as `streak_7`), `name` |
+| `family_rewards_held` | A parent put someone's rewards on hold, or lifted it. | `member`, `member_id`, `until` (empty when lifted), `reason` |
 | `family_reward_redeemed` | Points were spent on a reward. For a reward bought together, once per person when a parent says yes, with their share. | `member`, `member_id`, `reward`, `points`, `balance`, `eligible` (`everyone`, or the names of the people the reward is for), and `together` (everyone's names) for a reward bought together |
 
 ## Troubleshooting

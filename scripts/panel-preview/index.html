@@ -171,7 +171,7 @@ const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const PARENT_ONLY = ["hold", "trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 // Trades for today (like trades.py): offered, taken, approved.
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
@@ -236,6 +236,7 @@ window.hass = {
     if (t === "move" && msg.collection === "routines") { const i = routines.findIndex((x) => x.id === msg.item_id); const j = Math.max(0, Math.min(routines.length - 1, i + msg.offset)); routines.splice(j, 0, routines.splice(i, 1)[0]); return {}; }
     if (t === "move") { const i = controls.findIndex((x) => x.id === msg.item_id); const j = Math.max(0, Math.min(controls.length - 1, i + msg.offset)); controls.splice(j, 0, controls.splice(i, 1)[0]); return {}; }
     const m = members.find((x) => x.id === msg.member_id);
+    if (t === "redeem" || t === "cash_out") { const held = [m, ...(msg.together || []).map((id) => members.find((x) => x.id === id))].find((x) => x?.held_until && new Date(x.held_until) > new Date()); if (held) throw { message: `${held.name}'s rewards are on hold until ${new Date(held.held_until).toLocaleString()}${held.hold_reason ? ` (${held.hold_reason})` : ""}` }; }
     if (t === "complete") { const c = chores().find((x) => x.id === msg.chore_id); m.points += c.points; const e = { id: "n" + entries.length, at: new Date().toISOString(), kind: "chore", member: m.id, chore_id: c.id, title: c.name, points: c.points, review: "pending" }; entries.push(e);
       // Riley's only chore: the all-done bonus.
       if (c.id === "room") { const b = { id: "b" + entries.length, at: e.at, kind: "bonus", member: m.id, title: "All done today!", points: bonus.all_done, bonus: "all_done", for_entry: e.id }; entries.push(b); m.points += b.points; return { entry: { ...e, bonuses: [b] }, points: m.points }; }
@@ -315,6 +316,17 @@ window.hass = {
       return res;
     }
     if (t === "adjust") { m.points += msg.points; return { points: m.points }; }
+    if (t === "hold") {
+      if (msg.lift) { m.held_until = null; m.hold_reason = null; return { member: m }; }
+      const now = new Date();
+      let end;
+      if (msg.until) { end = new Date(msg.until + "T00:00:00"); end.setDate(end.getDate() + 1); }
+      else if (msg.days === 0) { end = new Date(now); end.setHours(24, 0, 0, 0); }
+      else end = new Date(now.getTime() + msg.days * 86400000);
+      if (end <= now) throw { message: "Pick a day that hasn't passed" };
+      m.held_until = end.toISOString(); m.hold_reason = (msg.reason || "").trim() || null;
+      return { member: m };
+    }
     throw { message: "unknown " + msg.type };
   },
 };

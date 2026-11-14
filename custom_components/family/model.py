@@ -1108,6 +1108,46 @@ def weekly_stats(
     return table
 
 
+# A hold on someone's rewards lasts at most this long.
+MAX_HOLD_DAYS = 90
+
+
+def held_until(member: dict[str, Any], now: datetime) -> datetime | None:
+    """When a hold on this person's rewards ends, or None when there's none now."""
+    raw = member.get("rewards_held_until")
+    if not raw:
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except TypeError, ValueError:
+        return None
+    if until.tzinfo is None:
+        return None
+    return until if until > now else None
+
+
+def hold_end(now: datetime, days: int | None, until: date | None) -> datetime:
+    """When a new hold ends: the end of today (days 0), that many days from now,
+    or the end of a chosen day. Raises ValueError when that's not ahead."""
+
+    def end_of(day: date) -> datetime:
+        return datetime.combine(day + timedelta(days=1), time.min, tzinfo=now.tzinfo)
+
+    if until is not None:
+        end = end_of(until)
+    elif days is not None:
+        if days < 0:
+            raise ValueError("Pick how long")
+        end = end_of(now.date()) if days == 0 else now + timedelta(days=days)
+    else:
+        raise ValueError("Pick how long")
+    if end <= now:
+        raise ValueError("Pick a day that hasn't passed")
+    if end - now > timedelta(days=MAX_HOLD_DAYS):
+        raise ValueError(f"A hold can last up to {MAX_HOLD_DAYS} days")
+    return end
+
+
 def cashout_points(points: Any, balance: int) -> int:
     """Points to cash out: a whole number from 1 to the member's balance."""
     try:

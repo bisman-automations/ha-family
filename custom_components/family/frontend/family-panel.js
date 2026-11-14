@@ -117,6 +117,10 @@ const pts = (n) => `${n} ${Math.abs(n) === 1 ? "point" : "points"}`;
 const MEALS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"]];
 const WEEKDAYS_LONG = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 // An ISO date (YYYY-MM-DD) as "Mon 9", "Today" or "Tomorrow".
+// When a hold on someone's rewards ends, in words: "Sat 6:00 PM".
+const holdText = (iso) =>
+  new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const HOLD_FOR = [["0", "Rest of today"], ["1", "1 day"], ["2", "2 days"], ["3", "3 days"], ["7", "1 week"], ["until", "Until a day…"]];
 const dayText = (iso, index) => {
   if (index === 0) return "Today";
   if (index === 1) return "Tomorrow";
@@ -505,6 +509,9 @@ const STYLES = `
   .eligible-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--primary-color); }
   .field small.eligible-warn { color: var(--fam-bad); font-weight: 600; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hold-note { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning-color, #f4b400) 18%, transparent); }
+  .hold-tag { font-size: 0.9em; color: var(--warning-color, #b07d00); }
+  .hold-form { flex-basis: 100%; }
   .quick-edit li { flex-wrap: wrap; }
   .quick-edit .item-emoji { width: 3em; flex: none; text-align: center; font-size: 20px; padding: 4px; }
   .quick-edit .grow { flex: 1 1 160px; min-width: 0; }
@@ -1138,10 +1145,11 @@ class FamilyPanel extends HTMLElement {
       ? `<div class="tiles" data-fit="rewards">${visibleRewards
           .map((r) => {
             const short = member && member.points < r.points;
-            const used = member && (r.used_by || []).includes(member.id);
+            // On hold: no getting it now, but one they can't afford yet can still be saved for.
+            const used = member && ((r.used_by || []).includes(member.id) || (member.held_until && !short));
             const goal = member && member.goal === r.id;
             const sub = this._rewardSub(r);
-            const note = used ? AGAIN[r.limit] : short ? `${member.points} of ${r.points} · ${r.points - member.points} more to go` : LIMIT_TEXT[r.limit] || "";
+            const note = member?.held_until ? "On hold" : used ? AGAIN[r.limit] : short ? `${member.points} of ${r.points} · ${r.points - member.points} more to go` : LIMIT_TEXT[r.limit] || "";
             const bar = short && !used ? this._bar(member.points, r.points) : "";
             // Not enough yet: a tap offers to save up for it.
             return `<button class="tile${short ? " short" : ""}${goal ? " goal" : ""}" data-reward="${esc(r.id)}" ${used ? "disabled" : ""}>
@@ -1155,7 +1163,7 @@ class FamilyPanel extends HTMLElement {
       : `<p class="empty">${d.rewards.length ? (member ? `No rewards for ${esc(member.name)} right now.` : "No rewards for everyone right now.") : "No rewards yet. A parent adds them on the <b>Parents</b> dashboard."}</p>`;
     const cashTile =
       member && d.money
-        ? `<button class="tile cashout" data-cash-out><span class="emoji">💰</span><span class="label">Cash out</span><span class="sub">${esc(money(member.points, d.money))} in points</span></button>`
+        ? `<button class="tile cashout" data-cash-out ${member.held_until ? "disabled" : ""}><span class="emoji">💰</span><span class="label">Cash out</span><span class="sub">${esc(money(member.points, d.money))} in points</span></button>`
         : "";
     const feed = member ? d.recent.filter((e) => e.member === member.id) : d.recent;
     const controls = this._visibleControls();
@@ -1201,7 +1209,7 @@ class FamilyPanel extends HTMLElement {
       today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
       meals: meals.length ? this._section("meals", "Meals", mealTiles) : "",
       done: done.length ? this._section("done", "Done today", doneTiles, done.length) : "",
-      rewards: visibleRewards.length || cashTile || !hide ? this._section("rewards", "Rewards", cashTile && visibleRewards.length ? rewardTiles.replace('data-fit="rewards">', `data-fit="rewards">${cashTile}`) : cashTile ? `<div class="tiles" data-fit="rewards">${cashTile}</div>` : rewardTiles, visibleRewards.length) : "",
+      rewards: visibleRewards.length || cashTile || !hide ? this._section("rewards", "Rewards", (member?.held_until ? `<p class="hold-note">⏸ Rewards are on hold until ${esc(holdText(member.held_until))}${member.hold_reason ? ` · ${esc(member.hold_reason)}` : ""}. Chores still earn points.</p>` : "") + (cashTile && visibleRewards.length ? rewardTiles.replace('data-fit="rewards">', `data-fit="rewards">${cashTile}`) : cashTile ? `<div class="tiles" data-fit="rewards">${cashTile}</div>` : rewardTiles), visibleRewards.length) : "",
       home,
       lately: feed.length || !hide ? this._section("lately", "Lately", `<div data-fit="lately">${this._feed(feed.slice(0, 10))}</div>`) : "",
     };
@@ -2327,6 +2335,19 @@ class FamilyPanel extends HTMLElement {
       <p class="muted">A chore can be said out loud on a speaker at a set time while someone still has it to do. Pick the voice here, then set the time and speakers on each chore.</p>${body}</div>`;
   }
 
+  _holdForm(m) {
+    const choice = this._holdChoice || "1";
+    return `<form class="edit hold-form" data-hold-form="${esc(m.id)}">
+      <p class="muted">${esc(m.name)} can't spend points on rewards or cash out until then. Chores still earn points, and they can still save up.</p>
+      <div class="inline">
+        <label class="field"><span>For</span><select name="for" data-hold-choice>${HOLD_FOR.map(([v, label]) => `<option value="${v}" ${v === choice ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        ${choice === "until" ? `<label class="field"><span>Through</span><input type="date" name="until" required></label>` : ""}
+        <label class="field grow"><span>Why (optional, they'll see it)</span><input type="text" name="reason" maxlength="80"></label>
+      </div>
+      <div class="form-actions"><button class="btn primary" type="submit">Hold rewards</button><button class="btn" type="button" data-hold-cancel>Cancel</button></div>
+    </form>`;
+  }
+
   _renderMembers() {
     const d = this._data;
     const edit = this._edit;
@@ -2338,8 +2359,12 @@ class FamilyPanel extends HTMLElement {
                 <input type="number" name="points" placeholder="± points" aria-label="Points for ${esc(m.name)}" style="width:100px">
                 <input type="text" name="reason" placeholder="Why (optional)" aria-label="Why">
                 <button class="btn" type="submit">Change points</button></form>
+              ${m.held_until
+                ? `<span class="hold-tag">⏸ Rewards on hold until ${esc(holdText(m.held_until))}${m.hold_reason ? ` · ${esc(m.hold_reason)}` : ""}</span><button class="btn" data-hold-lift="${esc(m.id)}">Lift the hold</button>`
+                : `<button class="btn" data-hold-open="${esc(m.id)}">Hold rewards</button>`}
               <button class="btn" data-edit="members" data-id="${esc(m.id)}">Edit</button>
-              <button class="btn bad" data-delete="members" data-id="${esc(m.id)}">Remove</button></li>`)
+              <button class="btn bad" data-delete="members" data-id="${esc(m.id)}">Remove</button>
+              ${this._holdFor === m.id ? this._holdForm(m) : ""}</li>`)
           .join("")}</ul>`
       : `<p class="empty">No family members yet.</p>`;
     const form = edit?.collection === "members" ? this._memberForm(edit.item) : `<button class="btn primary" data-new="members">Add a family member</button>`;
@@ -2687,6 +2712,15 @@ class FamilyPanel extends HTMLElement {
       this._edit = { collection: ds.new, item: null };
       this._rewardKind = null;
       this._render();
+    } else if (ds.holdOpen) {
+      this._holdFor = ds.holdOpen;
+      this._holdChoice = "1";
+      this._render();
+    } else if ("holdCancel" in ds) {
+      this._holdFor = null;
+      this._render();
+    } else if (ds.holdLift) {
+      this._call({ type: `${DOMAIN}/hold`, member_id: ds.holdLift, lift: true }, "Hold lifted.");
     } else if (ds.edit) {
       const list = ds.edit === "chores" ? this._data.all_chores : ds.edit === "routines" ? this._data.all_routines : this._data[ds.edit];
       this._edit = { collection: ds.edit, item: list.find((x) => x.id === ds.id) };
@@ -2712,6 +2746,15 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.holdChoice !== undefined) {
+      const form = ev.target.closest("form");
+      const reason = form?.querySelector('[name="reason"]')?.value || "";
+      this._holdChoice = ev.target.value;
+      this._render();
+      const again = this.shadowRoot.querySelector('[data-hold-form] [name="reason"]');
+      if (again) again.value = reason;
+      return;
+    }
     if (ev.target.dataset.historyMember !== undefined) {
       this._historyFilter = { ...(this._historyFilter || { text: "" }), member: ev.target.value };
       const list = this.shadowRoot.querySelector("[data-history-list]");
@@ -2897,6 +2940,16 @@ class FamilyPanel extends HTMLElement {
       const v = this._formValues(form);
       const number = (x) => Math.max(0, Math.round(Number(x) || 0));
       return this._call({ type: `${DOMAIN}/settings`, bonus_all_done: number(v.bonus_all_done), streak_days: number(v.streak_days), streak_bonus: number(v.streak_bonus) }, "Bonuses saved.");
+    }
+    if (form.dataset.holdForm) {
+      const v = this._formValues(form);
+      const msg = { type: `${DOMAIN}/hold`, member_id: form.dataset.holdForm, reason: v.reason || null };
+      if (v.for === "until") {
+        if (!v.until) return this._toast("Pick the last day of the hold.", true);
+        msg.until = v.until;
+      } else msg.days = Number(v.for);
+      this._holdFor = null;
+      return this._call(msg, "Rewards on hold.");
     }
     if (form.dataset.adjust) {
       const values = this._formValues(form);

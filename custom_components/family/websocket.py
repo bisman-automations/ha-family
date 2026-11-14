@@ -54,6 +54,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_given,
         ws_approve,
         ws_adjust,
+        ws_hold,
         ws_save,
         ws_delete,
         ws_move,
@@ -403,6 +404,32 @@ async def ws_approve(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_adjust(hass, connection, msg, manager) -> dict[str, Any]:
     entry = manager.adjust(msg["member_id"], msg["points"], msg.get("reason"))
     return {"entry": entry, "points": manager.points(msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/hold",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Optional("days"): vol.All(int, vol.Range(min=0, max=90)),
+        vol.Optional("until"): str,
+        vol.Optional("reason"): vol.Any(None, str),
+        vol.Optional("lift", default=False): bool,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_hold(hass, connection, msg, manager) -> dict[str, Any]:
+    """Put a hold on someone's rewards for a while, or lift it (parents)."""
+    member = manager.hold_rewards(
+        msg["member_id"],
+        days=msg.get("days"),
+        until=msg.get("until"),
+        reason=msg.get("reason"),
+        lift=msg["lift"],
+    )
+    return {"member": member}
 
 
 @websocket_api.websocket_command(

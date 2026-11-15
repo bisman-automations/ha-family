@@ -301,6 +301,8 @@ async def test_section_order(hass: HomeAssistant, client):
             "quests",
             "pets",
             "auctions",
+            "market",
+            "theme",
             "reading",
         ]
     )

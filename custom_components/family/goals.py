@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from .manager import FamilyManager
 
 MAX_GOALS = 6
+# Shown and announced once each on the way to a goal.
+MILESTONES = (25, 50, 75)
+EVENT_GOAL_MILESTONE = "family_goal_milestone"
 
 
 def _error(message: str) -> Exception:
@@ -79,6 +82,8 @@ class FamilyGoals:
             old = self._get(goal_id)
             goal["id"] = goal_id
             goal["since"] = now if restart else old.get("since") or now
+            if not restart and goal["target"] == old["target"]:
+                goal["milestones"] = list(old.get("milestones") or [])
             # A bigger target makes a reached goal open again.
             if (
                 not restart
@@ -123,16 +128,28 @@ class FamilyGoals:
         self.save(raw, first, restart)
 
     def check(self) -> None:
-        """Goals just reached: say so once (an event to automate on)."""
+        """Goals just reached, or a quarter, half or three quarters of the way:
+        say so once each (events to automate on)."""
         for goal in self.items:
             if goal.get("reached_at"):
                 continue
-            if (
-                model.goal_progress(
-                    self.manager.entries, goal.get("since"), self.who(goal)
-                )
-                < goal["target"]
-            ):
+            progress = model.goal_progress(
+                self.manager.entries, goal.get("since"), self.who(goal)
+            )
+            done = goal.setdefault("milestones", [])
+            for percent in MILESTONES:
+                if percent not in done and progress * 100 >= goal["target"] * percent:
+                    done.append(percent)
+                    if progress < goal["target"]:
+                        self.manager.hass.bus.async_fire(
+                            EVENT_GOAL_MILESTONE,
+                            {
+                                "id": goal["id"],
+                                "name": goal["name"],
+                                "percent": percent,
+                            },
+                        )
+            if progress < goal["target"]:
                 continue
             goal["reached_at"] = dt_util.now().isoformat()
             self.manager.hass.bus.async_fire(
@@ -160,6 +177,7 @@ class FamilyGoals:
             "since": goal.get("since"),
             "members": goal.get("members"),
             "kids": bool(goal.get("kids")),
+            "milestone": max(goal.get("milestones") or [0]),
             # Whose points count and whose pages show it (None: everyone's).
             "who": self.who(goal),
         }

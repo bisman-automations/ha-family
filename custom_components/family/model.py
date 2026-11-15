@@ -64,6 +64,8 @@ SECTIONS = (
     "quests",
     "pets",
     "auctions",
+    "market",
+    "theme",
     "reading",
     "pick",
     "claims",
@@ -1495,6 +1497,7 @@ KIND_HIGH_FIVE = "high_five"  # no points: a thank-you from one member to anothe
 HIGH_FIVE_EMOJI = ("🙌", "⭐", "❤️", "👏", "🎉", "🤝")
 BONUS_TIMER = "timer"  # beat a chore's timer
 BONUS_BEAT_CLOCK = "beat_clock"  # a routine finished before the time to leave
+BONUS_HELPER = "helper"  # helped a brother or sister finish a chore
 MAX_TIMER_MINUTES = 180
 
 
@@ -1812,3 +1815,22 @@ def age_points(points: int, age: int | None, rule: dict[str, Any] | None) -> int
     if years <= 0:
         return points
     return round(points * (100 + years * int(rule["percent"])) / 100)
+
+
+WEEKDAY_NAMES = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+
+
+def weekday_names(days: list[int]) -> str:
+    """ "Saturday", "Saturday and Sunday", "Friday, Saturday and Sunday"."""
+    names = [WEEKDAY_NAMES[d] for d in sorted(days) if 0 <= d < 7]
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + f" and {names[-1]}"

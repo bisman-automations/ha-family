@@ -21,8 +21,9 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import dt as dt_util
 
-from . import model, reading
+from . import extras, model, reading
 from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
 from .parent_pass import PIN_KEY, PINS_KEY
@@ -124,6 +125,9 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_gift_text,
         ws_bank_spend,
         ws_month_photos,
+        ws_grade_add,
+        ws_theme_keep,
+        ws_payouts,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -731,6 +735,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("homework"): vol.Any(None, dict),
         vol.Optional("age_points"): vol.Any(None, dict),
         vol.Optional("reward_list"): vol.Any(None, str),
+        vol.Optional("helper_bonus"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("grade_points"): vol.Any(None, dict),
+        vol.Optional("theme_week"): vol.Any(None, dict),
         vol.Optional("reminder_tts"): vol.Any(None, str),
         vol.Optional("weather_entity"): vol.Any(None, str),
         vol.Optional("links"): [dict],
@@ -1857,3 +1864,55 @@ async def ws_bank_spend(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_month_photos(hass, connection, msg, manager) -> dict[str, Any]:
     """The month's chore photos, for the memory wall (parents)."""
     return {"photos": manager.month_photos(msg["months_ago"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/grade/add",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Optional("subject"): vol.Any(None, str),
+        vol.Required("grade"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_grade_add(hass, connection, msg, manager) -> dict[str, Any]:
+    """A report card or test grade: its points (parents)."""
+    by = await _by(hass, connection, msg, manager)
+    return {
+        "entry": extras.add_grade(
+            manager, msg["member_id"], msg.get("subject"), msg["grade"], by
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/theme/keep",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_theme_keep(hass, connection, msg, manager) -> dict[str, Any]:
+    """A child kept today's theme (open to everyone, checked like a chore)."""
+    return {"entry": extras.keep_theme(manager, msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/payouts",
+        vol.Optional(PASS): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_payouts(hass, connection, msg, manager) -> dict[str, Any]:
+    """Money cashed out and paid, month by month (parents)."""
+    return {
+        "months": extras.payouts(manager.entries, manager.members, dt_util.now().date())
+    }

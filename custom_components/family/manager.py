@@ -26,7 +26,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import allowance_rule, model, reading, savings, team
+from . import allowance_rule, extras, model, reading, savings, team
 from .auctions import Auctions
 from .away import Away
 from .bank import ScreenBank
@@ -925,7 +925,22 @@ class FamilyManager:
         self.entries.append(entry)
         if helping:
             entry["together"] = [member_id, *(h["id"] for h in helping)]
+        helper_bonus = int(self.settings.get("helper_bonus") or 0) if helping else 0
         for helper in helping:
+            if helper_bonus:
+                # Extra for helping a brother or sister finish.
+                self.entries.append(
+                    {
+                        "id": _id(),
+                        "at": entry["at"],
+                        "kind": model.KIND_BONUS,
+                        "bonus": model.BONUS_HELPER,
+                        "member": helper["id"],
+                        "title": f"Helped {member['name']} with {chore['name']}",
+                        "points": helper_bonus,
+                        "for_entry": entry["id"],
+                    }
+                )
             # Their share: checked like any chore, undone with it, and not
             # counted as their own chore done (it was the other one's).
             self.entries.append(
@@ -1636,6 +1651,16 @@ class FamilyManager:
             self.settings["allowance_rule"] = allowance_rule.clean_rule(
                 raw.get("allowance_rule")
             )
+        if "helper_bonus" in raw:
+            self.settings["helper_bonus"] = model.clean_points(
+                raw.get("helper_bonus") or 0, "The helper bonus"
+            )
+        if "grade_points" in raw:
+            self.settings["grade_points"] = extras.clean_grade_points(
+                raw.get("grade_points")
+            )
+        if "theme_week" in raw:
+            self.settings["theme_week"] = extras.clean_theme(raw.get("theme_week"))
         if "reward_list" in raw:
             todo = raw.get("reward_list") or None
             if todo is not None and not str(todo).startswith("todo."):
@@ -1898,6 +1923,14 @@ class FamilyManager:
         )
         return member
 
+    def _require_shop_day(self, reward: dict[str, Any]) -> None:
+        """A reward with shop days can only be bought on those days."""
+        days = reward.get("shop_days") or []
+        if days and dt_util.now().weekday() not in days:
+            raise FamilyError(
+                f"{reward['name']} can only be bought on {model.weekday_names(days)}"
+            )
+
     def _require_eligible(self, member: dict[str, Any], reward: dict[str, Any]) -> None:
         """Refuse a redeem or a goal when this reward isn't for them."""
         if model.reward_for(reward, member["id"]):
@@ -1955,6 +1988,7 @@ class FamilyManager:
         reward = self.reward(reward_id)
         self._require_eligible(member, reward)
         self._require_not_held(member)
+        self._require_shop_day(reward)
         cost = int(reward.get("points", 0))
         # Saved up for it: a parent's match pays part of it.
         match = (
@@ -2036,6 +2070,7 @@ class FamilyManager:
             raise FamilyError("Pick who's sharing it")
         members = [self.member(i) for i in ids]
         reward = self.reward(reward_id)
+        self._require_shop_day(reward)
         for member in members:
             self._require_eligible(member, reward)
             self._require_not_held(member)
@@ -2619,6 +2654,8 @@ class FamilyManager:
             "kind": kind,
             "emoji": model.clean_emoji(raw.get("emoji"), 4),
             # Each person at most once a day or a week; None: any time.
+            # Only for sale on these weekdays (Monday 0); none: any day.
+            "shop_days": model.clean_days(raw.get("shop_days")),
             "limit": raw.get("limit")
             if raw.get("limit") in model.REWARD_LIMITS
             else None,
@@ -3070,6 +3107,8 @@ class FamilyManager:
                 for m in self.members
             },
             "saving_next": savings.next_bonus(self),
+            "theme": extras.theme_today(self, today),
+            "grade_points": self.settings.get("grade_points") or extras.DEFAULT_GRADES,
             "beat_clock": int(self.settings.get("beat_clock_points") or 0),
             "challenge_points": int(self.settings.get("challenge_points") or 0),
             "mood_check": bool(self.settings.get("mood_check")),

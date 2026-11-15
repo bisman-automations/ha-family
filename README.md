@@ -164,6 +164,8 @@ wall: true
 - **Wishlist.** On a reward's sheet, **♡ On my wishlist** marks up to three rewards someone wants most. Parents see **Most wanted** on the **Rewards** tab.
 - **Chore auctions.** Bid how few points you'd do a job for; the lowest bid when time's up gets it.
 - **Reading.** **Log reading** with the minutes (and the book) for points, checked like a chore.
+- **Swap market.** Chores offered to anyone, in one place: tap one to take it (a parent still says yes).
+- **Theme week.** While a theme week is on, tap each day you kept it.
 - **Homework timer.** Start it when sitting down to homework and tap it when done; points for every so many minutes, checked like a chore.
 - **Keep your points.** With the saving bonus on, a kid's page shows what they'll get on allowance day if they keep their points.
 - **Trade for the week.** When offering a chore to trade, **For the rest of the week** makes it theirs through Sunday.
@@ -258,6 +260,11 @@ Every card in the parent controls folds away: tap its title. A folded card stays
 - **Gift ideas** (under **Rewards**). What each child added under **Gift ideas** on their page, plus their wishlist. **Share** sends it as a message (or copies it) for grandparents and friends.
 - **Chore auctions** (under **Chores**). Put a bigger job up for auction, with the most points it's worth and how long bidding lasts. The kids bid how few points they'd do it for; when time's up, or you press **Close now**, the lowest bid (the first, on a tie) gets it as a one-off chore worth their bid. Nobody bid: nothing happens.
 - **Team chores.** Under a chore's **How it's done**, **Team chore**: each person ticked ticks it, and their points count only once they all have (until then it says who's still to do it).
+- **Grades** (under **To check**). Pick who, the subject and the grade; its points are given straight away. The grades and their points are set under **Family**.
+- **Money paid out** (under **History**). Each month's cash outs and how much was paid, per child, with **⬇︎ Spreadsheet**.
+- **Theme week** (under **Family**). A theme, points a day and its first and last day; each child taps once a day that they kept it, checked like a chore.
+- **Shop days** (when editing a reward). Tick the days it can be bought; none ticked is any day.
+- **Helping out** (under **Family**, with reading). Extra points for each helper when a chore is marked done with helpers.
 - **Photos of the month** (under **History**). Every chore photo from this month or last on one page, with **Print**.
 - **How hard** (when editing a chore). Easy, medium or hard, shown as stars on the tile.
 - **Homework, points by age and rewards to buy** (under **Family**, with reading). Homework timer: points for every so many minutes, up to a limit a day. Points by age: older kids get a percentage more for each year over an age you pick (needs their birthday and year born). Rewards to buy: when someone gets a reward a parent hands out, it's added to the to-do list you pick ("A new toy for Alex").
@@ -322,6 +329,8 @@ For automations, for example to send a message or play a sound:
 | `family_chore_done` | A chore is marked done. | `member`, `member_id`, `chore`, `points`, `balance` |
 | `family_chore_reviewed` | A parent checked a chore, or it was counted as done automatically. | `member`, `member_id`, `chore`, `approved`, `automatic` (when counted automatically), `points`, `penalty` (extra points taken), `balance` |
 | `family_bonus_given` | Someone earned bonus points. | `member`, `member_id`, `bonus` (`all_done` or `streak`), `title`, `points`, `balance` |
+| `family_goal_milestone` | A family goal got a quarter, halfway or three quarters of the way, once each. | `id`, `name`, `percent` (25, 50 or 75) |
+| `family_grade_added` | A parent gave points for a grade. | `member`, `member_id`, `grade`, `points` |
 | `family_goal_reached` | A family goal was reached. | `id`, `name`, `target`, `members` (when it's for some of you), `kids` |
 | `family_badge_earned` | Someone earned a badge. | `member`, `member_id`, `badge` (its key, such as `streak_7`), `name` |
 | `family_rewards_held` | A parent put someone's rewards on hold, or lifted it. | `member`, `member_id`, `until` (empty when lifted), `reason` |

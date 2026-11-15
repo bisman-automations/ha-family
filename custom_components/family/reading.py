@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from .manager import FamilyManager
 
 READING_CHORE = "reading"
+HOMEWORK_CHORE = "homework"
+# What each log is called, and the setting its rule is in.
+LOGS = {READING_CHORE: ("Read", "reading"), HOMEWORK_CHORE: ("Homework", "homework")}
 DEFAULT_READING = {"block_minutes": 0, "points": 0, "max_minutes": 120}
 MAX_LOG_MINUTES = 600
 
@@ -60,11 +63,13 @@ def reading_points(minutes: int, rule: dict[str, int]) -> int:
     return (minutes // block) * int(rule.get("points") or 0)
 
 
-def minutes_today(entries: list[dict[str, Any]], member_id: str, day) -> int:
+def minutes_today(
+    entries: list[dict[str, Any]], member_id: str, day, kind: str = READING_CHORE
+) -> int:
     return sum(
         int(e.get("minutes") or 0)
         for e in entries
-        if e.get("chore_id") == READING_CHORE
+        if e.get("chore_id") == kind
         and e.get("member") == member_id
         and e.get("review") != model.REVIEW_REJECTED
         and model.entry_day(e) == day
@@ -72,20 +77,28 @@ def minutes_today(entries: list[dict[str, Any]], member_id: str, day) -> int:
 
 
 def log(
-    manager: FamilyManager, member_id: str, minutes: Any, book: Any = None
+    manager: FamilyManager,
+    member_id: str,
+    minutes: Any,
+    book: Any = None,
+    kind: str = READING_CHORE,
 ) -> dict[str, Any]:
-    """Minutes read: a chore entry worth its whole blocks, checked later."""
+    """Minutes read (or of homework, timed on the dashboard): a chore entry
+    worth its whole blocks, checked later."""
+    if kind not in LOGS:
+        raise _error("Log reading or homework")
+    verb, setting = LOGS[kind]
     member = manager.member(member_id)
-    rule = manager.settings.get("reading") or DEFAULT_READING
+    rule = manager.settings.get(setting) or DEFAULT_READING
     if not rule.get("block_minutes"):
-        raise _error("Reading points aren't set up")
+        raise _error(f"{verb} points aren't set up")
     read = int(minutes or 0)
     if not 1 <= read <= MAX_LOG_MINUTES:
         raise _error(f"Log 1 to {MAX_LOG_MINUTES} minutes")
     now = dt_util.now()
     if manager.away.on(now.date()):
         raise _error("Chores are off while the family is away")
-    before = minutes_today(manager.entries, member_id, now.date())
+    before = minutes_today(manager.entries, member_id, now.date(), kind)
     most = int(rule.get("max_minutes") or 0)
     if most:
         read = min(read, most - before)
@@ -99,9 +112,9 @@ def log(
         "at": now.isoformat(),
         "kind": model.KIND_CHORE,
         "member": member_id,
-        "title": f"Read {read} minutes" + (f": {title_book}" if title_book else ""),
+        "title": f"{verb} {read} minutes" + (f": {title_book}" if title_book else ""),
         "points": points,
-        "chore_id": READING_CHORE,
+        "chore_id": kind,
         "minutes": read,
         "review": model.REVIEW_PENDING,
         "penalty": 0,

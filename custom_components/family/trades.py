@@ -15,6 +15,7 @@ are anyone's already, and to-do items come back by their list).
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -27,6 +28,11 @@ OFFERED = "offered"
 TAKEN = "taken"
 APPROVED = "approved"
 KIND_TRADE_PAY = "trade_pay"  # points paid for taking someone's chore
+
+
+def _last_day(trade: dict[str, Any]) -> str:
+    """The last day a trade is for (a whole-week one runs to Sunday)."""
+    return str(trade.get("until") or trade.get("day") or "")
 
 
 def _error(message: str) -> Exception:
@@ -50,10 +56,10 @@ class Trades:
 
     @property
     def items(self) -> list[dict[str, Any]]:
-        """Today's trades (older ones are dropped)."""
+        """Trades still on: today's, and whole-week ones until Sunday."""
         today = dt_util.now().date().isoformat()
-        if any(t.get("day") != today for t in self._items):
-            self._items[:] = [t for t in self._items if t.get("day") == today]
+        if any(_last_day(t) < today for t in self._items):
+            self._items[:] = [t for t in self._items if _last_day(t) >= today]
         return self._items
 
     def _get(self, trade_id: str) -> dict[str, Any]:
@@ -71,7 +77,7 @@ class Trades:
         for trade in self._items:
             if (
                 trade.get("status") == APPROVED
-                and trade.get("day") == today
+                and trade.get("day", "") <= today <= _last_day(trade)
                 and trade.get("chore_id") == chore["id"]
                 and trade.get("from") in members
             ):
@@ -81,7 +87,12 @@ class Trades:
         return chore
 
     def offer(
-        self, member_id: str, chore_id: str, to: str | None = None, pay: int = 0
+        self,
+        member_id: str,
+        chore_id: str,
+        to: str | None = None,
+        pay: int = 0,
+        week: bool = False,
     ) -> dict[str, Any]:
         manager = self.manager
         member = manager.member(member_id)
@@ -121,6 +132,10 @@ class Trades:
             # Points the offerer pays whoever takes it, on a parent's yes.
             "pay": pay,
         }
+        if week:
+            # The rest of the week, through Sunday.
+            today = dt_util.now().date()
+            trade["until"] = (today + timedelta(days=6 - today.weekday())).isoformat()
         self.items.append(trade)
         manager.changed()
         return trade

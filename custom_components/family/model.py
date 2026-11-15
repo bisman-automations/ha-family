@@ -1144,14 +1144,21 @@ def section_order(order: Iterable[str] | None) -> list[str]:
 GOAL_KINDS = (KIND_CHORE, KIND_BONUS)
 
 
-def goal_progress(entries: list[dict[str, Any]], since: str | None) -> int:
-    """Points earned together since ``since`` (an ISO time)."""
+def goal_progress(
+    entries: list[dict[str, Any]],
+    since: str | None,
+    members: list[str] | None = None,
+) -> int:
+    """Points earned together since ``since`` (an ISO time), by everyone or
+    only by ``members``."""
     if not since:
         return 0
     start = datetime.fromisoformat(since)
     total = 0
     for entry in entries:
         if entry.get("kind") not in GOAL_KINDS:
+            continue
+        if members and entry.get("member") not in members:
             continue
         if entry.get("review") == REVIEW_REJECTED:
             continue
@@ -1772,3 +1779,36 @@ def money_owed(entries: Iterable[dict[str, Any]]) -> dict[str, float]:
                 owed.get(e["member"], 0) + float(e.get("money") or 0), 2
             )
     return owed
+
+
+# ---- difficulty and age (2.14.0) ---------------------------------------------------
+
+DIFFICULTIES = ("easy", "medium", "hard")
+MAX_AGE_PERCENT = 50
+
+
+def clean_age_points(raw: Any) -> dict[str, int] | None:
+    """{percent, from_age}: older kids get ``percent`` more per year over
+    ``from_age``. None (or 0 percent): off."""
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("Points by age need a percent and an age")
+    percent = int(raw.get("percent") or 0)
+    from_age = int(raw.get("from_age") or 0)
+    if not 0 <= percent <= MAX_AGE_PERCENT:
+        raise ValueError(f"Points by age go up 0 to {MAX_AGE_PERCENT}% a year")
+    if not 0 <= from_age <= 18:
+        raise ValueError("Start from an age of 0 to 18")
+    return {"percent": percent, "from_age": from_age} if percent else None
+
+
+def age_points(points: int, age: int | None, rule: dict[str, Any] | None) -> int:
+    """A chore's points for someone this age: ``percent`` more for each year
+    over ``from_age``, rounded. Unknown ages and no rule: as set."""
+    if not rule or age is None or points <= 0:
+        return points
+    years = age - int(rule.get("from_age") or 0)
+    if years <= 0:
+        return points
+    return round(points * (100 + years * int(rule["percent"])) / 100)

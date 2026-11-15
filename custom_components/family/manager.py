@@ -252,6 +252,8 @@ class FamilyManager:
         self.chore_ideas = ChoreIdeas(self)
         self.challenges = Challenges(self)
         self.goals = FamilyGoals(self)
+        # Members whose person is a Home Assistant admin (async_refresh_parents).
+        self.parent_ids: set[str] = set()
         self.auctions = Auctions(self)
         self.bank = ScreenBank(self)
         self.moods = Moods(self)
@@ -298,6 +300,7 @@ class FamilyManager:
         self.chore_ideas.load(data)
         self.challenges.load(data)
         self.goals.load()
+        await self.async_refresh_parents()
         self.auctions.load(data)
         self.bank.load(data)
         self.moods.load(data)
@@ -377,6 +380,17 @@ class FamilyManager:
 
     async def is_parent(self, member: dict[str, Any]) -> bool:
         return await self._is_parent(member)
+
+    async def async_refresh_parents(self) -> None:
+        """Who the parents are (admins), kept for kids-only goals."""
+        found = {m["id"] for m in self.members if await self._is_parent(m)}
+        if found != self.parent_ids:
+            self.parent_ids = found
+            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+
+    def kid_ids(self) -> list[str]:
+        """Everyone in the family who isn't a parent."""
+        return [m["id"] for m in self.members if m["id"] not in self.parent_ids]
 
     @callback
     def save(self) -> None:
@@ -560,6 +574,9 @@ class FamilyManager:
             self.photos.async_prune(), "family photo prune"
         )
         changed = self._prune_board()
+        self.hass.async_create_background_task(
+            self.async_refresh_parents(), "family parents"
+        )
         now = dt_util.now()
         if savings.give_birthday_bonus(self, now):
             changed = True
@@ -871,7 +888,11 @@ class FamilyManager:
                 f"{chore['name']} is already done or isn't {member['name']}'s"
             )
         factor = self.boosts.factor(chore_id, now)
-        total = int(chore.get("points", 0)) * factor
+        total = model.age_points(
+            int(chore.get("points", 0)) * factor,
+            model.age_on(member, now.date()),
+            self.settings.get("age_points"),
+        )
         shares = model.split_evenly(total, [member_id, *(h["id"] for h in helping)])
         entry = {
             "id": _id(),
@@ -985,6 +1006,27 @@ class FamilyManager:
             # Not stored: the points wait until these have ticked it too.
             entry = {**entry, "team_waiting": waiting}
         return entry
+
+    @callback
+    def _shop_for(self, reward: dict[str, Any], who: str) -> None:
+        """A reward a parent hands out goes on the shopping list, if one is
+        picked (``settings.reward_list``), such as "A new toy for Alex"."""
+        todo = self.settings.get("reward_list")
+        if not todo or self.hass.states.get(todo) is None:
+            return
+
+        async def _add() -> None:
+            try:
+                await self.hass.services.async_call(
+                    "todo",
+                    "add_item",
+                    {"entity_id": todo, "item": f"{reward['name']} for {who}"},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - the reward still counts
+                _LOGGER.warning("Couldn't add %s to the list: %s", reward["name"], err)
+
+        self.hass.async_create_background_task(_add(), "family reward list")
 
     def only_when_ok(self, chore: dict[str, Any]) -> bool:
         """A chore's "only when": a device (or Daily Routine's Kind of day)
@@ -1348,6 +1390,22 @@ class FamilyManager:
         self._changed()
         return ideas
 
+    def month_photos(self, months_ago: int) -> list[dict[str, Any]]:
+        """Chores with a photo in a month (0: this one), oldest first."""
+        start, end = month_bounds(dt_util.now().date(), months_ago)
+        return [
+            {
+                "entry_id": e["id"],
+                "title": e.get("title", ""),
+                "member": e["member"],
+                "at": e["at"],
+            }
+            for e in self.entries
+            if e.get("photo")
+            and e.get("review") != model.REVIEW_REJECTED
+            and start <= model.entry_day(e) < end
+        ]
+
     def gift_text(self, member_id: str) -> str:
         """Gift ideas and wishlist for grandparents and friends, as text."""
         member = self.member(member_id)
@@ -1578,6 +1636,15 @@ class FamilyManager:
             self.settings["allowance_rule"] = allowance_rule.clean_rule(
                 raw.get("allowance_rule")
             )
+        if "reward_list" in raw:
+            todo = raw.get("reward_list") or None
+            if todo is not None and not str(todo).startswith("todo."):
+                raise FamilyError("Pick a to-do list for rewards to buy")
+            self.settings["reward_list"] = todo
+        if "age_points" in raw:
+            self.settings["age_points"] = model.clean_age_points(raw.get("age_points"))
+        if "homework" in raw:
+            self.settings["homework"] = reading.clean_reading(raw.get("homework"))
         if "beat_clock_points" in raw:
             self.settings["beat_clock_points"] = model.clean_points(
                 raw.get("beat_clock_points") or 0, "Beat the clock"
@@ -1950,6 +2017,7 @@ class FamilyManager:
         self._changed()
         if not given_now:
             self.notices.reward_to_give(entry, member)
+            self._shop_for(reward, member["name"])
         self.hass.bus.async_fire(
             EVENT_REWARD_REDEEMED,
             self._redeemed_event(
@@ -2066,6 +2134,7 @@ class FamilyManager:
         self.notices.clear(group_id)
         if not given_now:
             self.notices.reward_to_give(first, {"name": names})
+            self._shop_for(reward, names)
         for entry in entries:
             self.hass.bus.async_fire(
                 EVENT_REWARD_REDEEMED,
@@ -2376,6 +2445,9 @@ class FamilyManager:
         }
         new = self._upsert(self.members, member)
         self._changed(members=new)
+        self.hass.async_create_background_task(
+            self.async_refresh_parents(), "family parents"
+        )
         return member
 
     @callback
@@ -2476,6 +2548,10 @@ class FamilyManager:
             "only_when": _only_when(raw.get("only_when")),
             # When it's done, also start this script, scene or button.
             "on_done": _on_done(raw.get("on_done")),
+            # How hard it is ("", easy, medium, hard): shown on the tile.
+            "difficulty": raw.get("difficulty")
+            if raw.get("difficulty") in model.DIFFICULTIES
+            else "",
         }
         if chore["pool"] and chore["turns"]:
             raise FamilyError(
@@ -2718,6 +2794,7 @@ class FamilyManager:
             self.picks.forget_member(item_id)
             self.chore_ideas.forget_member(item_id)
             self.auctions.forget_member(item_id)
+            self.goals.forget_member(item_id)
             self.bank.forget_member(item_id)
             self.moods.forget_member(item_id)
             self.quests.forget_member(item_id)
@@ -2985,6 +3062,14 @@ class FamilyManager:
                 m["id"]: reading.minutes_today(self.entries, m["id"], today)
                 for m in self.members
             },
+            "homework": reading.public_rule(self.settings.get("homework")),
+            "homework_today": {
+                m["id"]: reading.minutes_today(
+                    self.entries, m["id"], today, reading.HOMEWORK_CHORE
+                )
+                for m in self.members
+            },
+            "saving_next": savings.next_bonus(self),
             "beat_clock": int(self.settings.get("beat_clock_points") or 0),
             "challenge_points": int(self.settings.get("challenge_points") or 0),
             "mood_check": bool(self.settings.get("mood_check")),

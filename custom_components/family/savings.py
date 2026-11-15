@@ -107,3 +107,21 @@ def give_birthday_bonus(manager: FamilyManager, now: datetime | None = None) -> 
 
 def birthday_today(member: dict[str, Any], now: datetime | None = None) -> bool:
     return model.birthday_on(member.get("birthday"), (now or dt_util.now()).date())
+
+
+def next_bonus(manager: FamilyManager) -> dict[str, Any] | None:
+    """What each member's saving bonus would be if they kept their points
+    until it's given, and the weekday it comes (Monday 0). None: off."""
+    settings = manager.settings
+    percent = int(settings.get("saving_percent") or 0)
+    if percent <= 0:
+        return None
+    most = int(settings.get("saving_max") or 0)
+    return {
+        "weekday": int(settings.get("allowance_day", model.DEFAULT_ALLOWANCE_DAY)),
+        "percent": percent,
+        "points": {
+            m["id"]: model.saving_bonus(manager.points(m["id"]), percent, most)
+            for m in manager.members
+        },
+    }

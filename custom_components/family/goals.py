@@ -67,6 +67,13 @@ class FamilyGoals:
             raise _error(str(err)) from err
         if goal is None:
             raise _error("Give the goal a name and a target")
+        # Only some of the family (brothers and sisters saving together);
+        # None: everyone.
+        goal["kids"] = bool(raw.get("kids"))
+        picked = [] if goal["kids"] else self.manager.known_members(raw.get("members"))
+        goal["members"] = picked if len(picked) >= 2 else None
+        if raw.get("members") and not goal["kids"] and goal["members"] is None:
+            raise _error("A goal for some of the family needs two or more people")
         now = dt_util.now().isoformat()
         if goal_id:
             old = self._get(goal_id)
@@ -90,6 +97,19 @@ class FamilyGoals:
         self.check()
         return goal
 
+    def who(self, goal: dict[str, Any]) -> list[str] | None:
+        """The members a goal is for: the kids, the people picked, or None
+        for everyone."""
+        if goal.get("kids"):
+            return self.manager.kid_ids()
+        return goal.get("members")
+
+    def forget_member(self, member_id: str) -> None:
+        for goal in self.items:
+            if goal.get("members"):
+                left = [m for m in goal["members"] if m != member_id]
+                goal["members"] = left if len(left) >= 2 else None
+
     def delete(self, goal_id: str) -> None:
         self._writable().remove(self._get(goal_id))
 
@@ -108,18 +128,28 @@ class FamilyGoals:
             if goal.get("reached_at"):
                 continue
             if (
-                model.goal_progress(self.manager.entries, goal.get("since"))
+                model.goal_progress(
+                    self.manager.entries, goal.get("since"), self.who(goal)
+                )
                 < goal["target"]
             ):
                 continue
             goal["reached_at"] = dt_util.now().isoformat()
             self.manager.hass.bus.async_fire(
                 EVENT_GOAL_REACHED,
-                {"id": goal["id"], "name": goal["name"], "target": goal["target"]},
+                {
+                    "id": goal["id"],
+                    "name": goal["name"],
+                    "target": goal["target"],
+                    "members": goal.get("members"),
+                    "kids": bool(goal.get("kids")),
+                },
             )
 
     def _view(self, goal: dict[str, Any]) -> dict[str, Any]:
-        progress = model.goal_progress(self.manager.entries, goal.get("since"))
+        progress = model.goal_progress(
+            self.manager.entries, goal.get("since"), self.who(goal)
+        )
         return {
             "id": goal["id"],
             "name": goal["name"],
@@ -128,6 +158,10 @@ class FamilyGoals:
             "progress": min(progress, goal["target"]),
             "reached": bool(goal.get("reached_at")) or progress >= goal["target"],
             "since": goal.get("since"),
+            "members": goal.get("members"),
+            "kids": bool(goal.get("kids")),
+            # Whose points count and whose pages show it (None: everyone's).
+            "who": self.who(goal),
         }
 
     def snapshot(self) -> list[dict[str, Any]]:

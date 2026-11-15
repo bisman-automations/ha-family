@@ -123,6 +123,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_gift_idea,
         ws_gift_text,
         ws_bank_spend,
+        ws_month_photos,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -727,6 +728,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("reading"): vol.Any(None, dict),
         vol.Optional("allowance_rule"): vol.Any(None, dict),
         vol.Optional("beat_clock_points"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("homework"): vol.Any(None, dict),
+        vol.Optional("age_points"): vol.Any(None, dict),
+        vol.Optional("reward_list"): vol.Any(None, str),
         vol.Optional("reminder_tts"): vol.Any(None, str),
         vol.Optional("weather_entity"): vol.Any(None, str),
         vol.Optional("links"): [dict],
@@ -921,6 +925,7 @@ async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("chore_id"): str,
         vol.Optional("to"): vol.Any(None, str),
         vol.Optional("pay"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
+        vol.Optional("week"): bool,
     }
 )
 @websocket_api.async_response
@@ -929,7 +934,11 @@ async def ws_trade_offer(hass, connection, msg, manager) -> dict[str, Any]:
     """Offer one of your own chores today to someone else (or anyone)."""
     return {
         "trade": manager.trades.offer(
-            msg["member_id"], msg["chore_id"], msg.get("to"), msg.get("pay") or 0
+            msg["member_id"],
+            msg["chore_id"],
+            msg.get("to"),
+            msg.get("pay") or 0,
+            bool(msg.get("week")),
         )
     }
 
@@ -1649,6 +1658,8 @@ async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("emoji"): vol.Any(None, str),
         vol.Required("target"): vol.Coerce(int),
         vol.Optional("restart"): bool,
+        vol.Optional("members"): vol.Any(None, [str]),
+        vol.Optional("kids"): bool,
     }
 )
 @_require_parent
@@ -1657,7 +1668,13 @@ async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_goal_save(hass, connection, msg, manager) -> dict[str, Any]:
     """Add a family goal, or change one (parents)."""
     goal = manager.goals.save(
-        {"name": msg["name"], "emoji": msg.get("emoji"), "target": msg["target"]},
+        {
+            "name": msg["name"],
+            "emoji": msg.get("emoji"),
+            "target": msg["target"],
+            "members": msg.get("members"),
+            "kids": bool(msg.get("kids")),
+        },
         msg.get("item_id"),
         bool(msg.get("restart")),
     )
@@ -1762,6 +1779,8 @@ async def ws_auction_cancel(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("member_id"): str,
         vol.Required("minutes"): vol.Coerce(int),
         vol.Optional("book"): vol.Any(None, str),
+        # "reading" (default) or "homework" (timed on the dashboard).
+        vol.Optional("kind"): vol.In(list(reading.LOGS)),
     }
 )
 @websocket_api.async_response
@@ -1769,7 +1788,13 @@ async def ws_auction_cancel(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_reading_log(hass, connection, msg, manager) -> dict[str, Any]:
     """Minutes read: points for whole blocks, checked like a chore."""
     return {
-        "entry": reading.log(manager, msg["member_id"], msg["minutes"], msg.get("book"))
+        "entry": reading.log(
+            manager,
+            msg["member_id"],
+            msg["minutes"],
+            msg.get("book"),
+            msg.get("kind") or reading.READING_CHORE,
+        )
     }
 
 
@@ -1817,3 +1842,18 @@ async def ws_gift_text(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_bank_spend(hass, connection, msg, manager) -> dict[str, Any]:
     """Use saved TV minutes (open to everyone, like a reward)."""
     return {"left": await manager.bank.async_spend(msg["member_id"], msg["minutes"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/photos/month",
+        vol.Optional(PASS): str,
+        vol.Optional("months_ago", default=0): vol.All(int, vol.Range(min=0, max=3)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_month_photos(hass, connection, msg, manager) -> dict[str, Any]:
+    """The month's chore photos, for the memory wall (parents)."""
+    return {"photos": manager.month_photos(msg["months_ago"])}

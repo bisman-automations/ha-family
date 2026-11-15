@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-11-15
+
+### Added
+
+- **Kids-only goals.** A family goal can be just for the kids: only their points count toward it, and it doesn't show on the parents' own pages. A goal can also be for some of you, such as two brothers saving together.
+- **Trade a chore for the week.** When offering a chore, tick **For the rest of the week** and it's theirs through Sunday, not just today.
+- **Keep your points.** With the saving bonus on, a kid's page shows what they'll get on allowance day if they keep their points until then.
+- **Homework timer.** Kids start a timer on the Family dashboard when they sit down to homework and stop it when they're done; points for every so many minutes, checked like a chore.
+- **Photos of the month.** Under **History**, every chore photo from this month (or last) on one page, to look back on or print.
+- **How hard a chore is, and points by age.** Mark chores easy, medium or hard (shown as stars on the tile). Older kids can get a percentage more points for each year over an age you pick.
+- **Rewards to buy go on a list.** Pick a to-do list, and when someone gets a reward a parent hands out, "A new toy for Alex" is added to it.
+
+### Changed
+
+- The `family_goal_reached` event also has `members` and `kids`.
+
 ## [2.13.0] - 2026-11-15
 
 ### Added
@@ -444,6 +460,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.14.0]: https://github.com/bisman-automations/ha-family/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/bisman-automations/ha-family/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/bisman-automations/ha-family/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/bisman-automations/ha-family/compare/v2.10.0...v2.11.0

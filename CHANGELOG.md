@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-11-15
+
+### Added
+
+- **Fair turns.** A chore taken in turns can now go **Fairly**: to whoever has done it least in the last 30 days, so a missed turn evens out instead of being skipped.
+- **Match on saving up.** Under **Family**, set a percent a parent adds when someone gets the reward they're saving for. At 25%, a 100-point reward takes 80 of their own points. The goal tile shows the lower price, and the match shows in History.
+- **TV time for chores done.** With TV Mgmt, a family member can get minutes of TV (on one TV, or the whole home too) as soon as they finish all of their own chores for the day. Undoing a chore takes the time back.
+- **A kid's own phone.** `/family#me`, or the Family card with `phone: true`, opens straight on the signed-in child's page with only their sections and no way to switch to someone else.
+- **Family meeting.** Under **History**, **Family meeting** shows this week for everyone, with what to talk about (chores that didn't happen, and why) and each person's chores for next week.
+- **How to do a chore.** A chore can have a few lines on how it's done and an example photo of it done right. An **ⓘ** on its tile shows them, and **Read it to me** reads them aloud.
+- **Helping out.** When the Family dashboard asks who did a chore, **Did someone help?** splits the points between whoever helped. Each share shows in that person's History, and undo takes them all back.
+- **Mobile view for links.** Each link has **Mobile view**, on to start: the page shows at phone width, the way most school and club sites look best. Untick it for a site that needs the whole width.
+
 ## [2.9.0] - 2026-11-15
 
 ### Added
@@ -390,6 +403,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.10.0]: https://github.com/bisman-automations/ha-family/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/bisman-automations/ha-family/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/bisman-automations/ha-family/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/bisman-automations/ha-family/compare/v2.6.0...v2.7.0

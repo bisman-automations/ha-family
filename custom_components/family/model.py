@@ -317,7 +317,11 @@ def hours_over(chore: dict[str, Any], now: datetime) -> bool:
 TURN_EVERY_TIME = "time"  # the next person after each time it's done
 TURN_EVERY_DAY = "day"
 TURN_EVERY_WEEK = "week"
-TURN_EVERY = (TURN_EVERY_TIME, TURN_EVERY_DAY, TURN_EVERY_WEEK)
+# Whoever has done it the least lately (FAIR_DAYS), so unpopular chores are
+# shared out fairly however often each person is around.
+TURN_EVERY_FAIR = "fair"
+FAIR_DAYS = 30
+TURN_EVERY = (TURN_EVERY_TIME, TURN_EVERY_DAY, TURN_EVERY_WEEK, TURN_EVERY_FAIR)
 
 
 def turn_member(
@@ -339,6 +343,8 @@ def turn_member(
     except KeyError, TypeError, ValueError:
         since = now
     every = chore.get("turn_every") or TURN_EVERY_TIME
+    if every == TURN_EVERY_FAIR:
+        return fair_member(chore["id"], members, entries, now)
     if every == TURN_EVERY_DAY:
         steps = (now.date() - since.date()).days
     elif every == TURN_EVERY_WEEK:
@@ -355,6 +361,53 @@ def turn_member(
             and datetime.fromisoformat(e["at"]) >= since
         )
     return members[(start + max(0, steps)) % len(members)]
+
+
+def fair_member(
+    chore_id: str,
+    members: list[str],
+    entries: Iterable[dict[str, Any]],
+    now: datetime,
+) -> str:
+    """Whoever has done this chore the fewest times in the last FAIR_DAYS;
+    on a tie, whoever did it longest ago (never first), then family order."""
+    since = now - timedelta(days=FAIR_DAYS)
+    counts = dict.fromkeys(members, 0)
+    last: dict[str, str] = {}
+    for e in entries:
+        member = e.get("member")
+        if (
+            member in counts
+            and e.get("kind") == KIND_CHORE
+            and e.get("chore_id") == chore_id
+            and e.get("review") != REVIEW_REJECTED
+        ):
+            try:
+                at = datetime.fromisoformat(e["at"])
+            except KeyError, TypeError, ValueError:
+                continue
+            if at >= since:
+                counts[member] += 1
+            last[member] = max(last.get(member, ""), e["at"])
+    return min(members, key=lambda m: (counts[m], last.get(m, ""), members.index(m)))
+
+
+def split_evenly(points: int, members: list[str]) -> dict[str, int]:
+    """Points shared by people who did a chore together: as even as whole
+    points allow, the first ones getting the extra."""
+    if not members:
+        return {}
+    share, extra = divmod(max(0, points), len(members))
+    return {m: share + (1 if i < extra else 0) for i, m in enumerate(members)}
+
+
+def match_points(cost: int, percent: int) -> int:
+    """What a parent adds when someone gets the reward they saved for: the
+    match is ``percent`` of what they put in, so they pay cost / (1 + %)."""
+    if percent <= 0 or cost <= 0:
+        return 0
+    paid = -(-cost * 100 // (100 + percent))  # rounded up
+    return cost - paid
 
 
 # How often each person can get a reward: any time, once a day or once a week.
@@ -1542,8 +1595,9 @@ MAX_LINKS = 12
 def clean_links(raw: Any, member_ids: set[str]) -> list[dict[str, Any]]:
     """Web pages a parent puts on the Family dashboard (a school menu, say).
 
-    Each is {id, name, emoji, url, member}: a name, an http(s) address, and
-    optionally one member whose page it's on (None: every page).
+    Each is {id, name, emoji, url, member, mobile}: a name, an http(s)
+    address, optionally one member whose page it's on (None: every page), and
+    whether it's shown at phone width (on unless turned off).
     """
     if not isinstance(raw, list):
         raise ValueError("Links are a list")
@@ -1567,6 +1621,7 @@ def clean_links(raw: Any, member_ids: set[str]) -> list[dict[str, Any]]:
                 "emoji": clean_emoji(item.get("emoji"), 4),
                 "url": url[:2000],
                 "member": member if member in member_ids else None,
+                "mobile": item.get("mobile") is not False,
             }
         )
     return links
@@ -1650,7 +1705,8 @@ def for_ages(
 # A chore can ask for a photo when it's marked done: "" no, "ask" (can skip),
 # "need" (can't be marked done without one).
 PHOTO_CHOICES = ("", "ask", "need")
-BONUS_CHORE_STREAK = "chore_streak"  # the same chore so many days (weeks) running
+BONUS_CHORE_STREAK = "chore_streak"
+BONUS_MATCH = "match"  # a parent's match on a reward someone saved up for  # the same chore so many days (weeks) running
 MAX_STREAK_DAYS = 60
 
 

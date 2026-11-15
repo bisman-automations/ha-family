@@ -106,6 +106,10 @@ def test_clean_links() -> None:
         ("School lunch", "a"),
         ("Library", None),
     ]
+    assert [link["mobile"] for link in links] == [True, True]
+    assert not model.clean_links(
+        [{"name": "Wide", "url": "https://example.com", "mobile": False}], set()
+    )[0]["mobile"]
     for bad in (
         [{"name": "Bad", "url": "javascript:alert(1)"}],
         [{"name": "", "url": "https://example.com"}],

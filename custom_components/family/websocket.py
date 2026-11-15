@@ -58,6 +58,8 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_unpick,
         ws_claim,
         ws_paid_all,
+        ws_chore_example,
+        ws_set_example,
         ws_meals,
         ws_given,
         ws_high_five,
@@ -254,13 +256,19 @@ async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("timer_started"): vol.Any(None, str),
         # A photo of it done (a JPEG data URL), for chores that ask.
         vol.Optional("photo"): vol.Any(None, str),
+        # Others who did it with them: the points are shared.
+        vol.Optional("helpers"): [str],
     }
 )
 @websocket_api.async_response
 @_handler
 async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
     entry = await manager.async_complete(
-        msg["member_id"], msg["chore_id"], msg.get("timer_started"), msg.get("photo")
+        msg["member_id"],
+        msg["chore_id"],
+        msg.get("timer_started"),
+        msg.get("photo"),
+        msg.get("helpers"),
     )
     return {
         "entry": entry,
@@ -659,6 +667,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("saving_max"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("birthday_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("pick_points"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("goal_match"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
         vol.Optional("family_goal"): vol.Any(
@@ -1268,3 +1277,33 @@ async def ws_paid_all(hass, connection, msg, manager) -> dict[str, Any]:
             msg["member_id"], await _by(hass, connection, msg, manager)
         )
     }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/chore/example",
+        vol.Optional(PASS): str,
+        vol.Required("chore_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_chore_example(hass, connection, msg, manager) -> dict[str, Any]:
+    """A chore's photo of what done looks like (open to everyone)."""
+    return {"url": await manager.async_example(msg["chore_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/chore/set_example",
+        vol.Optional(PASS): str,
+        vol.Required("chore_id"): str,
+        vol.Required("photo"): vol.Any(None, str),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_set_example(hass, connection, msg, manager) -> dict[str, Any]:
+    await manager.async_set_example(msg["chore_id"], msg["photo"])
+    return {}

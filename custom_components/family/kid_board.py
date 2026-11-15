@@ -87,6 +87,30 @@ class KidBoard:
             "away": manager.away.on(day),
         }
 
+    def next_week(self, member_id: str) -> list[str]:
+        """The names of a member's own chores in the coming week (Monday on),
+        for the family meeting: their own, taken in turns (if it may be
+        theirs) and the ones they picked from the pool."""
+        manager = self.manager
+        names: list[str] = []
+        for chore in manager.chores:
+            if (
+                not chore.get("enabled", True)
+                or chore.get("repeat") == model.REPEAT_ONCE
+            ):
+                continue
+            if chore.get("pool"):
+                mine = manager.picks.picked_by(chore["id"]) == member_id
+            elif chore.get("turns"):
+                mine = member_id in (chore.get("members") or [])
+            else:
+                mine = model.is_own(chore, member_id)
+            if mine:
+                names.append(
+                    chore["name"] + (" (taking turns)" if chore.get("turns") else "")
+                )
+        return names
+
     # ---- screen time left ------------------------------------------------------------
 
     def screen(self) -> list[dict[str, Any]]:

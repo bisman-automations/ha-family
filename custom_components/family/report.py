@@ -1,4 +1,4 @@
-"""The weekly report: a week (Monday to Sunday) for each family member.
+"""The weekly report (and family meeting): a week (Monday to Sunday) for each family member.
 
 Chores done (and which, most first), points earned, spent and kept, rewards
 they got, bonuses, badges earned that week, and their streak now. The
@@ -39,6 +39,13 @@ def week_report(manager: FamilyManager, weeks_ago: int = 0) -> dict[str, Any]:
         e
         for e in manager.entries
         if in_week(e) and e.get("review") != model.REVIEW_REJECTED
+    ]
+    rejected = [
+        e
+        for e in manager.entries
+        if in_week(e)
+        and e.get("review") == model.REVIEW_REJECTED
+        and e.get("kind") == model.KIND_CHORE
     ]
     members = []
     for member in manager.members:
@@ -88,6 +95,14 @@ def week_report(manager: FamilyManager, weeks_ago: int = 0) -> dict[str, Any]:
                 ],
                 "points": manager.points(member["id"]),
                 "streak": manager.streak(member["id"]),
+                # For the family meeting: chores that didn't happen, and why.
+                "didnt": [
+                    {"title": e["title"], "reason": e.get("reason"), "at": e["at"]}
+                    for e in rejected
+                    if e.get("member") == member["id"]
+                ],
+                # And what's theirs next week: own chores, picks and turns.
+                "next_week": manager.kids.next_week(member["id"]),
             }
         )
     days_away = sum(1 for i in range(7) if manager.away.on(first + timedelta(days=i)))

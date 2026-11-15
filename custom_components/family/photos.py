@@ -33,10 +33,11 @@ class Photos:
     def folder(self) -> Path:
         return Path(self.manager.hass.config.path(FOLDER))
 
-    def _path(self, entry_id: str) -> Path:
+    def _path(self, entry_id: str, keep: bool = False) -> Path:
+        """A photo's file. ``keep``: kept for good (a chore's example)."""
         if not entry_id.isalnum():
             raise ValueError("That photo can't be found")
-        return self.folder / f"{entry_id}.jpg"
+        return self.folder / f"{entry_id}{'.keep' if keep else ''}.jpg"
 
     @staticmethod
     def decode(data_url: str) -> bytes:
@@ -53,8 +54,8 @@ class Photos:
             raise ValueError("The photo has to be a JPEG")
         return data
 
-    async def async_save(self, entry_id: str, data: bytes) -> None:
-        path = self._path(entry_id)
+    async def async_save(self, entry_id: str, data: bytes, keep: bool = False) -> None:
+        path = self._path(entry_id, keep)
 
         def _write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,8 +63,8 @@ class Photos:
 
         await self.manager.hass.async_add_executor_job(_write)
 
-    async def async_read(self, entry_id: str) -> str | None:
-        path = self._path(entry_id)
+    async def async_read(self, entry_id: str, keep: bool = False) -> str | None:
+        path = self._path(entry_id, keep)
 
         def _read() -> bytes | None:
             return path.read_bytes() if path.is_file() else None
@@ -71,14 +72,14 @@ class Photos:
         data = await self.manager.hass.async_add_executor_job(_read)
         return PREFIX + base64.b64encode(data).decode() if data else None
 
-    async def async_delete(self, entry_id: str) -> None:
-        path = self._path(entry_id)
+    async def async_delete(self, entry_id: str, keep: bool = False) -> None:
+        path = self._path(entry_id, keep)
         await self.manager.hass.async_add_executor_job(
             lambda: path.unlink(missing_ok=True)
         )
 
     async def async_prune(self) -> None:
-        """Remove photos older than ``KEEP_DAYS``."""
+        """Remove photos older than ``KEEP_DAYS`` (not the ones kept)."""
         folder = self.folder
         oldest = time.time() - KEEP_DAYS * 86400
 
@@ -86,6 +87,8 @@ class Photos:
             if not folder.is_dir():
                 return
             for path in folder.glob("*.jpg"):
+                if path.name.endswith(".keep.jpg"):
+                    continue
                 if path.stat().st_mtime < oldest:
                     path.unlink(missing_ok=True)
 

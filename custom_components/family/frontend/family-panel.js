@@ -692,6 +692,7 @@ const STYLES = `
   .items li:first-child { border-top: 0; }
   .items input { width: 100px; }
   .penalty { display: inline-flex; gap: 6px; align-items: center; }
+  .check-all { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0 12px; border-bottom: 1px solid var(--divider-color, #e0e0e0); margin-bottom: 4px; }
   .penalty input { width: 72px; }
   .penalty-setting { margin-top: 12px; align-items: flex-end; }
   .badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--fam-bad); color: #fff; font-size: 12px; line-height: 20px; text-align: center; margin-left: 6px; }
@@ -2351,6 +2352,18 @@ class FamilyPanel extends HTMLElement {
         <iframe src="${esc(link.url)}" title="${esc(link.name)}" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
         <p class="muted">Blank page? That site doesn't allow showing it here: <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">open it in a new tab</a>.</p></div></div>`;
     }
+    if (s.type === "didnt_all") {
+      const extra = s.ids.reduce((sum, id) => sum + (s.penalties[id] ?? 0), 0);
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="None of these happened">
+        <h3>${s.ids.length === 2 ? "Neither chore" : `None of these ${s.ids.length} chores`} happened?</h3>
+        <p class="muted">The points for each are taken back, and each one's penalty: the number in its box, or the chore's own, or the family's.${extra ? ` That's ${esc(pts(extra))} more from the boxes alone.` : ""} Say why if you like: they'll see it.</p>
+        <div class="chips">${DIDNT_REASONS.map((r) => `<button class="chip" type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div>
+        <form data-didnt-all-form>
+          <label class="field"><span>Why (optional)</span><input type="text" name="reason" maxlength="200" placeholder="Not done"></label>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button>
+          <button class="big bad" type="submit">Take the points back</button></div>
+        </form></div></div>`;
+    }
     if (s.type === "didnt") {
       const member = this._memberById(s.member);
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Didn't happen">
@@ -2608,10 +2621,25 @@ class FamilyPanel extends HTMLElement {
       <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-cancel>Cancel</button></div></form>`;
   }
 
+  // The penalties typed in the chores' boxes (empty boxes left out).
+  _penaltyBoxes(ids) {
+    const out = {};
+    for (const id of ids) {
+      const box = this.shadowRoot.querySelector(`[data-penalty-for="${CSS.escape(id)}"]`);
+      if (box && box.value.trim() !== "") out[id] = Math.max(0, Math.round(Number(box.value) || 0));
+    }
+    return out;
+  }
+
   _renderReview() {
     const d = this._data;
+    const all = d.to_check.length > 1
+      ? `<div class="check-all"><span class="grow">${d.to_check.length === 2 ? "Both chores" : `All ${d.to_check.length} chores`}:</span>
+          <button class="btn good" data-review-all="1">Done right</button>
+          <button class="btn bad" data-review-all="0">Didn't happen</button></div>`
+      : "";
     const check = d.to_check.length
-      ? `<ul class="rows">${d.to_check
+      ? `${all}<ul class="rows">${d.to_check
           .map((e) => {
             const m = this._memberById(e.member);
             return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))} · +${pts(e.points)} given</small></span>
@@ -3703,9 +3731,18 @@ class FamilyPanel extends HTMLElement {
       const box = this.shadowRoot.querySelector(`[data-penalty-for="${CSS.escape(ds.didnt)}"]`);
       this._sheet = { type: "didnt", id: ds.didnt, title: entry?.title || "", member: entry?.member, penalty: box && box.value.trim() !== "" ? Math.max(0, Math.round(Number(box.value) || 0)) : null, reason: "" };
       this._renderOverlay();
-    } else if (ds.reason !== undefined && this._sheet?.type === "didnt") {
-      const input = this.shadowRoot.querySelector("[data-didnt-form] [name=reason]");
+    } else if (ds.reason !== undefined && (this._sheet?.type === "didnt" || this._sheet?.type === "didnt_all")) {
+      const input = this.shadowRoot.querySelector("[data-didnt-form] [name=reason], [data-didnt-all-form] [name=reason]");
       if (input) input.value = ds.reason;
+    } else if (ds.reviewAll !== undefined) {
+      const ids = (this._data.to_check || []).map((e) => e.id);
+      if (!ids.length || this._busy) return;
+      if (ds.reviewAll === "1") {
+        this._call({ type: `${DOMAIN}/review_all`, entry_ids: ids, approved: true }, `${ids.length} chores checked.`);
+      } else {
+        this._sheet = { type: "didnt_all", ids, penalties: this._penaltyBoxes(ids) };
+        this._renderOverlay();
+      }
     } else if (ds.historyMore !== undefined) {
       this._historyMoreLoad();
     } else if (ds.historyCsv !== undefined) {
@@ -3933,6 +3970,16 @@ class FamilyPanel extends HTMLElement {
     if (form.dataset.meals) {
       const v = this._formValues(form);
       return this._call({ type: `${DOMAIN}/meals`, date: form.dataset.meals, breakfast: v.breakfast || "", lunch: v.lunch || "", dinner: v.dinner || "", ingredients: v.ingredients || "" }, "Meals saved.");
+    }
+    if (form.matches("[data-didnt-all-form]")) {
+      const s = this._sheet;
+      if (!s || this._busy) return;
+      const reason = form.querySelector("[name=reason]")?.value.trim() || null;
+      const msg = { type: `${DOMAIN}/review_all`, entry_ids: s.ids, approved: false, reason };
+      if (Object.keys(s.penalties).length) msg.penalties = s.penalties;
+      this._sheet = null;
+      this._renderOverlay();
+      return this._call(msg, "Points taken back.");
     }
     if (form.matches("[data-didnt-form]")) {
       const s = this._sheet;

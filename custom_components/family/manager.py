@@ -1023,6 +1023,36 @@ class FamilyManager:
         )
         return entry
 
+    async def async_review_many(
+        self,
+        entry_ids: list[str],
+        approved: bool,
+        penalties: dict[str, int] | None = None,
+        *,
+        reason: str | None = None,
+        by: str | None = None,
+    ) -> int:
+        """Check every chore in the list at once, as Done right or Didn't
+        happen. Ones already checked (by another parent, or automatically) or
+        gone are left alone. ``penalties`` holds a penalty per chore typed in
+        its box; the others take their usual one. Returns how many were checked.
+        """
+        penalties = penalties or {}
+        checked = 0
+        for entry_id in dict.fromkeys(entry_ids):
+            entry = next((e for e in self.entries if e["id"] == entry_id), None)
+            if (
+                entry is None
+                or entry.get("kind") != model.KIND_CHORE
+                or entry.get("review") != model.REVIEW_PENDING
+            ):
+                continue
+            await self.async_review(
+                entry_id, approved, penalties.get(entry_id), reason=reason, by=by
+            )
+            checked += 1
+        return checked
+
     @callback
     def async_auto_check(self, _now: Any = None) -> None:
         """Count chores nobody checked as done right, after a day or a week."""

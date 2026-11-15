@@ -59,6 +59,7 @@ const cantGet = (reward, member) => {
 };
 let entries = [
   { id: "e1", at: ago(30), kind: "chore", member: "a", chore_id: "bed", title: "Make your bed", points: 5, review: "pending" },
+  { id: "e1b", at: ago(45), kind: "chore", member: "b", chore_id: "dishes", title: "Empty the dishwasher", points: 3, review: "pending" },
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
   { id: "e3a", at: ago(15), kind: "reward", member: "a", reward_id: "toy", title: "A new toy", points: -60, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
   { id: "e3c", at: ago(15), kind: "reward", member: "c", reward_id: "toy", title: "A new toy", points: -40, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
@@ -216,7 +217,7 @@ const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const PARENT_ONLY = ["request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "review_all", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 // Trades for today (like trades.py): offered, taken, approved.
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
@@ -381,6 +382,16 @@ window.hass = {
         if (taken) { mm.points -= taken; entries.push({ id: "p" + entries.length, at: new Date().toISOString(), kind: "penalty", member: e.member, title: e.title, points: -taken, for_entry: e.id }); }
       }
       return {};
+    }
+    if (t === "review_all") {
+      let checked = 0;
+      for (const id of new Set(msg.entry_ids)) {
+        const e = entries.find((x) => x.id === id);
+        if (!e || e.kind !== "chore" || e.review !== "pending") continue;
+        await hass.callWS({ type: "family/review", entry_id: id, approved: msg.approved, penalty: (msg.penalties || {})[id], reason: msg.reason, pass: msg.pass });
+        checked += 1;
+      }
+      return { checked };
     }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
     if (t === "save" && msg.collection === "routines" && !(msg.item.steps || []).length) throw { message: "Give the routine at least one step" };

@@ -1624,3 +1624,70 @@ async def test_only_the_family_pin_or_your_own(hass: HomeAssistant, client):
     assert state["pin_set"] is False
     manager = hass.config_entries.async_entries(DOMAIN)[0].runtime_data
     assert "parent_pins" not in manager.settings
+
+
+async def test_check_every_chore_at_once(
+    hass: HomeAssistant, client, hass_ws_client, hass_read_only_access_token
+):
+    alex, sam = await _family(client)
+    await client.ok("settings", penalty=1)
+    chores = [
+        (
+            await client.ok(
+                "save",
+                collection="chores",
+                item={"name": name, "points": 4, "repeat": "daily"},
+            )
+        )["item"]
+        for name in ("Dishes", "Bins", "Tidy up")
+    ]
+    reviewed = []
+    hass.bus.async_listen("family_chore_reviewed", reviewed.append)
+
+    async def balances() -> dict[str, int]:
+        return {m["id"]: m["points"] for m in (await client.ok("state"))["members"]}
+
+    done = [
+        (await client.ok("complete", member_id=who, chore_id=c["id"]))["entry"]["id"]
+        for who, c in zip((alex, sam, alex), chores, strict=True)
+    ]
+    assert await balances() == {alex: 8, sam: 4}
+
+    # None of them happened: the points go back, with the boxes' penalties or
+    # the family's, and the reason on each.
+    res = await client.ok(
+        "review_all",
+        entry_ids=done,
+        approved=False,
+        penalties={done[0]: 3},
+        reason="Not done",
+    )
+    assert res == {"checked": 3}
+    assert await balances() == {alex: -3 - 1, sam: -1}
+    state = await client.ok("state")
+    assert state["to_check"] == []
+    assert {e["reason"] for e in state["history"] if e["kind"] == "chore"} == {
+        "Not done"
+    }
+    await hass.async_block_till_done()
+    assert len(reviewed) == 3
+
+    # Done again, all done right. One already checked, a duplicate and one
+    # that's gone are left alone.
+    again = [
+        (await client.ok("complete", member_id=alex, chore_id=c["id"]))["entry"]["id"]
+        for c in chores
+    ]
+    await client.ok("review", entry_id=again[0], approved=True)
+    res = await client.ok(
+        "review_all", entry_ids=[*again, again[1], "gone"], approved=True
+    )
+    assert res == {"checked": 2}
+    state = await client.ok("state")
+    assert state["to_check"] == []
+    assert all(e["review"] == "approved" for e in state["history"] if e["id"] in again)
+
+    # Only parents.
+    kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
+    res = await kiosk("review_all", entry_ids=again, approved=False)
+    assert res["error"]["code"] == "unauthorized"

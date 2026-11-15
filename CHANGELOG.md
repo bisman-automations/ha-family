@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-11-15
+
+### Added
+
+- **Check every chore at once.** When there's more than one chore to check, **Done right** and **Didn't happen** above the list check them all. **Didn't happen** asks first, and lets you say why once for all of them; each chore still takes back its own points and its own penalty (the number typed in its box, or the chore's, or the family's). A chore marked done while you were looking isn't checked with the rest.
+
 ## [2.6.0] - 2026-11-14
 
 ### Added
@@ -362,6 +368,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.7.0]: https://github.com/bisman-automations/ha-family/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/bisman-automations/ha-family/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/bisman-automations/ha-family/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/bisman-automations/ha-family/compare/v2.3.0...v2.4.0

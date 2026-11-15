@@ -52,6 +52,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_note_add,
         ws_note_remove,
         ws_review,
+        ws_review_all,
         ws_meals,
         ws_given,
         ws_high_five,
@@ -429,6 +430,34 @@ async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
             msg["entry_id"],
             msg["approved"],
             msg.get("penalty"),
+            reason=msg.get("reason"),
+            by=await _by(hass, connection, msg, manager),
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/review_all",
+        vol.Optional(PASS): str,
+        # The chores on the parent's screen, so one marked done since isn't
+        # checked unseen.
+        vol.Required("entry_ids"): vol.All([str], vol.Length(min=1, max=500)),
+        vol.Required("approved"): bool,
+        # A penalty per chore typed in its box; the rest take their usual one.
+        vol.Optional("penalties"): {str: vol.All(int, vol.Range(min=0, max=10000))},
+        vol.Optional("reason"): vol.Any(None, str),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_review_all(hass, connection, msg, manager) -> dict[str, Any]:
+    return {
+        "checked": await manager.async_review_many(
+            msg["entry_ids"],
+            msg["approved"],
+            msg.get("penalties"),
             reason=msg.get("reason"),
             by=await _by(hass, connection, msg, manager),
         )

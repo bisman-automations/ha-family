@@ -67,6 +67,7 @@ async def test_a_hold_stops_spending_until_it_ends(
     state = await client.ok("state")
     assert _member(state, alex)["held_until"]
     assert _member(state, sam)["held_until"] is None
+    await hass.async_block_till_done()
     assert events[0].data["member"] == "Alex"
 
     refused = await client("redeem", member_id=alex, reward_id=reward)

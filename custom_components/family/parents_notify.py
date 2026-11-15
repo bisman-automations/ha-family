@@ -145,6 +145,25 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_request")
 
     @callback
+    def chore_idea(self, idea: dict[str, Any], member: dict[str, Any]) -> None:
+        """A child offered to do a chore that isn't on the list."""
+        if not self._settings.get("notify_rewards") or not self.targets():
+            return
+        asked = idea.get("points")
+        data = {
+            "title": f"{member['name']} offered to do {idea['name']}",
+            "message": (f"They think it's worth {asked} points. " if asked else "")
+            + "Say yes or no under To check.",
+            "data": {
+                "tag": tag_for(idea["id"]),
+                "group": "family",
+                "url": PARENTS_PATH,
+                "clickAction": PARENTS_PATH,
+            },
+        }
+        self._spawn(self._send(data), "family_notify_chore_idea")
+
+    @callback
     def pin_locked(self) -> None:
         """Someone got the parent PIN wrong too many times on the shared screen."""
         if not self.targets():

@@ -129,6 +129,10 @@ A chore can ask for a photo (**Photo when it's done**: ask for one, or needs one
 
 Tick **In the pick-your-chores pool** on a chore, and it belongs to nobody until someone picks it for the week. **Pick your chores** on the Family dashboard shows whose turn it is: whoever has picked the fewest points this week goes next, so the big chores get shared out. Tap a chore to pick it; it's then that person's own chore for the week. Tick who can pick each one under **Who can do it** (nobody ticked: everyone). Under **Chores** → **Pick your chores**, **Points each picks a week** stops someone picking once they have that much (0: no limit). A parent can put a pick back with **Put back** in the chores list. The picks start again every Monday.
 
+### Chores that wait for something, or start something
+
+**Only when this… shows** keeps a chore off the Family dashboard until something shows one of the states you type, such as Daily Routine's **Kind of day** being *School day*, or the house mode. **When it's done, also start** runs a script, scene or button as soon as the chore is marked done, such as one that gives TV time or turns the desk lamp off once homework is done.
+
 ### Chores a device finishes
 
 **Done when this device… changes to** marks a chore done when a device does it: a robot vacuum back on its dock (`docked`), the dishwasher door opened (`on`), the washing machine finished. Whoever started the device from Home Assistant (their login, linked through their person) gets the points. If that isn't known, and the chore isn't just one person's, the Family dashboard shows it under **Who did this?** until someone taps it and says it was them.
@@ -141,6 +145,15 @@ For a TV or a tablet on the wall: everyone's points, today's progress and their 
 type: custom:family-card
 wall: true
 ```
+
+### Chore bingo, races and the give jar
+
+- **Chore bingo.** With points set for it (under **Family** → **Bingo, races and the evening check-in**), each person's page has a 3×3 card of nine of their chores, new every Monday. Doing a chore marks its square; every row, column or diagonal earns points, and the whole card more. It needs nine chores they can do.
+- **Races.** **Race someone** (under **Going for**) challenges a brother or sister: whoever finishes all of today's own chores first wins the race's points. Undoing or rejecting the winning chore opens the race again.
+- **The give jar.** When a parent sets what the family gives for (such as an animal shelter), its tile shows how far everyone has got. On their own page, a child taps it to give some of their points; a share of each allowance can go in by itself.
+- **Offer to do a chore.** Next to **Ask for something** under **Rewards**, a child offers a chore that isn't on the list ("Wash the car") and how many points they think it's worth. A parent's yes adds it as a one-off chore of theirs.
+- **How was today?** With the evening check-in on, each person taps how their day was. Only parents see it, under **History**.
+- **Time to leave.** On days a parent set a leave time, a countdown shows across the top (and on the wall view) from shortly before: "Leave in 14 minutes".
 
 ### On a kid's own phone
 
@@ -237,12 +250,16 @@ Every card in the parent controls folds away: tap its title. A folded card stays
 - **Dinner vote** (under **Meals**). Give two to six choices, the day, and when voting closes (optional). Everyone votes on the Family dashboard. When it closes (by its time, or **Close the vote now**), the choice with the most votes wins (a tie goes to the one listed first) and becomes that day's dinner on the meal plan. **Take it down** ends it without a winner. One vote runs at a time.
 - **Countdowns** (under **Notes**). Add a name, an emoji, the day, and who it's for (or everyone). It shows on the Family dashboard until the end of its day. Birthdays count down by themselves.
 - **Add to the calendar** (under **Notes**, once calendars are picked under **Family**). Put an event on one of the family's calendars: a day with a start and end time, or an all-day event (optionally over several days).
+- **Chores they offered to do** (under **To check**). Set the points and tap **Yes**: it becomes a one-off chore of that child's. **No** tells them not this time. Phones are told like for rewards asked for.
 - **Rewards they asked for** (top of **To check**). What the kids asked for. Set what it costs and tap **Yes**: it becomes a reward for that child only. **No** tells them not this time. With **when a reward needs handing out** on under **Phones**, your phones are told when a child asks.
 - **Double points** (top of **Chores**). Start double or triple points until a time you pick (at most two weeks), for every chore (to-do items too) or only the chores you tick, with an optional name such as "Saturday cleanup". **Stop** ends it early. A chore done while it's on is worth that many times its points; bonuses stay as they are.
 - **Seasons** (on a chore). **Season** shows a chore only between two days of the year, every year, such as October 1 to November 30 for raking leaves, or December 1 to March 31 (it can wrap past New Year) for shoveling.
 - **Notes.** Every note on the board, who put it up and until when. Put one up for everyone or for one person, or take any note down.
 - **Family.** Add, edit or remove family members, and add or take away points by hand, with a reason. Each member can have an **allowance**: points added every week, and a **birthday** (month and day). Add the **year born** too, and chores can be set for some ages. **Picture mode** shows that person big pictures on their chores and reads them aloud. With TV Mgmt, **Their chores done unlock** gives minutes of TV (on one TV, or the whole home too) the moment they finish all of their own chores for the day; undoing a chore takes the time back.
 - **Away** (under **Family**). For a trip: set the first day away and, optionally, the day you're back (the last day away). While away, chores and routines are off, nothing counts as missed, streaks skip those days (a day away is a day off), and the weekly allowance isn't given (it isn't made up later). Points, rewards and everything else keep working. **We're back home** ends it, and today counts as usual again. Trips that haven't started can be removed.
+- **Give jar** (under **Family**). What the family gives for, the target in points, and optionally a percent of each allowance that goes in by itself. **Start counting again from now** begins a new jar; **Remove** takes it away.
+- **Bingo, races and the evening check-in** (under **Family**). Points for a bingo line and for the whole card (0 and 0: no bingo), points for winning a race (0: no races), and whether the evening check-in shows. **How their days were** (top of **History**) shows the last two weeks of check-ins.
+- **Time to leave** (under **Family**). A leave time for each day of the week (empty: none) and how many minutes before it the countdown shows.
 - **Saving and birthday bonuses** (under **Family**). A **saving bonus**: a percent (up to 50%) of the points someone kept all week, given with the allowance, at most so many points (0: no limit). "Kept" is the lower of their points now and a week ago, so this week's points don't count yet and spending lowers it. **Birthday points**: given once on each person's birthday. **Match on saving up**: when someone gets the reward they set as what they're saving for, a parent adds this percent of what they put in, so at 25% a 100-point reward takes 80 of their own; the match shows in History as a bonus.
 - **Allowance and money** (under **Family**). The day and time the weekly allowance is given (a week Home Assistant was off isn't made up), and optionally what one point is worth and a money sign, so points also show as money, like "42 points · $4.20".
 - **Today's calendar** (under **Family**). Pick the calendars whose events show under **Today**, each for everyone or for one person.

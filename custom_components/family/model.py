@@ -55,10 +55,12 @@ GIVEN_DONE = "given"
 # The Family dashboard's sections, in their usual order.
 SECTIONS = (
     "going",
+    "mood",
     "weather",
     "countdowns",
     "vote",
     "chores",
+    "bingo",
     "pick",
     "claims",
     "routines",

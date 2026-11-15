@@ -28,8 +28,11 @@ from homeassistant.util import dt as dt_util
 
 from . import model, savings
 from .away import Away
+from .bingo import Bingo
 from .boosts import Boosts
 from .calendar_today import DAYS as CALENDAR_DAYS, CalendarToday, clean_calendars
+from .challenges import Challenges
+from .chore_ideas import ChoreIdeas
 from .const import (
     DOMAIN,
     EVENT_BADGE_EARNED,
@@ -52,8 +55,11 @@ from .const import (
 from .countdowns import Countdowns
 from .dinner_vote import DinnerVote
 from .done_when import DoneWhen
+from .give import MAX_GIVE_PERCENT, Give, clean_goal as clean_give_goal
 from .kid_board import KidBoard
+from .leave import clean_leave_times, leave_at
 from .live_activity import ChoreActivity
+from .moods import Moods
 from .parent_pass import ParentPasses
 from .parents_notify import ParentNotices
 from .photos import Photos
@@ -142,6 +148,40 @@ def _done_when(raw: Any) -> dict[str, str] | None:
     return {"entity_id": entity_id, "state": state[:60]}
 
 
+# What a chore's "when it's done, also start" can be, and how it's started.
+ON_DONE_SERVICES = {
+    "script": "turn_on",
+    "scene": "turn_on",
+    "button": "press",
+    "input_button": "press",
+}
+
+
+def _only_when(raw: Any) -> dict[str, Any] | None:
+    """A chore's "only when this shows": {entity_id, states}, or None."""
+    if not isinstance(raw, dict) or not raw.get("entity_id"):
+        return None
+    entity_id = str(raw["entity_id"])
+    states = raw.get("states")
+    if isinstance(states, str):
+        states = states.split(",")
+    states = [str(s).strip()[:60] for s in states or [] if str(s).strip()]
+    if "." not in entity_id:
+        raise FamilyError("Pick what the chore waits for")
+    if not states:
+        raise FamilyError("Say what it shows when the chore is on")
+    return {"entity_id": entity_id, "states": states[:10]}
+
+
+def _on_done(raw: Any) -> str | None:
+    entity_id = str(raw or "").strip()
+    if not entity_id:
+        return None
+    if entity_id.split(".", 1)[0] not in ON_DONE_SERVICES:
+        raise FamilyError("Pick a script, scene or button to start")
+    return entity_id
+
+
 def _now_iso() -> str:
     return dt_util.now().isoformat()
 
@@ -189,6 +229,11 @@ class FamilyManager:
         self.photos = Photos(self)
         self.picks = Picks(self)
         self.done_when = DoneWhen(self)
+        self.bingo = Bingo(self)
+        self.give = Give(self)
+        self.chore_ideas = ChoreIdeas(self)
+        self.challenges = Challenges(self)
+        self.moods = Moods(self)
         self.new_badges: list[dict[str, Any]] = []
         self.voice = Voice(self)
         self._seen_chores: tuple | None = None
@@ -227,6 +272,9 @@ class FamilyManager:
         self.vote.load(data)
         self.picks.load(data)
         self.done_when.load(data)
+        self.chore_ideas.load(data)
+        self.challenges.load(data)
+        self.moods.load(data)
         # Streaks count days with all of one's own chores done from this day;
         # before it, any chore, as they used to.
         if "streak_rule_from" not in self.settings:
@@ -266,6 +314,9 @@ class FamilyManager:
             **self.vote.data(),
             **self.picks.data(),
             **self.done_when.data(),
+            **self.chore_ideas.data(),
+            **self.challenges.data(),
+            **self.moods.data(),
         }
 
     @callback
@@ -484,6 +535,9 @@ class FamilyManager:
             self.requests.prune(now),
             self.away.prune(today),
             self.boosts.prune(now),
+            self.chore_ideas.prune(now),
+            self.challenges.prune(today),
+            self.moods.prune(today),
         ):
             changed = changed or pruned
         return changed
@@ -530,6 +584,9 @@ class FamilyManager:
                     "points": points,
                 }
             )
+            # The give jar's share of it, if a parent set one.
+            if gift := self.give.from_allowance(member["id"], points):
+                self.entries.append(gift)
         self.settings["allowance_week"] = key
         self._changed()
 
@@ -733,6 +790,7 @@ class FamilyManager:
                 not chore.get("enabled", True)
                 or chore.get("unpicked")
                 or not model.available(chore, now)
+                or not self.only_when_ok(chore)
             ):
                 continue
             done = self._done(chore, now)
@@ -784,7 +842,7 @@ class FamilyManager:
             raise FamilyError(f"Take a photo to show {chore['name']} is done")
         if self.away.on(now.date()):
             raise FamilyError("Chores are off while the family is away")
-        if not model.available(chore, now):
+        if not model.available(chore, now) or not self.only_when_ok(chore):
             raise FamilyError(f"{chore['name']} isn't for right now")
         done = self._done(chore, now)
         if not model.can_do(member_id, chore, done):
@@ -860,6 +918,8 @@ class FamilyManager:
         if streak := self._chore_streak_bonus(chore, entry, now):
             bonuses.append(streak)
         self._changed()
+        if chore.get("on_done"):
+            self._run_on_done(chore)
         for bonus in bonuses:
             if bonus.get("tv"):
                 await self._async_unlock(bonus, member, int(bonus["minutes"]))
@@ -890,6 +950,36 @@ class FamilyManager:
         if bonuses:
             entry = {**entry, "bonuses": bonuses}
         return entry
+
+    def only_when_ok(self, chore: dict[str, Any]) -> bool:
+        """A chore's "only when": a device (or Daily Routine's Kind of day)
+        shows one of the states. Unknown: not now."""
+        rule = chore.get("only_when")
+        if not rule:
+            return True
+        state = self.hass.states.get(rule["entity_id"])
+        return state is not None and state.state in rule["states"]
+
+    @callback
+    def _run_on_done(self, chore: dict[str, Any]) -> None:
+        """Start what the chore's done starts: a script, scene or button."""
+        entity_id = chore["on_done"]
+        domain = entity_id.split(".", 1)[0]
+        service = ON_DONE_SERVICES.get(domain)
+        if service is None or self.hass.states.get(entity_id) is None:
+            return
+
+        async def _run() -> None:
+            try:
+                await self.hass.services.async_call(
+                    domain, service, {"entity_id": entity_id}, blocking=True
+                )
+            except Exception as err:  # noqa: BLE001 - the chore still counts
+                _LOGGER.warning(
+                    "%s done: couldn't start %s: %s", chore["name"], entity_id, err
+                )
+
+        self.hass.async_create_background_task(_run(), f"family on done {entity_id}")
 
     async def async_set_example(self, chore_id: str, photo: str | None) -> None:
         """A parent's photo of what a chore looks like done (None removes it)."""
@@ -1013,6 +1103,38 @@ class FamilyManager:
             }
             for kind, title, points in found
         ]
+        # Chore bingo: lines and the full card on this week's board.
+        for kind, title, points in self.bingo.bonuses(member_id, entry):
+            bonuses.append(
+                {
+                    "id": _id(),
+                    "at": _now_iso(),
+                    "kind": model.KIND_BONUS,
+                    "member": member_id,
+                    "title": title,
+                    "points": points,
+                    "bonus": kind,
+                    "for_entry": entry["id"],
+                }
+            )
+        # First to finish their own chores: the races they win.
+        if finished:
+            for kind, title, points, challenge in self.challenges.wins(
+                member_id, today
+            ):
+                bonuses.append(
+                    {
+                        "id": _id(),
+                        "at": _now_iso(),
+                        "kind": model.KIND_BONUS,
+                        "member": member_id,
+                        "title": title,
+                        "points": points,
+                        "bonus": kind,
+                        "challenge": challenge,
+                        "for_entry": entry["id"],
+                    }
+                )
         # Their own chores done: the screen time they unlock.
         member_tv = member.get("unlock_tv")
         minutes = int(member.get("unlock_minutes") or 0)
@@ -1373,6 +1495,37 @@ class FamilyManager:
             self.settings["goal_match"] = min(
                 model.clean_points(raw.get("goal_match") or 0, "The match"), 100
             )
+        if "bingo_line" in raw:
+            self.settings["bingo_line"] = model.clean_points(
+                raw.get("bingo_line") or 0, "Points for a line"
+            )
+        if "bingo_full" in raw:
+            self.settings["bingo_full"] = model.clean_points(
+                raw.get("bingo_full") or 0, "Points for the whole card"
+            )
+        if "give_percent" in raw:
+            percent = model.clean_points(raw.get("give_percent") or 0, "Give share")
+            if percent > MAX_GIVE_PERCENT:
+                raise FamilyError(f"Keep the give share at {MAX_GIVE_PERCENT}% or less")
+            self.settings["give_percent"] = percent
+        if "give_goal" in raw:
+            self.settings["give_goal"] = clean_give_goal(
+                raw.get("give_goal"),
+                self.settings.get("give_goal"),
+                bool(raw.get("restart_give")),
+            )
+        if "leave_times" in raw:
+            self.settings["leave_times"] = clean_leave_times(raw.get("leave_times"))
+        if "leave_warn" in raw:
+            self.settings["leave_warn"] = max(
+                1, min(model.clean_points(raw.get("leave_warn") or 30, "Show it"), 120)
+            )
+        if "challenge_points" in raw:
+            self.settings["challenge_points"] = model.clean_points(
+                raw.get("challenge_points") or 0, "Points for winning a race"
+            )
+        if "mood_check" in raw:
+            self.settings["mood_check"] = bool(raw.get("mood_check"))
         if "pick_points" in raw:
             self.settings["pick_points"] = model.clean_points(
                 raw.get("pick_points") or 0, "Points each picks"
@@ -2126,6 +2279,11 @@ class FamilyManager:
             ),
             # Done when a device changes to a state (a robot vacuum docked).
             "done_when": _done_when(raw.get("done_when")),
+            # Only while something shows a state (Daily Routine's Kind of
+            # day is School day, the bins are out…).
+            "only_when": _only_when(raw.get("only_when")),
+            # When it's done, also start this script, scene or button.
+            "on_done": _on_done(raw.get("on_done")),
         }
         if chore["pool"] and chore["turns"]:
             raise FamilyError(
@@ -2355,6 +2513,8 @@ class FamilyManager:
             self.requests.forget_member(item_id)
             self.vote.forget_member(item_id)
             self.picks.forget_member(item_id)
+            self.chore_ideas.forget_member(item_id)
+            self.moods.forget_member(item_id)
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
             # Drop them from rewards they were picked for. An empty list stays
@@ -2502,6 +2662,7 @@ class FamilyManager:
                 ),
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
+                "mood_today": self.moods.today(m["id"]),
                 "badges": model.badge_list(m.get("badges")),
                 "birthday_today": savings.birthday_today(m),
                 # While rewards are on hold: when that ends (None: not held).
@@ -2603,6 +2764,13 @@ class FamilyManager:
             "family_goal": self.family_goal(),
             # A parent's match on what someone saves up for (percent).
             "goal_match": int(self.settings.get("goal_match") or 0),
+            "bingo": self.bingo.snapshot(),
+            "give": self.give.snapshot(),
+            "leave": None if self.away.on(today) else leave_at(self.settings, now),
+            "chore_ideas": self.chore_ideas.snapshot(),
+            "challenges": self.challenges.snapshot(),
+            "challenge_points": int(self.settings.get("challenge_points") or 0),
+            "mood_check": bool(self.settings.get("mood_check")),
         }
         if is_admin if parent is None else parent:
             result["owed"] = model.money_owed(self.entries)
@@ -2634,7 +2802,17 @@ class FamilyManager:
                 "pick_points": int(self.settings.get("pick_points") or 0),
                 "goal_match": int(self.settings.get("goal_match") or 0),
                 "shopping_list": self.settings.get("shopping_list"),
+                "bingo_line": int(self.settings.get("bingo_line") or 0),
+                "bingo_full": int(self.settings.get("bingo_full") or 0),
+                "give_percent": int(self.settings.get("give_percent") or 0),
+                "give_goal": self.settings.get("give_goal"),
+                "leave_times": dict(self.settings.get("leave_times") or {}),
+                "leave_warn": int(self.settings.get("leave_warn") or 30),
+                "challenge_points": int(self.settings.get("challenge_points") or 0),
+                "mood_check": bool(self.settings.get("mood_check")),
             }
+            if self.settings.get("mood_check"):
+                result["moods"] = self.moods.recent(today)
             result["weeks"] = model.weekly_stats(
                 self.entries, [m["id"] for m in self.members], today
             )

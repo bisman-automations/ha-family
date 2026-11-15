@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-11-15
+
+### Added
+
+- **Chore bingo.** Each person gets a 3×3 card of nine of their chores every Monday. Doing a chore marks its square, and every line, and the whole card, earns points.
+- **Races.** A child challenges a brother or sister: the first to finish all of today's own chores wins the points.
+- **The give jar.** Set something the family gives for. The kids give points from their own page, and a share of each allowance can go in by itself.
+- **Offer to do a chore.** Kids suggest a chore that isn't on the list and what it's worth; a parent's yes makes it a one-off chore of theirs.
+- **How was today?** An evening check-in: each person taps how their day was. Only parents see the last two weeks, under History.
+- **Time to leave.** A countdown across the top of the Family dashboard and the wall view on mornings with a leave time.
+- **Chores that wait for something, or start something.** A chore can show only while something shows a state (Daily Routine's Kind of day, the house mode…), and finishing it can start a script, scene or button.
+
 ## [2.10.0] - 2026-11-15
 
 ### Added
@@ -403,6 +415,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.11.0]: https://github.com/bisman-automations/ha-family/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/bisman-automations/ha-family/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/bisman-automations/ha-family/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/bisman-automations/ha-family/compare/v2.7.0...v2.8.0

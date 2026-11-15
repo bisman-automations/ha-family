@@ -97,6 +97,12 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_shopping,
         ws_calendar_add,
         ws_report,
+        ws_give,
+        ws_idea_add,
+        ws_idea_cancel,
+        ws_idea_decide,
+        ws_challenge,
+        ws_mood,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -668,6 +674,22 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("birthday_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("pick_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("goal_match"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("bingo_line"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("bingo_full"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("give_percent"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("give_goal"): vol.Any(
+            None,
+            {
+                vol.Required("name"): str,
+                vol.Optional("emoji"): vol.Any(None, str),
+                vol.Required("target"): vol.Coerce(int),
+            },
+        ),
+        vol.Optional("restart_give"): bool,
+        vol.Optional("leave_times"): {str: vol.Any(None, str)},
+        vol.Optional("leave_warn"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("challenge_points"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("mood_check"): bool,
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
         vol.Optional("family_goal"): vol.Any(
@@ -808,6 +830,32 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
             for s in sorted(
                 hass.states.async_all(FINISHER_DOMAINS),
                 key=lambda s: (s.domain, s.name.casefold()),
+            )
+        ],
+        # What finishing a chore can start: scripts, scenes and buttons.
+        "starters": [
+            {"entity_id": s.entity_id, "name": s.name}
+            for s in sorted(
+                hass.states.async_all(("script", "scene", "button", "input_button")),
+                key=lambda s: (s.domain, s.name.casefold()),
+            )
+        ],
+        # What a chore can wait for: anything with a state, such as Daily
+        # Routine's Kind of day or the house mode.
+        "watchables": [
+            {"entity_id": s.entity_id, "name": s.name, "state": s.state}
+            for s in sorted(
+                hass.states.async_all(
+                    (
+                        "sensor",
+                        "select",
+                        "input_select",
+                        "binary_sensor",
+                        "input_boolean",
+                        "calendar",
+                    )
+                ),
+                key=lambda s: s.name.casefold(),
             )
         ],
     }
@@ -990,6 +1038,106 @@ async def ws_request_decide(hass, connection, msg, manager) -> dict[str, Any]:
     return manager.requests.decide(
         msg["request_id"], msg["approved"], msg.get("points")
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/give",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("points"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_give(hass, connection, msg, manager) -> dict[str, Any]:
+    """A child puts points in the give jar (open to everyone, like a reward)."""
+    return {"entry": manager.give.give(msg["member_id"], msg["points"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/idea/add",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("name"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+        vol.Optional("points"): vol.Any(None, vol.Coerce(int)),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_idea_add(hass, connection, msg, manager) -> dict[str, Any]:
+    """A child offers to do a chore that isn't on the list."""
+    return {
+        "idea": manager.chore_ideas.add(
+            msg["member_id"], msg["name"], msg.get("emoji"), msg.get("points")
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/idea/cancel",
+        vol.Optional(PASS): str,
+        vol.Required("idea_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_idea_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.chore_ideas.cancel(msg["idea_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/idea/decide",
+        vol.Optional(PASS): str,
+        vol.Required("idea_id"): str,
+        vol.Required("approved"): bool,
+        vol.Optional("points"): vol.Any(None, vol.Coerce(int)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_idea_decide(hass, connection, msg, manager) -> dict[str, Any]:
+    """Yes (a one-off chore of theirs, at this many points) or no."""
+    return manager.chore_ideas.decide(
+        msg["idea_id"], msg["approved"], msg.get("points")
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/challenge",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("other_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_challenge(hass, connection, msg, manager) -> dict[str, Any]:
+    """Race someone to finish today's own chores first (open to everyone)."""
+    return {"challenge": manager.challenges.start(msg["member_id"], msg["other_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mood",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("mood"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_mood(hass, connection, msg, manager) -> dict[str, Any]:
+    """How today was (open to everyone; only parents see the history)."""
+    manager.moods.set(msg["member_id"], msg["mood"])
+    return {}
 
 
 @websocket_api.websocket_command(

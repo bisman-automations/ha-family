@@ -103,6 +103,16 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_idea_decide,
         ws_challenge,
         ws_mood,
+        ws_freeze,
+        ws_wish,
+        ws_statement,
+        ws_quest_save,
+        ws_quest_delete,
+        ws_quest_step,
+        ws_quest_undo,
+        ws_pet_save,
+        ws_pet_delete,
+        ws_pet_care,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -690,6 +700,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("leave_warn"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("challenge_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("mood_check"): bool,
+        vol.Optional("freeze_cost"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("quiet_from"): vol.Any(None, str),
+        vol.Optional("quiet_until"): vol.Any(None, str),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
         vol.Optional("family_goal"): vol.Any(
@@ -894,6 +907,7 @@ async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("member_id"): str,
         vol.Required("chore_id"): str,
         vol.Optional("to"): vol.Any(None, str),
+        vol.Optional("pay"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
     }
 )
 @websocket_api.async_response
@@ -901,7 +915,9 @@ async def ws_pin(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_trade_offer(hass, connection, msg, manager) -> dict[str, Any]:
     """Offer one of your own chores today to someone else (or anyone)."""
     return {
-        "trade": manager.trades.offer(msg["member_id"], msg["chore_id"], msg.get("to"))
+        "trade": manager.trades.offer(
+            msg["member_id"], msg["chore_id"], msg.get("to"), msg.get("pay") or 0
+        )
     }
 
 
@@ -1455,3 +1471,154 @@ async def ws_chore_example(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_set_example(hass, connection, msg, manager) -> dict[str, Any]:
     await manager.async_set_example(msg["chore_id"], msg["photo"])
     return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/freeze",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("day"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_freeze(hass, connection, msg, manager) -> dict[str, Any]:
+    """Spend points so a sick day doesn't break a streak (open to everyone)."""
+    return {"entry": manager.freeze(msg["member_id"], msg["day"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/wish",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("reward_id"): str,
+        vol.Required("on"): bool,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_wish(hass, connection, msg, manager) -> dict[str, Any]:
+    """Put a reward on someone's wishlist, or take it off (open to everyone)."""
+    return {"wishes": manager.set_wish(msg["member_id"], msg["reward_id"], msg["on"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/statement",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Optional("months_ago", default=0): vol.All(int, vol.Range(min=0, max=11)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_statement(hass, connection, msg, manager) -> dict[str, Any]:
+    """Someone's month, like a bank statement."""
+    return {"statement": manager.statement(msg["member_id"], msg["months_ago"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/quest/save",
+        vol.Optional(PASS): str,
+        vol.Required("quest"): dict,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_quest_save(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"quest": manager.quests.save(msg["quest"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/quest/delete",
+        vol.Optional(PASS): str,
+        vol.Required("quest_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_quest_delete(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.quests.delete(msg["quest_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/quest/step",
+        vol.Optional(PASS): str,
+        vol.Required("quest_id"): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_quest_step(hass, connection, msg, manager) -> dict[str, Any]:
+    """Someone did a quest's next step (open to everyone)."""
+    return {"entry": manager.quests.step(msg["quest_id"], msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/quest/undo",
+        vol.Optional(PASS): str,
+        vol.Required("quest_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_quest_undo(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.quests.undo_step(msg["quest_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/pet/save",
+        vol.Optional(PASS): str,
+        vol.Required("pet"): dict,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_pet_save(hass, connection, msg, manager) -> dict[str, Any]:
+    return {"pet": manager.pets.save(msg["pet"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/pet/delete",
+        vol.Optional(PASS): str,
+        vol.Required("pet_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_pet_delete(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.pets.delete(msg["pet_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/pet/care",
+        vol.Optional(PASS): str,
+        vol.Required("pet_id"): str,
+        vol.Required("slot"): vol.Coerce(int),
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
+    """Someone fed (or walked) a pet (open to everyone, like a chore)."""
+    return {"entry": manager.pets.care(msg["pet_id"], msg["slot"], msg["member_id"])}

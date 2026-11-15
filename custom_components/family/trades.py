@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 OFFERED = "offered"
 TAKEN = "taken"
 APPROVED = "approved"
+KIND_TRADE_PAY = "trade_pay"  # points paid for taking someone's chore
 
 
 def _error(message: str) -> Exception:
@@ -80,7 +81,7 @@ class Trades:
         return chore
 
     def offer(
-        self, member_id: str, chore_id: str, to: str | None = None
+        self, member_id: str, chore_id: str, to: str | None = None, pay: int = 0
     ) -> dict[str, Any]:
         manager = self.manager
         member = manager.member(member_id)
@@ -102,6 +103,9 @@ class Trades:
             t["chore_id"] == chore_id and t["from"] == member_id for t in self.items
         ):
             raise _error("You've already offered that one")
+        pay = max(0, int(pay or 0))
+        if pay > manager.points(member_id):
+            raise _error(f"{member['name']} doesn't have {pay} points to pay")
         trade = {
             "id": uuid4().hex,
             "chore_id": chore_id,
@@ -114,6 +118,8 @@ class Trades:
             "day": dt_util.now().date().isoformat(),
             "status": OFFERED,
             "at": dt_util.now().isoformat(),
+            # Points the offerer pays whoever takes it, on a parent's yes.
+            "pay": pay,
         }
         self.items.append(trade)
         manager.changed()
@@ -156,6 +162,36 @@ class Trades:
             self.items.remove(trade)
             self.manager.changed()
             return None
+        pay = int(trade.get("pay") or 0)
+        if pay:
+            if pay > self.manager.points(trade["from"]):
+                raise _error(
+                    f"{trade['from_name']} doesn't have the {pay} points any more"
+                )
+            now = dt_util.now().isoformat()
+            taker = next(
+                (m["name"] for m in self.manager.members if m["id"] == trade["to"]),
+                "someone",
+            )
+            for member, points, title in (
+                (trade["from"], -pay, f"Paid {taker} to do {trade['chore']}"),
+                (
+                    trade["to"],
+                    pay,
+                    f"Paid by {trade['from_name']} for {trade['chore']}",
+                ),
+            ):
+                self.manager.entries.append(
+                    {
+                        "id": uuid4().hex[:12],
+                        "at": now,
+                        "kind": KIND_TRADE_PAY,
+                        "member": member,
+                        "title": title,
+                        "points": points,
+                        "trade": trade["id"],
+                    }
+                )
         trade["status"] = APPROVED
         self.manager.changed()
         return trade

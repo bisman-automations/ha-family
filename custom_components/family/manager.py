@@ -62,11 +62,14 @@ from .live_activity import ChoreActivity
 from .moods import Moods
 from .parent_pass import ParentPasses
 from .parents_notify import ParentNotices
+from .pets import Pets
 from .photos import Photos
 from .picks import Picks
+from .quests import Quests
 from .reminders import ChoreReminders
 from .reward_requests import RewardRequests
 from .routines import Routines
+from .statement import month_bounds, statement
 from .todo_sync import TodoSync
 from .trades import Trades
 from .voice import Voice
@@ -147,6 +150,10 @@ def _done_when(raw: Any) -> dict[str, str] | None:
         raise FamilyError("Pick what the device shows when it's done")
     return {"entity_id": entity_id, "state": state[:60]}
 
+
+KIND_FREEZE = "freeze"  # points spent so a sick day doesn't break a streak
+FREEZE_EVERY_DAYS = 7  # at most one streak freeze a week
+MAX_WISHES = 3
 
 # What a chore's "when it's done, also start" can be, and how it's started.
 ON_DONE_SERVICES = {
@@ -234,6 +241,8 @@ class FamilyManager:
         self.chore_ideas = ChoreIdeas(self)
         self.challenges = Challenges(self)
         self.moods = Moods(self)
+        self.quests = Quests(self)
+        self.pets = Pets(self)
         self.new_badges: list[dict[str, Any]] = []
         self.voice = Voice(self)
         self._seen_chores: tuple | None = None
@@ -275,6 +284,8 @@ class FamilyManager:
         self.chore_ideas.load(data)
         self.challenges.load(data)
         self.moods.load(data)
+        self.quests.load(data)
+        self.pets.load(data)
         # Streaks count days with all of one's own chores done from this day;
         # before it, any chore, as they used to.
         if "streak_rule_from" not in self.settings:
@@ -317,6 +328,8 @@ class FamilyManager:
             **self.chore_ideas.data(),
             **self.challenges.data(),
             **self.moods.data(),
+            **self.quests.data(),
+            **self.pets.data(),
         }
 
     @callback
@@ -1211,9 +1224,11 @@ class FamilyManager:
         """Whether a day had any of this member's own dashboard chores (one
         taken in turns isn't counted: whose turn it was isn't kept)."""
 
+        frozen = self.frozen_days(member_id)
+
         def has_own(day: date) -> bool:
-            if self.away.on(day):
-                return False  # away: a day off
+            if self.away.on(day) or day in frozen:
+                return False  # away, or a streak freeze: a day off
             return any(
                 model.is_own(c, member_id)
                 and not c.get("turns")
@@ -1222,6 +1237,105 @@ class FamilyManager:
             )
 
         return has_own
+
+    def frozen_days(self, member_id: str) -> set[date]:
+        """Days this member froze their streak on (spent points for a sick day)."""
+        return {
+            date.fromisoformat(e["day"])
+            for e in self.entries
+            if e.get("kind") == KIND_FREEZE
+            and e["member"] == member_id
+            and e.get("day")
+            and e.get("review") != model.REVIEW_REJECTED
+        }
+
+    def freeze_offers(self, member_id: str) -> list[str]:
+        """Days a freeze would save their streak: yesterday if it was missed,
+        and today while it isn't done. None while freezes are off, or one was
+        used in the last week."""
+        cost = int(self.settings.get("freeze_cost") or 0)
+        if not cost:
+            return []
+        today = dt_util.now().date()
+        frozen = self.frozen_days(member_id)
+        if any(today - day < timedelta(days=FREEZE_EVERY_DAYS) for day in frozen):
+            return []
+        has_own = self._has_own(member_id)
+        done = model.all_done_days(self.entries, member_id)
+        return [
+            day.isoformat()
+            for day in (today - timedelta(days=1), today)
+            if has_own(day) and day not in done
+        ]
+
+    @callback
+    def freeze(self, member_id: str, day: str) -> dict[str, Any]:
+        """Spend points so a sick day doesn't break their streak."""
+        member = self.member(member_id)
+        if day not in self.freeze_offers(member_id):
+            raise FamilyError("A streak freeze can't be used for that day")
+        cost = int(self.settings.get("freeze_cost") or 0)
+        if self.points(member_id) < cost:
+            raise FamilyError(f"{member['name']} needs {cost} points for a freeze")
+        entry = {
+            "id": _id(),
+            "at": _now_iso(),
+            "kind": KIND_FREEZE,
+            "member": member_id,
+            "title": "Streak freeze ("
+            + f"{date.fromisoformat(day):%a %b} {date.fromisoformat(day).day})",
+            "points": -cost,
+            "day": day,
+        }
+        self.entries.append(entry)
+        self._changed()
+        return entry
+
+    @callback
+    def set_wish(self, member_id: str, reward_id: str, on: bool) -> list[str]:
+        """Add a reward to someone's wishlist (up to MAX_WISHES), or take it off."""
+        member = self.member(member_id)
+        reward = self.reward(reward_id)
+        wishes = [w for w in member.get("wishes") or [] if w != reward_id]
+        if on:
+            if not model.reward_for(reward, member_id):
+                raise FamilyError(f"{reward['name']} isn't for {member['name']}")
+            if len(wishes) >= MAX_WISHES:
+                raise FamilyError(f"Up to {MAX_WISHES} wishes: take one off first")
+            wishes.append(reward_id)
+        member["wishes"] = wishes
+        self._changed()
+        return wishes
+
+    def most_wanted(self) -> list[dict[str, Any]]:
+        """Rewards on the wishlists, the most wished for first."""
+        counts: dict[str, list[str]] = {}
+        known = {r["id"] for r in self.rewards}
+        for member in self.members:
+            for wish in member.get("wishes") or []:
+                if wish in known:
+                    counts.setdefault(wish, []).append(member["id"])
+        return sorted(
+            ({"reward_id": rid, "members": who} for rid, who in counts.items()),
+            key=lambda w: -len(w["members"]),
+        )
+
+    def statement(self, member_id: str, months_ago: int) -> dict[str, Any]:
+        member = self.member(member_id)
+        start, end = month_bounds(dt_util.now().date(), months_ago)
+        result = statement(
+            self.entries, member_id, int(self.carried.get(member_id, 0)), start, end
+        )
+        result["member"] = member["name"]
+        result["money"] = (
+            {
+                "value": self.settings.get("point_value"),
+                "currency": self.settings.get("currency") or "",
+            }
+            if self.settings.get("point_value")
+            else None
+        )
+        return result
 
     def streak(self, member_id: str, done_today: bool = False) -> int:
         """Days in a row this member did all of their own chores."""
@@ -1524,6 +1638,13 @@ class FamilyManager:
             self.settings["challenge_points"] = model.clean_points(
                 raw.get("challenge_points") or 0, "Points for winning a race"
             )
+        if "freeze_cost" in raw:
+            self.settings["freeze_cost"] = model.clean_points(
+                raw.get("freeze_cost") or 0, "A streak freeze"
+            )
+        for key in ("quiet_from", "quiet_until"):
+            if key in raw:
+                self.settings[key] = model.clean_time(raw.get(key), "Quiet hours")
         if "mood_check" in raw:
             self.settings["mood_check"] = bool(raw.get("mood_check"))
         if "pick_points" in raw:
@@ -2165,7 +2286,11 @@ class FamilyManager:
             # Screen time their own chores unlock each day: minutes on a
             # TV Mgmt TV once all of their own chores are done.
             **_unlock(raw),
-            # Chosen on the Family dashboard, not here: kept as it is.
+            # Chosen on the Family dashboard, not here: kept as they are.
+            "wishes": next(
+                (m.get("wishes") for m in self.members if m["id"] == member_id), None
+            )
+            or [],
             "goal": next(
                 (m.get("goal") for m in self.members if m["id"] == member_id), None
             ),
@@ -2515,6 +2640,8 @@ class FamilyManager:
             self.picks.forget_member(item_id)
             self.chore_ideas.forget_member(item_id)
             self.moods.forget_member(item_id)
+            self.quests.forget_member(item_id)
+            self.pets.forget_member(item_id)
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
             # Drop them from rewards they were picked for. An empty list stays
@@ -2663,6 +2790,7 @@ class FamilyManager:
                 "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
                 "mood_today": self.moods.today(m["id"]),
+                "freeze_offers": self.freeze_offers(m["id"]),
                 "badges": model.badge_list(m.get("badges")),
                 "birthday_today": savings.birthday_today(m),
                 # While rewards are on hold: when that ends (None: not held).
@@ -2771,6 +2899,16 @@ class FamilyManager:
             "challenges": self.challenges.snapshot(),
             "challenge_points": int(self.settings.get("challenge_points") or 0),
             "mood_check": bool(self.settings.get("mood_check")),
+            "quests": self.quests.snapshot(),
+            "pets": self.pets.snapshot(),
+            "freeze_cost": int(self.settings.get("freeze_cost") or 0),
+            # The shared screen rests between these times (None: never).
+            "quiet": {
+                "from": self.settings.get("quiet_from"),
+                "until": self.settings.get("quiet_until"),
+            }
+            if self.settings.get("quiet_from") and self.settings.get("quiet_until")
+            else None,
         }
         if is_admin if parent is None else parent:
             result["owed"] = model.money_owed(self.entries)
@@ -2810,7 +2948,11 @@ class FamilyManager:
                 "leave_warn": int(self.settings.get("leave_warn") or 30),
                 "challenge_points": int(self.settings.get("challenge_points") or 0),
                 "mood_check": bool(self.settings.get("mood_check")),
+                "freeze_cost": int(self.settings.get("freeze_cost") or 0),
+                "quiet_from": self.settings.get("quiet_from"),
+                "quiet_until": self.settings.get("quiet_until"),
             }
+            result["most_wanted"] = self.most_wanted()
             if self.settings.get("mood_check"):
                 result["moods"] = self.moods.recent(today)
             result["weeks"] = model.weekly_stats(

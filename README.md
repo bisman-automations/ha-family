@@ -155,6 +155,15 @@ wall: true
 - **How was today?** With the evening check-in on, each person taps how their day was. Only parents see it, under **History**.
 - **Time to leave.** On days a parent set a leave time, a countdown shows across the top (and on the wall view) from shortly before: "Leave in 14 minutes".
 
+### Quests, pets, wishlists and more
+
+- **Quests.** A bigger job in steps, such as clearing out the garage. The steps open one at a time under **Quests**; whoever does one taps it (on everyone's page, then says who) and gets its points.
+- **Pets.** Each pet's meals (or walks) at set times. A time can be ticked off from an hour before it, once, so nobody feeds the dog two breakfasts; it's late an hour after. Each one is checked under **To check** like a chore, and can be undone like one.
+- **Save your streak.** With streak freezes on, someone who missed yesterday (or can't finish today) can spend points to make it a day off, once a week.
+- **Paying for a trade.** When offering a chore to trade, a child can add some of their own points for whoever takes it; they move when a parent says yes.
+- **Wishlist.** On a reward's sheet, **♡ On my wishlist** marks up to three rewards someone wants most. Parents see **Most wanted** on the **Rewards** tab.
+- **Quiet hours.** Between the times a parent sets, the shared screen rests after a while with no taps: a big clock, time to leave and notes for everyone. A tap wakes it.
+
 ### On a kid's own phone
 
 Add `#me` to the end of the Family page's address on a child's phone (`/family#me`), or add the Family card with `phone: true`. If their Home Assistant login is linked to their family member (through their person), it opens straight on their page with only what's theirs: what they're going for, their chores, picks, routines, up for grabs, rewards and tomorrow. There's no people strip to switch to someone else.
@@ -257,8 +266,10 @@ Every card in the parent controls folds away: tap its title. A folded card stays
 - **Notes.** Every note on the board, who put it up and until when. Put one up for everyone or for one person, or take any note down.
 - **Family.** Add, edit or remove family members, and add or take away points by hand, with a reason. Each member can have an **allowance**: points added every week, and a **birthday** (month and day). Add the **year born** too, and chores can be set for some ages. **Picture mode** shows that person big pictures on their chores and reads them aloud. With TV Mgmt, **Their chores done unlock** gives minutes of TV (on one TV, or the whole home too) the moment they finish all of their own chores for the day; undoing a chore takes the time back.
 - **Away** (under **Family**). For a trip: set the first day away and, optionally, the day you're back (the last day away). While away, chores and routines are off, nothing counts as missed, streaks skip those days (a day away is a day off), and the weekly allowance isn't given (it isn't made up later). Points, rewards and everything else keep working. **We're back home** ends it, and today counts as usual again. Trips that haven't started can be removed.
+- **Quests** and **Pets** (under **Chores**). Add a quest with its steps, one on each line with the points at the end (`Sweep the floor [3]`), and who can do it; **Put back the last step** undoes one done by mistake (its points too). Add a pet with what's done (Feed, Walk), the times, and the points each time.
+- **Pocket money statement** (under **History**). Pick someone and a month: points at the start, every entry, earned, spent, given and taken away, and points at the end. **Print** gives them a copy.
 - **Give jar** (under **Family**). What the family gives for, the target in points, and optionally a percent of each allowance that goes in by itself. **Start counting again from now** begins a new jar; **Remove** takes it away.
-- **Bingo, races and the evening check-in** (under **Family**). Points for a bingo line and for the whole card (0 and 0: no bingo), points for winning a race (0: no races), and whether the evening check-in shows. **How their days were** (top of **History**) shows the last two weeks of check-ins.
+- **Bingo, races and the evening check-in** (under **Family**). Points for a bingo line and for the whole card (0 and 0: no bingo), points for winning a race (0: no races), a streak freeze's cost (0: none), the shared screen's quiet hours, and whether the evening check-in shows. **How their days were** (top of **History**) shows the last two weeks of check-ins.
 - **Time to leave** (under **Family**). A leave time for each day of the week (empty: none) and how many minutes before it the countdown shows.
 - **Saving and birthday bonuses** (under **Family**). A **saving bonus**: a percent (up to 50%) of the points someone kept all week, given with the allowance, at most so many points (0: no limit). "Kept" is the lower of their points now and a week ago, so this week's points don't count yet and spending lowers it. **Birthday points**: given once on each person's birthday. **Match on saving up**: when someone gets the reward they set as what they're saving for, a parent adds this percent of what they put in, so at 25% a 100-point reward takes 80 of their own; the match shows in History as a bonus.
 - **Allowance and money** (under **Family**). The day and time the weekly allowance is given (a week Home Assistant was off isn't made up), and optionally what one point is worth and a money sign, so points also show as money, like "42 points · $4.20".

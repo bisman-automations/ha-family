@@ -61,6 +61,8 @@ SECTIONS = (
     "vote",
     "chores",
     "bingo",
+    "quests",
+    "pets",
     "pick",
     "claims",
     "routines",

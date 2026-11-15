@@ -242,7 +242,7 @@ async function shrinkPhoto(file) {
 const matchPoints = (cost, percent) => (percent > 0 && cost > 0 ? cost - Math.ceil((cost * 100) / (100 + percent)) : 0);
 
 // The sections a child's own phone shows.
-const PHONE_SECTIONS = ["going", "mood", "chores", "bingo", "pick", "routines", "grabs", "rewards", "tomorrow"];
+const PHONE_SECTIONS = ["going", "mood", "chores", "bingo", "quests", "pets", "pick", "routines", "grabs", "rewards", "tomorrow"];
 // The evening check-in's choices (moods.MOODS).
 const MOODS = [["great", "🤩", "Great"], ["good", "🙂", "Good"], ["ok", "😐", "OK"], ["tired", "😴", "Tired"], ["sad", "😢", "Sad"], ["angry", "😠", "Angry"]];
 const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -342,6 +342,8 @@ const SECTIONS = [
   ["vote", "What's for dinner?"],
   ["chores", "My chores"],
   ["bingo", "Chore bingo"],
+  ["quests", "Quests"],
+  ["pets", "Pets"],
   ["pick", "Pick your chores"],
   ["claims", "Who did this?"],
   ["routines", "Routines"],
@@ -773,6 +775,23 @@ const STYLES = `
   .banner.birthday { background: color-mix(in srgb, #e91e63 16%, transparent); }
   .banner.leave { background: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent); font-size: 1.15em; font-weight: 600; }
   .banner.leave.now { background: color-mix(in srgb, var(--error-color, #db4437) 22%, transparent); }
+  .quest-steps, .pet-slots { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+  .quest-steps .done, .pet-slots .done { color: var(--success-color, #43a047); }
+  .quest-steps .later, .pet-slots .later { opacity: .55; }
+  .tile.quest, .tile.pet { align-items: stretch; }
+  .freeze-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pay { color: var(--success-color, #43a047); font-weight: 600; }
+  .quiet { min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; cursor: pointer; }
+  .quiet-clock { font-size: clamp(64px, 16vw, 160px); font-weight: 300; line-height: 1; }
+  .quiet-day { font-size: 22px; opacity: .7; }
+  .quiet-note { font-size: 20px; margin: 0; max-width: 40ch; }
+  .quiet-hint { opacity: .4; margin-top: 24px; }
+  .statement-nums { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 12px; }
+  table.statement { width: 100%; border-collapse: collapse; }
+  table.statement td { padding: 4px 6px; border-bottom: 1px solid var(--fam-divider); }
+  table.statement .num { text-align: right; white-space: nowrap; }
+  table.statement .neg { color: var(--error-color, #db4437); }
+  .badge-count { font-weight: 600; color: #e91e63; }
   .bingo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 520px; }
   .bingo-cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; min-height: 92px; padding: 8px; border-radius: 14px; border: 2px dashed var(--fam-divider); font-size: 14px; }
   .bingo-cell .emoji { font-size: 26px; }
@@ -1030,6 +1049,14 @@ class FamilyPanel extends HTMLElement {
       this._over = this._overCount();
       if (this._sheet?.type === "days") this._renderOverlay();
       else if (!this._sheet && !this._busy) this._render();
+    }
+    if (this._mode === "family" && this._data?.quiet) {
+      const quiet = this._isQuiet();
+      if (quiet !== this._wasQuiet && !this._sheet && !this._busy) this._render();
+      else if (quiet) {
+        const clock = this.shadowRoot?.querySelector(".quiet-clock");
+        if (clock) clock.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      }
     }
     if (this._mode === "family" && this._data?.leave) {
       const left = leaveMinutes(this._data.leave);
@@ -1599,6 +1626,10 @@ class FamilyPanel extends HTMLElement {
           <small>Each person gets a 3×3 card of nine of their chores, new every Monday; a chore done marks its square. Needs nine chores they can do. 0 and 0: no bingo.</small></div>
         <label class="field"><span>Races</span><span><input type="number" name="challenge_points" min="0" max="10000" value="${esc(st.challenge_points || 0)}" style="width:90px"> points to whoever finishes today's own chores first</span>
           <small>A child challenges a brother or sister on the Family dashboard. 0: no races.</small></label>
+        <label class="field"><span>Streak freeze</span><span><input type="number" name="freeze_cost" min="0" max="10000" value="${esc(st.freeze_cost || 0)}" style="width:90px"> points to make a missed day a day off</span>
+          <small>For a sick day: yesterday, or today, once a week. 0: no freezes.</small></label>
+        <div class="field"><span>Quiet hours on the shared screen</span><span class="inline"><input type="time" name="quiet_from" value="${esc(st.quiet_from || "")}" aria-label="From"> to <input type="time" name="quiet_until" value="${esc(st.quiet_until || "")}" aria-label="Until"></span>
+          <small>After a while with no taps, the Family dashboard rests: a big clock, time to leave and notes, until someone taps it. Leave both empty for never.</small></div>
         <label class="check"><input type="checkbox" name="mood_check" ${st.mood_check ? "checked" : ""}> Evening check-in: each person taps how their day was. Only parents see it, under <b>History</b>.</label>
         <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
       </form></div>`;
@@ -1614,6 +1645,94 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Show it</span><span><input type="number" name="leave_warn" min="1" max="120" value="${esc(st.leave_warn || 30)}" style="width:80px"> minutes before</span></label>
         <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
       </form></div>`;
+  }
+
+  _statementCard() {
+    const months = Array.from({ length: 6 }, (_v, i) => {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      return [String(i), d.toLocaleDateString([], { month: "long", year: "numeric" })];
+    });
+    return `<div class="card"><h2>Pocket money statement</h2>
+      <p class="muted">One person's month, like a bank statement: points at the start, everything earned, spent, given and taken away, and points at the end. Print it for them.</p>
+      <form class="inline" data-statement-form>
+        <label class="field"><span>Who</span><select name="member_id">${this._data.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>
+        <label class="field"><span>Month</span><select name="months_ago">${months.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join("")}</select></label>
+        <button class="btn primary" type="submit" style="align-self:end">Show it</button></form></div>`;
+  }
+
+  _statementBody(st) {
+    const cash = (n) => (st.money ? ` <small>(${esc(money(n, st.money))})</small>` : "");
+    const month = new Date(`${st.start}T12:00:00`).toLocaleDateString([], { month: "long", year: "numeric" });
+    return `<h3>${esc(st.member)}: ${esc(month)}</h3>
+      <div class="statement-nums"><span>Start <b>${st.opening}</b>${cash(st.opening)}</span><span>Earned <b>+${st.earned}</b></span><span>Spent <b>−${st.spent}</b></span>${st.given ? `<span>Given <b>−${st.given}</b></span>` : ""}${st.taken ? `<span>Taken away <b>−${st.taken}</b></span>` : ""}<span>End <b>${st.closing}</b>${cash(st.closing)}</span></div>
+      <table class="statement"><tbody>${st.lines.map((l) => `<tr><td>${esc(new Date(l.at).toLocaleDateString([], { month: "short", day: "numeric" }))}</td><td>${esc(l.title)}</td><td class="num ${l.points < 0 ? "neg" : ""}">${l.points > 0 ? "+" : ""}${l.points}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nothing this month.</td></tr>`}</tbody></table>`;
+  }
+
+  _printStatement() {
+    const st = this._sheet?.statement;
+    if (!st) return;
+    const w = window.open("", "_blank");
+    if (!w) {
+      this._toast("Allow pop-ups for Home Assistant to print it.", true);
+      return;
+    }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(st.member)}</title>
+      <style>body{font-family:system-ui,sans-serif;margin:24px;color:#222}.statement-nums{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 12px}table{border-collapse:collapse;width:100%}td{border-bottom:1px solid #ddd;padding:4px 6px}.num{text-align:right}.neg{color:#b00}.muted{color:#666}</style></head>
+      <body>${this._statementBody(st)}</body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
+
+  _questsCard() {
+    const quests = this._data.quests || [];
+    const editing = this._questEdit;
+    const rows = quests.map((q) => `<li><span class="grow">${emo(q.emoji, "🗺️")} <b>${esc(q.name)}</b><small>${q.done.length} of ${q.steps.length} steps done${q.members ? ` · ${esc(namesText(q.members.map((id) => this._memberById(id)?.name).filter(Boolean)))}` : ""}</small></span>
+        ${q.done.length ? `<button class="btn" data-quest-undo="${esc(q.id)}">Put back the last step</button>` : ""}
+        <button class="btn" data-quest-edit="${esc(q.id)}">Edit</button><button class="btn bad" data-quest-delete="${esc(q.id)}">Remove</button></li>`).join("");
+    const q = editing === "new" ? {} : quests.find((x) => x.id === editing);
+    const form = q ? `<form class="edit" data-quest-form>
+        <input type="hidden" name="id" value="${esc(q.id || "")}">
+        <div class="inline">${this._picField(q.emoji, "🗺️")}<label class="field grow"><span>Quest</span><input type="text" name="name" maxlength="60" required value="${esc(q.name || "")}" placeholder="Clear out the garage"></label></div>
+        <label class="field"><span>Steps, in order: one on each line, with points at the end</span><textarea name="steps" rows="5" placeholder="Sort the toys [5]&#10;Sweep the floor [3]&#10;Take the boxes out [5]">${esc((q.steps || []).map((st) => `${st.name}${st.points ? ` [${st.points}]` : ""}`).join("\n"))}</textarea></label>
+        <div class="field"><span>Who can do it</span>${this._whoDropdown(q.members ?? null, { id: "quest-who", label: "Who can do it", everyone: true })}</div>
+        <div class="form-actions"><button class="btn" type="button" data-quest-edit="">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`
+      : `<button class="btn primary" data-quest-edit="new">Add a quest</button>`;
+    return `<div class="card"><h2>Quests</h2>
+      <p class="muted">A bigger job in steps, such as clearing out the garage. The steps open one at a time on the Family dashboard; whoever does one gets its points.</p>
+      ${rows ? `<ul class="rows">${rows}</ul>` : ""}${form}</div>`;
+  }
+
+  _petsCard() {
+    const pets = this._data.pets || [];
+    const editing = this._petEdit;
+    const rows = pets.map((p) => `<li><span class="grow">${emo(p.emoji, "🐾")} <b>${esc(p.name)}</b><small>${esc(p.task)} at ${esc(p.times.map(timeText).join(", "))}${p.points ? ` · +${pts(p.points)} each` : ""}</small></span>
+        <button class="btn" data-pet-edit="${esc(p.id)}">Edit</button><button class="btn bad" data-pet-delete="${esc(p.id)}">Remove</button></li>`).join("");
+    const p = editing === "new" ? { task: "Feed" } : pets.find((x) => x.id === editing);
+    const form = p ? `<form class="edit" data-pet-form>
+        <input type="hidden" name="id" value="${esc(p.id || "")}">
+        <div class="inline">${this._picField(p.emoji, "🐶")}<label class="field grow"><span>Name</span><input type="text" name="name" maxlength="60" required value="${esc(p.name || "")}" placeholder="Rex"></label>
+        <label class="field"><span>What</span><input type="text" name="task" maxlength="30" value="${esc(p.task || "Feed")}" style="width:120px"></label></div>
+        <div class="inline"><label class="field grow"><span>Times (separated by commas)</span><input type="text" name="times" value="${esc((p.times || []).join(", "))}" placeholder="07:00, 18:00"></label>
+        <label class="field"><span>Points each time</span><input type="number" name="points" min="0" max="10000" value="${esc(p.points || 0)}" style="width:100px"></label></div>
+        <div class="form-actions"><button class="btn" type="button" data-pet-edit="">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`
+      : `<button class="btn primary" data-pet-edit="new">Add a pet</button>`;
+    return `<div class="card"><h2>Pets</h2>
+      <p class="muted">Each pet's meals (or walks) at set times. Each one can be done once, from an hour before its time, so nobody feeds the dog two breakfasts. It's checked under <b>To check</b> like a chore.</p>
+      ${rows ? `<ul class="rows">${rows}</ul>` : ""}${form}</div>`;
+  }
+
+  _mostWantedCard() {
+    const wanted = this._data.most_wanted || [];
+    if (!wanted.length) return "";
+    const rows = wanted.map((w) => {
+      const r = this._data.rewards.find((x) => x.id === w.reward_id);
+      if (!r) return "";
+      return `<li><span class="grow">${emo(r.emoji, "🎁")} <b>${esc(r.name)}</b><small>${pts(r.points)} · wished for by ${esc(namesText(w.members.map((id) => this._memberById(id)?.name).filter(Boolean)))}</small></span><span class="badge-count">♥ ${w.members.length}</span></li>`;
+    }).join("");
+    return `<div class="card"><h2>Most wanted</h2><p class="muted">The rewards on the kids' wishlists (up to three each), the most wished for first.</p><ul class="rows">${rows}</ul></div>`;
   }
 
   _moodsCard() {
@@ -1727,7 +1846,7 @@ class FamilyPanel extends HTMLElement {
     const f = (this._historyFilter ||= { member: "", text: "", kind: "" });
     const people = this._data.members.map((m) => `<option value="${esc(m.id)}" ${f.member === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("");
     const kinds = HISTORY_KINDS.map(([k, label]) => `<option value="${k}" ${f.kind === k ? "selected" : ""}>${esc(label)}</option>`).join("");
-    return `${this._reportCard()}${this._moodsCard()}${this._balanceChart()}${this._weeksCard()}<div class="card"><div class="history-filter inline">
+    return `${this._reportCard()}${this._statementCard()}${this._moodsCard()}${this._balanceChart()}${this._weeksCard()}<div class="card"><div class="history-filter inline">
         <label class="field"><span>Who</span><select data-history-member aria-label="Who"><option value="">Everyone</option>${people}</select></label>
         <label class="field"><span>Type</span><select data-history-kind aria-label="Type">${kinds}</select></label>
         <label class="field grow"><span>Search</span><input type="search" data-history-text value="${esc(f.text)}" placeholder="A chore, reward or bonus" aria-label="Search history"></label>
@@ -1944,7 +2063,9 @@ class FamilyPanel extends HTMLElement {
     if (slot) slot.innerHTML = this._switchBar();
     const wall = this._mode !== "parents" && this._isWall();
     main.classList.toggle("wall-main", wall);
-    main.innerHTML = (slot || wall ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : wall ? this._renderWall() : this._renderFamily());
+    const quiet = !wall && this._isQuiet();
+    this._wasQuiet = quiet;
+    main.innerHTML = quiet ? this._renderQuiet() : (slot || wall ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : wall ? this._renderWall() : this._renderFamily());
     if (this._mode === "parents") this._foldCards();
     this._fit();
     this._renderOverlay();
@@ -2022,7 +2143,7 @@ class FamilyPanel extends HTMLElement {
             const bar = short && !used ? this._bar(member.points, r.points) : "";
             // Not enough yet: a tap offers to save up for it.
             return `<button class="tile${short ? " short" : ""}${goal ? " goal" : ""}" data-reward="${esc(r.id)}" ${used ? "disabled" : ""}>
-              ${goal ? `<span class="sub goal-tag">🎯 Saving for this</span>` : ""}
+              ${goal ? `<span class="sub goal-tag">🎯 Saving for this</span>` : member && (member.wishes || []).includes(r.id) ? `<span class="sub goal-tag">♥ On your wishlist</span>` : ""}
               ${r.emoji ? `<span class="emoji">${emo(r.emoji)}</span>` : ""}
               <span class="label">${esc(r.name)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
               <span class="worth">${pts(r.points)}</span>
@@ -2048,7 +2169,7 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
     // Someone's own routines on their page; every routine on everyone's.
     const routines = (d.routines || []).filter((r) => !member || r.who.includes(member.id));
-    const goingFor = [this._familyGoalTile(), this._giveTile(member), ...(member ? this._goingFor(member) : []), ...this._raceTiles(member)].filter(Boolean);
+    const goingFor = [this._familyGoalTile(), this._freezeTile(member), this._giveTile(member), ...(member ? this._goingFor(member) : []), ...this._raceTiles(member)].filter(Boolean);
     const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
     // "Add a note" comes first, so it's never folded away with the rest.
     const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
@@ -2078,6 +2199,8 @@ class FamilyPanel extends HTMLElement {
     const bingo = member ? d.bingo?.[member.id] : null;
     const sections = {
       bingo: bingo ? this._section("bingo", "Chore bingo", this._bingoBody(bingo)) : "",
+      quests: this._questsBody(member),
+      pets: this._petsBody(member),
       mood: member && d.mood_check ? this._section("mood", "How was today?", this._moodBody(member)) : "",
       weather: weather ? this._section("weather", "What to wear", `<div class="tiles" data-fit="weather">${this._weatherTile(weather)}</div>`) : "",
       tomorrow: tomorrow ? this._section("tomorrow", "Tomorrow", tomorrow.body, tomorrow.count) : "",
@@ -2144,6 +2267,74 @@ class FamilyPanel extends HTMLElement {
     const reward = [board.line_points ? `+${pts(board.line_points)} a line` : "", board.full_points ? `+${pts(board.full_points)} for the whole card` : ""].filter(Boolean).join(", ");
     return `<div class="bingo-grid">${cells}</div>
       <p class="muted">${board.full ? "🎉 The whole card! " : board.lines ? `${board.lines} ${board.lines === 1 ? "line" : "lines"} so far. ` : ""}Rows, columns and diagonals count${reward ? `: ${esc(reward)}` : ""}. A new card every Monday.</p>`;
+  }
+
+  // A streak about to break (a sick day): freeze it for some points.
+  _freezeTile(member) {
+    const days = member?.freeze_offers || [];
+    if (!days.length || !this._data.freeze_cost) return "";
+    const today = new Date().toISOString().slice(0, 10);
+    return `<div class="tile going-tile freeze"><span class="emoji">❄️</span><span class="label">Save your streak</span>
+      <span class="sub">Sick, or a busy day? A streak freeze makes it a day off, for ${pts(this._data.freeze_cost)}. One a week.</span>
+      <span class="freeze-btns">${days.map((day) => `<button class="btn" data-freeze="${esc(day)}" ${member.points < this._data.freeze_cost ? "disabled" : ""}>${day === today ? "Freeze today" : "Freeze yesterday"}</button>`).join("")}</span></div>`;
+  }
+
+  // Quests: bigger jobs in steps, done in order.
+  _questsBody(member) {
+    const quests = (this._data.quests || []).filter((q) => !member || !q.members || q.members.includes(member.id));
+    if (!quests.length) return "";
+    const tiles = quests.map((q) => {
+      const steps = q.steps.map((st, i) => {
+        const done = q.done[i];
+        const who = done ? this._memberById(done.member) : null;
+        if (done) return `<li class="done">✓ ${esc(st.name)}<small>${who ? ` · ${esc(who.name)}` : ""}</small></li>`;
+        if (i === q.next) return `<li class="next"><button class="btn primary" data-quest="${esc(q.id)}">Done: ${esc(st.name)}${st.points ? ` +${pts(st.points)}` : ""}</button></li>`;
+        return `<li class="later">🔒 ${esc(st.name)}</li>`;
+      }).join("");
+      return `<div class="tile quest${q.finished ? " won" : ""}"><span class="emoji">${emo(q.emoji, "🗺️")}</span><span class="label">${esc(q.name)}</span>
+        ${this._bar(q.done.length, q.steps.length)}<ol class="quest-steps">${steps}</ol>${q.finished ? `<span class="sub">Quest complete! 🎉</span>` : ""}</div>`;
+    }).join("");
+    return this._section("quests", "Quests", `<div class="tiles quests" data-fit="quests">${tiles}</div>`, quests.length);
+  }
+
+  // Pets: today's meals (or walks), done once each.
+  _petsBody(member) {
+    const pets = (this._data.pets || []).filter((p) => !member || !p.members || p.members.includes(member.id));
+    if (!pets.length) return "";
+    const tiles = pets.map((p) => {
+      const slots = p.slots.map((slot, i) => {
+        const who = slot.done_by ? this._memberById(slot.done_by) : null;
+        if (slot.done_by) return `<li class="done">✓ ${esc(timeText(slot.time))}<small> · ${esc(who?.name || "Someone")} at ${esc(timeText(slot.done_at.slice(11, 16)))}</small></li>`;
+        if (slot.due) return `<li><button class="btn${slot.late ? " bad" : " primary"}" data-pet="${esc(p.id)}" data-slot="${i}">${esc(p.task)} · ${esc(timeText(slot.time))}${slot.late ? " (late)" : ""}</button></li>`;
+        return `<li class="later">${esc(timeText(slot.time))}</li>`;
+      }).join("");
+      return `<div class="tile pet"><span class="emoji">${emo(p.emoji, "🐾")}</span><span class="label">${esc(p.name)}</span><ul class="pet-slots">${slots}</ul>${p.points ? `<span class="sub">+${pts(p.points)} each time</span>` : ""}</div>`;
+    }).join("");
+    return this._section("pets", "Pets", `<div class="tiles pets" data-fit="pets">${tiles}</div>`, pets.length);
+  }
+
+  // The shared screen at rest (quiet hours): a clock, time to leave and notes.
+  _isQuiet() {
+    const q = this._data?.quiet;
+    if (!q || this._mode === "parents" || Date.now() - (this._lastTouch || 0) < IDLE_MS) return false;
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const at = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+    const from = at(q.from);
+    const until = at(q.until);
+    return from <= until ? minutes >= from && minutes < until : minutes >= from || minutes < until;
+  }
+
+  _renderQuiet() {
+    const d = this._data;
+    const now = new Date();
+    const notes = (d.notes || []).filter((n) => !n.member).slice(0, 3);
+    return `<div class="quiet" data-wake>
+      <div class="quiet-clock">${esc(now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</div>
+      <div class="quiet-day">${esc(now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }))}</div>
+      ${this._leaveBanner()}
+      ${notes.map((n) => `<p class="quiet-note">${esc(n.text)}</p>`).join("")}
+      <p class="quiet-hint">Tap to wake</p></div>`;
   }
 
   // The evening check-in: one tap for how today was.
@@ -2323,7 +2514,7 @@ class FamilyPanel extends HTMLElement {
 
   _tradesBlock(member) {
     const rows = this._tradesFor(member).map((t) => {
-      const chore = `${t.emoji ? `${emo(t.emoji)} ` : ""}<b>${esc(t.chore)}</b> +${pts(t.points)}`;
+      const chore = `${t.emoji ? `${emo(t.emoji)} ` : ""}<b>${esc(t.chore)}</b> +${pts(t.points)}${t.pay ? ` <span class="pay">and ${pts(t.pay)} paid</span>` : ""}`;
       if (t.from === member.id) {
         const taker = t.to ? this._memberById(t.to)?.name || "someone" : "anyone";
         const text = t.status === "taken" ? `${esc(taker)} took it · waiting for a parent` : `Offered to ${esc(taker)}`;
@@ -2760,6 +2951,7 @@ class FamilyPanel extends HTMLElement {
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Trade a chore">
         <h3>Trade ${esc(chore?.name || "this chore")}?</h3>
         <p class="muted">Whoever takes it does it today instead, once a parent says yes.</p>
+        <label class="field"><span>Pay them (optional)</span><span><input type="number" min="0" max="${esc(this._memberById(s.member)?.points || 0)}" data-trade-pay value="0" inputmode="numeric" style="width:90px"> of your points, when a parent says yes</span></label>
         <div class="people small-people">${others.map((m) => `<button class="person pick" style="--c:${esc(m.color)}" data-trade-to="${esc(m.id)}">${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></button>`).join("")}
           <button class="person pick" data-trade-to=""><span class="name">Anyone</span></button></div>
         <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
@@ -2861,6 +3053,23 @@ class FamilyPanel extends HTMLElement {
         <p class="muted">What earned and spent them lately, with the points before → after.</p>
         <div class="story">${body}</div>
         <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
+    }
+    if (s.type === "who") {
+      const quest = s.what === "quest" ? (d.quests || []).find((q) => q.id === s.id) : null;
+      const pet = s.what === "pet" ? (d.pets || []).find((p) => p.id === s.id) : null;
+      const allowed = (quest || pet)?.members;
+      const people = d.members.filter((m) => !allowed || allowed.includes(m.id));
+      const what = quest ? `${quest.steps[quest.next]?.name || ""} (${quest.name})` : pet ? `${pet.task} ${pet.name}` : "";
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who did it">
+        <h3>Who did it?</h3><p class="muted">${esc(what)}</p>
+        <div class="people small-people">${people.map((m) => `<button class="person pick" style="--c:${esc(m.color)}" data-who-did="${esc(m.id)}">${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></button>`).join("")}</div>
+        <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
+    }
+    if (s.type === "statement") {
+      const st = s.statement;
+      return `<div class="sheet-bg" data-close><div class="sheet wide" role="dialog" aria-modal="true" aria-label="Statement">
+        ${st ? this._statementBody(st) : `<p class="muted">Loading…</p>`}
+        <div class="actions"><button class="big" data-close>Close</button>${st ? `<button class="big primary" data-statement-print>Print</button>` : ""}</div></div></div>`;
     }
     if (s.type === "give") {
       const member = this._memberById(s.member);
@@ -3021,6 +3230,7 @@ class FamilyPanel extends HTMLElement {
         ${this._bar(member.points, reward.points)}
         <div class="actions" style="margin-top:18px"><button class="big" data-close>Not now</button>
         ${saving ? `<button class="big" data-goal="">Stop saving for it</button>` : `<button class="big primary" data-goal="${esc(reward.id)}" ${this._busy ? "disabled" : ""}>Save for this</button>`}
+        <button class="big" data-wish="${esc(reward.id)}">${(member.wishes || []).includes(reward.id) ? "♥ Off my wishlist" : "♡ On my wishlist"}</button>
         ${this._canShare(reward) ? `<button class="big" data-together-start>Get it together</button>` : ""}</div></div></div>`;
     }
     const tv = reward.kind === "tv_time" ? ` You'll get ${reward.minutes} minutes on ${esc(reward.tv_name || "the TV")} straight away.` : reward.kind === "music_time" ? ` You'll get ${reward.minutes} minutes of music on ${esc(reward.speaker_name || "the speaker")} straight away.` : " A parent will give it to you.";
@@ -3351,7 +3561,7 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
     const listForm = edit?.collection === "todo_lists" && !edit.item?.id ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
-    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>${this._pickCard()}
+    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>${this._pickCard()}${this._questsCard()}${this._petsCard()}
       <div class="card"><h2>Chores from to-do lists</h2>
         <p class="muted">Every open item on these lists is a chore. Put the points at the end of an item to change them, like <b>Feed the dog [5]</b>. When it's marked done, the item is ticked off its list.</p>
         ${lists}${listForm}</div>`;
@@ -3598,7 +3808,7 @@ class FamilyPanel extends HTMLElement {
       : `<p class="empty">No rewards yet.</p>`;
     const form = edit?.collection === "rewards" && !edit.item?.id ? this._rewardForm(edit.item) : `<button class="btn primary" data-new="rewards">Add a reward</button>`;
     const b = d.bonus || {};
-    return `${this._familyGoalCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
+    return `${this._familyGoalCard()}${this._mostWantedCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
       <div class="card"><h2>Bonus points</h2>
         <form class="edit" data-bonus>
           <label class="field"><span>All of their own chores done for the day</span>
@@ -4238,6 +4448,75 @@ class FamilyPanel extends HTMLElement {
       this._call({ type: `${DOMAIN}/pin`, pin: null, own }, own ? "Your PIN is removed." : "Family PIN removed.");
       return;
     }
+    if (ds.questEdit !== undefined) {
+      this._questEdit = ds.questEdit || null;
+      this._render();
+      return;
+    }
+    if (ds.petEdit !== undefined) {
+      this._petEdit = ds.petEdit || null;
+      this._render();
+      return;
+    }
+    if ("statementPrint" in ds) {
+      this._printStatement();
+      return;
+    }
+    if ("wake" in ds) {
+      this._lastTouch = Date.now();
+      this._render();
+      return;
+    }
+    if (ds.freeze) {
+      const member = this._memberById(this._member);
+      if (member) this._call({ type: `${DOMAIN}/freeze`, member_id: member.id, day: ds.freeze }, "❄️ Streak saved.");
+      return;
+    }
+    if (ds.wish) {
+      const member = this._memberById(this._sheet?.member || this._member);
+      if (!member) return;
+      const on = !(member.wishes || []).includes(ds.wish);
+      this._sheet = null;
+      this._renderOverlay();
+      this._call({ type: `${DOMAIN}/wish`, member_id: member.id, reward_id: ds.wish, on }, on ? "♥ On your wishlist." : "Off your wishlist.");
+      return;
+    }
+    if (ds.quest) {
+      if (this._member) this._call({ type: `${DOMAIN}/quest/step`, quest_id: ds.quest, member_id: this._member }, "Step done! 🗺️");
+      else {
+        this._sheet = { type: "who", what: "quest", id: ds.quest };
+        this._renderOverlay();
+      }
+      return;
+    }
+    if (ds.pet) {
+      if (this._member) this._call({ type: `${DOMAIN}/pet/care`, pet_id: ds.pet, slot: Number(ds.slot), member_id: this._member }, "Thank you! 🐾");
+      else {
+        this._sheet = { type: "who", what: "pet", id: ds.pet, slot: Number(ds.slot) };
+        this._renderOverlay();
+      }
+      return;
+    }
+    if (ds.whoDid && this._sheet?.type === "who") {
+      const s = this._sheet;
+      this._sheet = null;
+      this._renderOverlay();
+      if (s.what === "quest") this._call({ type: `${DOMAIN}/quest/step`, quest_id: s.id, member_id: ds.whoDid }, "Step done! 🗺️");
+      else this._call({ type: `${DOMAIN}/pet/care`, pet_id: s.id, slot: s.slot, member_id: ds.whoDid }, "Thank you! 🐾");
+      return;
+    }
+    if ("questUndo" in ds) {
+      this._call({ type: `${DOMAIN}/quest/undo`, quest_id: ds.questUndo }, "Put back.");
+      return;
+    }
+    if (ds.questDelete) {
+      this._call({ type: `${DOMAIN}/quest/delete`, quest_id: ds.questDelete }, "Removed.");
+      return;
+    }
+    if (ds.petDelete) {
+      this._call({ type: `${DOMAIN}/pet/delete`, pet_id: ds.petDelete }, "Removed.");
+      return;
+    }
     if ("giveRemove" in ds) {
       this._call({ type: `${DOMAIN}/settings`, give_goal: null }, "Removed.");
       return;
@@ -4415,7 +4694,8 @@ class FamilyPanel extends HTMLElement {
     } else if (ds.tradeTo !== undefined && this._sheet?.type === "trade") {
       const s = this._sheet;
       this._sheet = null;
-      this._call({ type: `${DOMAIN}/trade/offer`, member_id: s.member, chore_id: s.id, to: ds.tradeTo || null }, "Offered. It's still yours until someone takes it and a parent says yes.");
+      const pay = Math.max(0, Math.round(Number(this.shadowRoot.querySelector("[data-trade-pay]")?.value) || 0));
+      this._call({ type: `${DOMAIN}/trade/offer`, member_id: s.member, chore_id: s.id, to: ds.tradeTo || null, pay }, "Offered. It's still yours until someone takes it and a parent says yes.");
     } else if (ds.tradeTake) {
       this._call({ type: `${DOMAIN}/trade/take`, trade_id: ds.tradeTake, member_id: this._member }, "Taken. A parent will say yes or no.");
     } else if (ds.tradeCancel) {
@@ -4879,7 +5159,36 @@ class FamilyPanel extends HTMLElement {
     if (form.dataset.funForm !== undefined) {
       const v = this._formValues(form);
       const number = (x) => Math.max(0, Math.round(Number(x) || 0));
-      return this._call({ type: `${DOMAIN}/settings`, bingo_line: number(v.bingo_line), bingo_full: number(v.bingo_full), challenge_points: number(v.challenge_points), mood_check: !!v.mood_check }, "Saved.");
+      return this._call({ type: `${DOMAIN}/settings`, bingo_line: number(v.bingo_line), bingo_full: number(v.bingo_full), challenge_points: number(v.challenge_points), mood_check: !!v.mood_check, freeze_cost: number(v.freeze_cost), quiet_from: v.quiet_from && v.quiet_until ? v.quiet_from : null, quiet_until: v.quiet_from && v.quiet_until ? v.quiet_until : null }, "Saved.");
+    }
+    if (form.dataset.statementForm !== undefined) {
+      const v = this._formValues(form);
+      this._sheet = { type: "statement", statement: null };
+      this._renderOverlay();
+      try {
+        const result = await this._ws({ type: `${DOMAIN}/statement`, member_id: v.member_id, months_ago: Number(v.months_ago) || 0 });
+        this._sheet = { type: "statement", statement: result.statement };
+      } catch (err) {
+        this._sheet = null;
+        this._toast(err?.message || String(err), true);
+      }
+      this._renderOverlay();
+      return;
+    }
+    if (form.dataset.questForm !== undefined) {
+      const v = this._formValues(form);
+      const steps = String(v.steps || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+        const m = line.match(/^(.*?)\s*\[(\d+)\]\s*$/);
+        return m ? { name: m[1], points: Number(m[2]) } : { name: line, points: 0 };
+      });
+      const members = this._rewardMembers(v);
+      this._questEdit = null;
+      return this._call({ type: `${DOMAIN}/quest/save`, quest: { id: v.id || null, name: v.name, emoji: v.emoji || null, steps, members } }, "Saved.");
+    }
+    if (form.dataset.petForm !== undefined) {
+      const v = this._formValues(form);
+      this._petEdit = null;
+      return this._call({ type: `${DOMAIN}/pet/save`, pet: { id: v.id || null, name: v.name, emoji: v.emoji || null, task: v.task, times: String(v.times || "").split(",").map((t) => t.trim()).filter(Boolean), points: Math.max(0, Math.round(Number(v.points) || 0)) } }, "Saved.");
     }
     if (form.dataset.leaveForm !== undefined) {
       const v = this._formValues(form);

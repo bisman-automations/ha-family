@@ -63,6 +63,8 @@ SECTIONS = (
     "bingo",
     "quests",
     "pets",
+    "auctions",
+    "reading",
     "pick",
     "claims",
     "routines",
@@ -1485,6 +1487,7 @@ def vote_winner(options: list[str], votes: dict[str, int]) -> int | None:
 KIND_HIGH_FIVE = "high_five"  # no points: a thank-you from one member to another
 HIGH_FIVE_EMOJI = ("🙌", "⭐", "❤️", "👏", "🎉", "🤝")
 BONUS_TIMER = "timer"  # beat a chore's timer
+BONUS_BEAT_CLOCK = "beat_clock"  # a routine finished before the time to leave
 MAX_TIMER_MINUTES = 180
 
 

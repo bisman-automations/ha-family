@@ -26,8 +26,10 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import model, savings
+from . import allowance_rule, model, reading, savings, team
+from .auctions import Auctions
 from .away import Away
+from .bank import ScreenBank
 from .bingo import Bingo
 from .boosts import Boosts
 from .calendar_today import DAYS as CALENDAR_DAYS, CalendarToday, clean_calendars
@@ -39,7 +41,6 @@ from .const import (
     EVENT_BONUS,
     EVENT_CHORE_DONE,
     EVENT_CHORE_REVIEWED,
-    EVENT_GOAL_REACHED,
     EVENT_REWARD_REDEEMED,
     EVENT_REWARDS_HELD,
     KEEP_HISTORY_DAYS,
@@ -56,6 +57,7 @@ from .countdowns import Countdowns
 from .dinner_vote import DinnerVote
 from .done_when import DoneWhen
 from .give import MAX_GIVE_PERCENT, Give, clean_goal as clean_give_goal
+from .goals import FamilyGoals
 from .kid_board import KidBoard
 from .leave import clean_leave_times, leave_at
 from .live_activity import ChoreActivity
@@ -126,6 +128,14 @@ def _set(entry: dict[str, Any], key: str, value: Any) -> None:
         entry.pop(key, None)
 
 
+def _bank(raw: dict[str, Any]) -> dict[str, Any]:
+    tv = raw.get("bank_tv") or None
+    most = int(raw.get("bank_max") or 120)
+    if not 15 <= most <= 600:
+        raise FamilyError("A screen-time bank holds 15 to 600 minutes")
+    return {"bank_tv": tv, "bank_max": most if tv else 120}
+
+
 def _unlock(raw: dict[str, Any]) -> dict[str, Any]:
     tv = raw.get("unlock_tv") or None
     minutes = model.clean_points(raw.get("unlock_minutes") or 0, "Minutes")
@@ -154,6 +164,7 @@ def _done_when(raw: Any) -> dict[str, str] | None:
 KIND_FREEZE = "freeze"  # points spent so a sick day doesn't break a streak
 FREEZE_EVERY_DAYS = 7  # at most one streak freeze a week
 MAX_WISHES = 3
+MAX_GIFT_IDEAS = 10
 
 # What a chore's "when it's done, also start" can be, and how it's started.
 ON_DONE_SERVICES = {
@@ -240,6 +251,9 @@ class FamilyManager:
         self.give = Give(self)
         self.chore_ideas = ChoreIdeas(self)
         self.challenges = Challenges(self)
+        self.goals = FamilyGoals(self)
+        self.auctions = Auctions(self)
+        self.bank = ScreenBank(self)
         self.moods = Moods(self)
         self.quests = Quests(self)
         self.pets = Pets(self)
@@ -283,6 +297,9 @@ class FamilyManager:
         self.done_when.load(data)
         self.chore_ideas.load(data)
         self.challenges.load(data)
+        self.goals.load()
+        self.auctions.load(data)
+        self.bank.load(data)
         self.moods.load(data)
         self.quests.load(data)
         self.pets.load(data)
@@ -327,6 +344,8 @@ class FamilyManager:
             **self.done_when.data(),
             **self.chore_ideas.data(),
             **self.challenges.data(),
+            **self.auctions.data(),
+            **self.bank.data(),
             **self.moods.data(),
             **self.quests.data(),
             **self.pets.data(),
@@ -334,7 +353,7 @@ class FamilyManager:
 
     @callback
     def _changed(self, members: bool = False) -> None:
-        self._check_goal()
+        self.goals.check()
         self._check_badges()
         self._store.async_delay_save(self._data, SAVE_DELAY)
         async_dispatcher_send(self.hass, SIGNAL_CHANGED)
@@ -403,33 +422,8 @@ class FamilyManager:
     # ---- family goal ----------------------------------------------------------
 
     def family_goal(self) -> dict[str, Any] | None:
-        """The family goal with how far along it is, or None."""
-        goal = self.settings.get("family_goal")
-        if not goal:
-            return None
-        progress = model.goal_progress(self.entries, goal.get("since"))
-        return {
-            "name": goal["name"],
-            "emoji": goal.get("emoji"),
-            "target": goal["target"],
-            "progress": min(progress, goal["target"]),
-            "reached": bool(goal.get("reached_at")) or progress >= goal["target"],
-            "since": goal.get("since"),
-        }
-
-    @callback
-    def _check_goal(self) -> None:
-        """The family goal just reached: say so once (an event to automate on)."""
-        goal = self.settings.get("family_goal")
-        if not goal or goal.get("reached_at"):
-            return
-        if model.goal_progress(self.entries, goal.get("since")) < goal["target"]:
-            return
-        goal["reached_at"] = _now_iso()
-        self.hass.bus.async_fire(
-            EVENT_GOAL_REACHED,
-            {"name": goal["name"], "target": goal["target"]},
-        )
+        """The first family goal (closest to done), or None; see goals.py."""
+        return self.goals.first()
 
     def _check_badges(self, quiet: bool = False) -> None:
         """Badges just earned: kept on the member, with an event, and told
@@ -474,6 +468,8 @@ class FamilyManager:
             self.reminders.check(now)
         self.live.tick(now)
         self.vote.tick(now)
+        self.auctions.tick(now)
+        self.bank.tick(now)
         if (
             not any(
                 c.get("days")
@@ -583,20 +579,28 @@ class FamilyManager:
             return
         # Away: no allowance this week (it isn't made up later).
         away = self.away.on(now.date())
+        rule = self.settings.get("allowance_rule") or allowance_rule.DEFAULT_RULE
         for member in [] if away else self.members:
             points = int(member.get("allowance") or 0)
             if points <= 0:
                 continue
-            self.entries.append(
-                {
-                    "id": _id(),
-                    "at": now.isoformat(),
-                    "kind": model.KIND_ALLOWANCE,
-                    "member": member["id"],
-                    "title": "Weekly allowance",
-                    "points": points,
-                }
+            share = allowance_rule.last_week_share(
+                model.all_done_days(self.entries, member["id"]),
+                self._has_own(member["id"]),
+                now.date(),
             )
+            points, why = allowance_rule.adjusted(points, share, rule)
+            allowance = {
+                "id": _id(),
+                "at": now.isoformat(),
+                "kind": model.KIND_ALLOWANCE,
+                "member": member["id"],
+                "title": f"Weekly allowance ({why})" if why else "Weekly allowance",
+                "points": points,
+            }
+            if why:
+                allowance["base_points"] = int(member.get("allowance") or 0)
+            self.entries.append(allowance)
             # The give jar's share of it, if a parent set one.
             if gift := self.give.from_allowance(member["id"], points):
                 self.entries.append(gift)
@@ -813,6 +817,8 @@ class FamilyManager:
             if not can:
                 continue
             row = {**chore, "can": can}
+            if chore.get("team"):
+                row["team_done"] = [m for m in chore.get("members") or [] if m in done]
             # Double points: shown as what it's worth now.
             if (factor := self.boosts.factor(chore["id"], now)) > 1:
                 row.update(
@@ -848,6 +854,8 @@ class FamilyManager:
         ]
         chore = self.chore(chore_id)
         now = dt_util.now()
+        if chore.get("team") and helping:
+            raise FamilyError(f"{chore['name']} is a team chore: each one ticks it")
         if chore.get("unpicked"):
             raise FamilyError(f"Nobody picked {chore['name']} this week yet")
         picture = self.photos.decode(photo) if photo else None
@@ -879,6 +887,11 @@ class FamilyManager:
         }
         if factor > 1:
             entry["boost"] = factor
+        if chore.get("team"):
+            # The points wait until everyone on the team has ticked it.
+            entry["team_points"] = entry["points"]
+            entry["points"] = 0
+            entry["team_wait"] = True
         if picture is not None:
             await self.photos.async_save(entry["id"], picture)
             entry["photo"] = True
@@ -910,6 +923,12 @@ class FamilyManager:
             )
         if chore.get("source") == "todo":
             await self._async_set_todo(chore["todo_entity"], chore["todo_uid"], True)
+        waiting: list[str] = []
+        if chore.get("team") and not team.settle(self.entries, chore, now):
+            waiting = [
+                self._member_name(m)
+                for m in team.still_to_tick(self.entries, chore, now)
+            ]
         bonuses = self._earn_bonuses(member, entry)
         if model.beat_timer(chore, timer_started, now):
             timer = {
@@ -962,6 +981,9 @@ class FamilyManager:
             )
         if bonuses:
             entry = {**entry, "bonuses": bonuses}
+        if waiting:
+            # Not stored: the points wait until these have ticked it too.
+            entry = {**entry, "team_waiting": waiting}
         return entry
 
     def only_when_ok(self, chore: dict[str, Any]) -> bool:
@@ -1307,6 +1329,38 @@ class FamilyManager:
         self._changed()
         return wishes
 
+    @callback
+    def gift_idea(self, member_id: str, text: Any, add: bool) -> list[str]:
+        """Add a gift idea to someone's list (up to MAX_GIFT_IDEAS), or take
+        one off. Shared with family as text (``gift_text``)."""
+        member = self.member(member_id)
+        idea = str(text or "").strip()[:80]
+        if not idea:
+            raise FamilyError("Write the gift idea")
+        ideas = [i for i in member.get("gift_ideas") or [] if i.lower() != idea.lower()]
+        if add:
+            if len(ideas) >= MAX_GIFT_IDEAS:
+                raise FamilyError(
+                    f"Up to {MAX_GIFT_IDEAS} gift ideas: take one off first"
+                )
+            ideas.append(idea)
+        member["gift_ideas"] = ideas
+        self._changed()
+        return ideas
+
+    def gift_text(self, member_id: str) -> str:
+        """Gift ideas and wishlist for grandparents and friends, as text."""
+        member = self.member(member_id)
+        names = {r["id"]: r["name"] for r in self.rewards}
+        lines = [f"Gift ideas for {member['name']}"]
+        if member.get("birthday"):
+            month, day = (int(x) for x in member["birthday"].split("-"))
+            lines.append(f"Birthday: {date(2000, month, day):%B} {day}")
+        ideas = list(member.get("gift_ideas") or [])
+        ideas += [names[w] for w in member.get("wishes") or [] if w in names]
+        lines += [f"- {i}" for i in ideas] or ["(nothing on the list yet)"]
+        return "\n".join(lines)
+
     def most_wanted(self) -> list[dict[str, Any]]:
         """Rewards on the wishlists, the most wished for first."""
         counts: dict[str, list[str]] = {}
@@ -1489,24 +1543,6 @@ class FamilyManager:
             (m["name"] for m in self.members if m["id"] == member_id), "Someone"
         )
 
-    @callback
-    def _save_goal(self, raw: Any, restart: bool) -> None:
-        """Set, change or remove the family goal. A new goal, or starting
-        over, counts from now; changing the name or target keeps going."""
-        goal = model.clean_goal(raw)
-        if goal is None:
-            self.settings.pop("family_goal", None)
-            return
-        old = self.settings.get("family_goal") or {}
-        if old and not restart:
-            goal["since"] = old.get("since") or _now_iso()
-            # A bigger target makes a reached goal open again.
-            if old.get("reached_at") and goal["target"] <= old["target"]:
-                goal["reached_at"] = old["reached_at"]
-        else:
-            goal["since"] = _now_iso()
-        self.settings["family_goal"] = goal
-
     def save_settings(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Change the settings that were sent; the rest stay."""
         if "auto_check" in raw:
@@ -1528,7 +1564,24 @@ class FamilyManager:
             days = model.clean_points(raw.get("streak_days") or 0, "Days in a row")
             self.settings["streak_days"] = min(days, 365)
         if "family_goal" in raw:
-            self._save_goal(raw["family_goal"], bool(raw.get("restart_goal")))
+            try:
+                self.goals.save_legacy(
+                    raw["family_goal"], bool(raw.get("restart_goal"))
+                )
+            except FamilyError:
+                raise
+            except ValueError as err:
+                raise FamilyError(str(err)) from err
+        if "reading" in raw:
+            self.settings["reading"] = reading.clean_reading(raw.get("reading"))
+        if "allowance_rule" in raw:
+            self.settings["allowance_rule"] = allowance_rule.clean_rule(
+                raw.get("allowance_rule")
+            )
+        if "beat_clock_points" in raw:
+            self.settings["beat_clock_points"] = model.clean_points(
+                raw.get("beat_clock_points") or 0, "Beat the clock"
+            )
         if "reminder_tts" in raw:
             tts = raw.get("reminder_tts") or None
             if tts is not None and not str(tts).startswith("tts."):
@@ -2047,6 +2100,12 @@ class FamilyManager:
             f"{member['name']}'s reward: {reward['name']}",
         )
 
+    async def async_grant_tv_time(
+        self, tv: str, minutes: int, whole_home: bool, reason: str
+    ) -> None:
+        """For the screen-time bank (bank.py)."""
+        await self._async_grant_tv_time(tv, minutes, whole_home, reason)
+
     async def _async_grant_tv_time(
         self, tv: str, minutes: int, whole_home: bool, reason: str
     ) -> None:
@@ -2286,6 +2345,14 @@ class FamilyManager:
             # Screen time their own chores unlock each day: minutes on a
             # TV Mgmt TV once all of their own chores are done.
             **_unlock(raw),
+            # Unused minutes of this TV Mgmt TV are saved in their bank.
+            **_bank(raw),
+            # Added on the Family dashboard, not here: kept as they are.
+            "gift_ideas": next(
+                (m.get("gift_ideas") for m in self.members if m["id"] == member_id),
+                None,
+            )
+            or [],
             # Chosen on the Family dashboard, not here: kept as they are.
             "wishes": next(
                 (m.get("wishes") for m in self.members if m["id"] == member_id), None
@@ -2414,6 +2481,17 @@ class FamilyManager:
             raise FamilyError(
                 "A chore is either picked from the pool or taken in turns"
             )
+        # A team chore: each of its people ticks it, and the points count
+        # once they all have.
+        chore["team"] = bool(raw.get("team"))
+        if chore["team"]:
+            if len(members) < 2:
+                raise FamilyError("Pick at least two people for a team chore")
+            if chore["grab"] or chore["turns"] or chore["pool"]:
+                raise FamilyError(
+                    "A team chore is done by everyone on it: not up for grabs, "
+                    "in turns or from the pool"
+                )
         self._upsert(self.chores, chore)
         self._changed()
         self.done_when.watch()
@@ -2639,6 +2717,8 @@ class FamilyManager:
             self.vote.forget_member(item_id)
             self.picks.forget_member(item_id)
             self.chore_ideas.forget_member(item_id)
+            self.auctions.forget_member(item_id)
+            self.bank.forget_member(item_id)
             self.moods.forget_member(item_id)
             self.quests.forget_member(item_id)
             self.pets.forget_member(item_id)
@@ -2897,6 +2977,15 @@ class FamilyManager:
             "leave": None if self.away.on(today) else leave_at(self.settings, now),
             "chore_ideas": self.chore_ideas.snapshot(),
             "challenges": self.challenges.snapshot(),
+            "family_goals": self.goals.snapshot(),
+            "auctions": self.auctions.snapshot(),
+            "bank": self.bank.snapshot(),
+            "reading": reading.public_rule(self.settings.get("reading")),
+            "reading_today": {
+                m["id"]: reading.minutes_today(self.entries, m["id"], today)
+                for m in self.members
+            },
+            "beat_clock": int(self.settings.get("beat_clock_points") or 0),
             "challenge_points": int(self.settings.get("challenge_points") or 0),
             "mood_check": bool(self.settings.get("mood_check")),
             "quests": self.quests.snapshot(),

@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from . import model
 from .const import EVENT_CHORE_DONE
+from .leave import leave_at
 
 if TYPE_CHECKING:
     from .manager import FamilyManager
@@ -70,6 +71,8 @@ class Routines:
             "from_time": model.clean_time(raw.get("from_time"), "From"),
             "until_time": model.clean_time(raw.get("until_time"), "Until"),
             "enabled": bool(raw.get("enabled", True)),
+            # Bonus points for finishing it before today's time to leave.
+            "beat_clock": bool(raw.get("beat_clock")),
         }
         for index, item in enumerate(self.items):
             if item["id"] == routine["id"]:
@@ -168,6 +171,35 @@ class Routines:
         manager.changed()
         return result
 
+    def _beat_clock(
+        self, routine: dict[str, Any], entry: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Finished before today's time to leave: the beat-the-clock bonus,
+        kept with the routine's entry (undone and rejected with it)."""
+        points = int(self.manager.settings.get("beat_clock_points") or 0)
+        if not routine.get("beat_clock") or not points:
+            return None
+        now = dt_util.now()
+        leave = leave_at(self.manager.settings, now)
+        if leave is None or now >= datetime.fromisoformat(leave["at"]):
+            return None
+        bonus = {
+            "bonus": model.BONUS_BEAT_CLOCK,
+            "title": f"{routine['name']} done before it's time to go",
+            "points": points,
+        }
+        self.manager.entries.append(
+            {
+                "id": uuid.uuid4().hex[:12],
+                "at": entry["at"],
+                "kind": model.KIND_BONUS,
+                "member": entry["member"],
+                "for_entry": entry["id"],
+                **bonus,
+            }
+        )
+        return bonus
+
     async def _finish(
         self, routine: dict[str, Any], member: dict[str, Any]
     ) -> dict[str, Any]:
@@ -192,6 +224,8 @@ class Routines:
             entry["reviewed_at"] = entry["at"]
             entry["parent"] = True
         manager.entries.append(entry)
+        if bonus := self._beat_clock(routine, entry):
+            entry["bonuses"] = [bonus]
         if not parent:
             manager.notices.chore_done(entry, member)
         manager.hass.bus.async_fire(

@@ -22,7 +22,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from . import model
+from . import model, reading
 from .const import DOMAIN, MEDIA_MGMT_DOMAIN, SIGNAL_CHANGED, TV_MGMT_DOMAIN
 from .manager import FamilyError, FamilyManager, manager_of
 from .parent_pass import PIN_KEY, PINS_KEY
@@ -113,6 +113,16 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_pet_save,
         ws_pet_delete,
         ws_pet_care,
+        ws_goal_save,
+        ws_goal_delete,
+        ws_auction_start,
+        ws_auction_bid,
+        ws_auction_close,
+        ws_auction_cancel,
+        ws_reading_log,
+        ws_gift_idea,
+        ws_gift_text,
+        ws_bank_spend,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -714,6 +724,9 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
             },
         ),
         vol.Optional("restart_goal"): bool,
+        vol.Optional("reading"): vol.Any(None, dict),
+        vol.Optional("allowance_rule"): vol.Any(None, dict),
+        vol.Optional("beat_clock_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("reminder_tts"): vol.Any(None, str),
         vol.Optional("weather_entity"): vol.Any(None, str),
         vol.Optional("links"): [dict],
@@ -1622,3 +1635,185 @@ async def ws_pet_delete(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
     """Someone fed (or walked) a pet (open to everyone, like a chore)."""
     return {"entry": manager.pets.care(msg["pet_id"], msg["slot"], msg["member_id"])}
+
+
+# ---- 2.13.0 ----------------------------------------------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/family_goal/save",
+        vol.Optional(PASS): str,
+        vol.Optional("item_id"): vol.Any(None, str),
+        vol.Required("name"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+        vol.Required("target"): vol.Coerce(int),
+        vol.Optional("restart"): bool,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_goal_save(hass, connection, msg, manager) -> dict[str, Any]:
+    """Add a family goal, or change one (parents)."""
+    goal = manager.goals.save(
+        {"name": msg["name"], "emoji": msg.get("emoji"), "target": msg["target"]},
+        msg.get("item_id"),
+        bool(msg.get("restart")),
+    )
+    manager.changed()
+    return {"goal": goal}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/family_goal/delete",
+        vol.Optional(PASS): str,
+        vol.Required("item_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_goal_delete(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.goals.delete(msg["item_id"])
+    manager.changed()
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/auction/start",
+        vol.Optional(PASS): str,
+        vol.Required("name"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+        vol.Required("points"): vol.Coerce(int),
+        vol.Required("minutes"): vol.Coerce(int),
+        vol.Optional("members"): vol.Any(None, [str]),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_auction_start(hass, connection, msg, manager) -> dict[str, Any]:
+    """Put a chore up for auction: the lowest bid does it (parents)."""
+    return {
+        "auction": manager.auctions.start(
+            msg["name"],
+            msg["points"],
+            msg["minutes"],
+            msg.get("emoji"),
+            msg.get("members"),
+        )
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/auction/bid",
+        vol.Optional(PASS): str,
+        vol.Required("auction_id"): str,
+        vol.Required("member_id"): str,
+        vol.Required("points"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_auction_bid(hass, connection, msg, manager) -> dict[str, Any]:
+    """A bid: how few points they'd do it for (open to everyone)."""
+    manager.auctions.bid(msg["auction_id"], msg["member_id"], msg["points"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/auction/close",
+        vol.Optional(PASS): str,
+        vol.Required("auction_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_auction_close(hass, connection, msg, manager) -> dict[str, Any]:
+    auction = manager.auctions.close(msg["auction_id"])
+    return {"winner": auction.get("winner"), "points": auction.get("won_for")}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/auction/cancel",
+        vol.Optional(PASS): str,
+        vol.Required("auction_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_auction_cancel(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.auctions.cancel(msg["auction_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/reading/log",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("minutes"): vol.Coerce(int),
+        vol.Optional("book"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_reading_log(hass, connection, msg, manager) -> dict[str, Any]:
+    """Minutes read: points for whole blocks, checked like a chore."""
+    return {
+        "entry": reading.log(manager, msg["member_id"], msg["minutes"], msg.get("book"))
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/gift_idea",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("text"): str,
+        vol.Required("add"): bool,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_gift_idea(hass, connection, msg, manager) -> dict[str, Any]:
+    """Add or take off a gift idea (open to everyone, like the wishlist)."""
+    return {"gift_ideas": manager.gift_idea(msg["member_id"], msg["text"], msg["add"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/gifts/text",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_gift_text(hass, connection, msg, manager) -> dict[str, Any]:
+    """Gift ideas and wishlist as text to share with family (parents)."""
+    return {"text": manager.gift_text(msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/bank/spend",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("minutes"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_bank_spend(hass, connection, msg, manager) -> dict[str, Any]:
+    """Use saved TV minutes (open to everyone, like a reward)."""
+    return {"left": await manager.bank.async_spend(msg["member_id"], msg["minutes"])}

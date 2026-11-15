@@ -300,6 +300,8 @@ async def test_section_order(hass: HomeAssistant, client):
             "mood",
             "quests",
             "pets",
+            "auctions",
+            "reading",
         ]
     )
     assert (await client.ok("state"))["section_order"] == order

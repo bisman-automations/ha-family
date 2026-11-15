@@ -242,7 +242,7 @@ async function shrinkPhoto(file) {
 const matchPoints = (cost, percent) => (percent > 0 && cost > 0 ? cost - Math.ceil((cost * 100) / (100 + percent)) : 0);
 
 // The sections a child's own phone shows.
-const PHONE_SECTIONS = ["going", "mood", "chores", "bingo", "quests", "pets", "pick", "routines", "grabs", "rewards", "tomorrow"];
+const PHONE_SECTIONS = ["going", "mood", "chores", "bingo", "quests", "pets", "auctions", "reading", "pick", "routines", "grabs", "rewards", "tomorrow"];
 // The evening check-in's choices (moods.MOODS).
 const MOODS = [["great", "🤩", "Great"], ["good", "🙂", "Good"], ["ok", "😐", "OK"], ["tired", "😴", "Tired"], ["sad", "😢", "Sad"], ["angry", "😠", "Angry"]];
 const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -344,6 +344,8 @@ const SECTIONS = [
   ["bingo", "Chore bingo"],
   ["quests", "Quests"],
   ["pets", "Pets"],
+  ["auctions", "Chore auctions"],
+  ["reading", "Reading"],
   ["pick", "Pick your chores"],
   ["claims", "Who did this?"],
   ["routines", "Routines"],
@@ -1616,6 +1618,30 @@ class FamilyPanel extends HTMLElement {
       </form></div>`;
   }
 
+  _extrasCard() {
+    const st = this._data.settings || {};
+    const r = st.reading || { block_minutes: 0, points: 0, max_minutes: 120 };
+    const a = st.allowance_rule || { enabled: false, boost_at: 100, boost: 20, cut_below: 50, cut: 25 };
+    return `<div class="card"><h2>Reading, allowance rules and beat the clock</h2>
+      <form class="edit" data-extras-form>
+        <div class="field"><span>Reading log</span>
+          <span class="inline"><input type="number" name="reading_points" min="0" max="10000" value="${esc(r.points || 0)}" style="width:80px" aria-label="Points"> points for every
+          <input type="number" name="reading_block" min="0" max="240" value="${esc(r.block_minutes || 0)}" style="width:80px" aria-label="Minutes"> minutes read, up to
+          <input type="number" name="reading_max" min="0" max="600" value="${esc(r.max_minutes ?? 120)}" style="width:80px" aria-label="Most minutes a day"> minutes a day</span>
+          <small>The kids log their reading on the Family dashboard; it's checked under <b>To check</b> like a chore. 0 minutes: no reading log. 0 a day: no limit.</small></div>
+        <div class="field"><span>Allowance rule</span>
+          <label class="check"><input type="checkbox" name="rule_enabled" ${a.enabled ? "checked" : ""}> Last week's chores change this week's allowance</label>
+          <span class="inline">All done on <input type="number" name="boost_at" min="0" max="100" value="${esc(a.boost_at)}" style="width:70px" aria-label="Boost from"> % of days or more: up
+          <input type="number" name="boost" min="0" max="100" value="${esc(a.boost)}" style="width:70px" aria-label="Boost"> %</span>
+          <span class="inline">Under <input type="number" name="cut_below" min="0" max="100" value="${esc(a.cut_below)}" style="width:70px" aria-label="Cut below"> % of days: down
+          <input type="number" name="cut" min="0" max="100" value="${esc(a.cut)}" style="width:70px" aria-label="Cut"> %</span>
+          <small>Counts last week's days that had their own chores; the history says why it changed.</small></div>
+        <label class="field"><span>Beat the clock</span><span><input type="number" name="beat_clock_points" min="0" max="10000" value="${esc(st.beat_clock_points || 0)}" style="width:90px"> points for finishing a routine before it's time to leave</span>
+          <small>Tick <b>Beat the clock</b> on a routine (such as Morning), and set the times under <b>Time to leave</b>. 0: off.</small></label>
+        <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
+      </form></div>`;
+  }
+
   _funCard() {
     const st = this._data.settings || {};
     return `<div class="card"><h2>Bingo, races and the evening check-in</h2>
@@ -2118,6 +2144,7 @@ class FamilyPanel extends HTMLElement {
               <span class="label">${esc(c.name)}</span>${this._timerBit(c)}
               ${(c.list || c.on_list) && !own ? `<span class="sub">${esc(c.list || c.on_list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               ${c.traded ? `<span class="sub">Traded from ${esc(this._tradeFrom(c.traded))}</span>` : ""}
+              ${c.team ? `<span class="sub">Team: ${(c.team_done || []).length} of ${(c.members || []).length} done</span>` : ""}
               <span class="worth">+${pts(c.points)}</span>${c.boost ? `<span class="sub boost-tag">⚡ ${c.boost}× points</span>` : ""}
               <span class="tile-tools">${c.how || c.example ? `<button class="say-btn" data-how="${esc(c.id)}" aria-label="How to do ${esc(c.name)}" title="How to do it">ⓘ</button>` : ""}${sayIt}${member && fit === "chores" && c.source !== "todo" && !c.list && !c.traded && !this._offered(c.id, member.id) ? `<button class="trade-btn" data-trade-offer="${esc(c.id)}" aria-label="Trade ${esc(c.name)}" title="Trade">⇄</button>` : ""}</span>
               <button class="check" data-chore="${esc(c.id)}" aria-label="${esc(c.name)} is done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>`;
@@ -2169,7 +2196,7 @@ class FamilyPanel extends HTMLElement {
       .join("")}</div>`;
     // Someone's own routines on their page; every routine on everyone's.
     const routines = (d.routines || []).filter((r) => !member || r.who.includes(member.id));
-    const goingFor = [this._familyGoalTile(), this._freezeTile(member), this._giveTile(member), ...(member ? this._goingFor(member) : []), ...this._raceTiles(member)].filter(Boolean);
+    const goingFor = [...this._familyGoalTiles(), this._freezeTile(member), this._giveTile(member), this._bankTile(member), this._giftTile(member), ...(member ? this._goingFor(member) : []), ...this._raceTiles(member)].filter(Boolean);
     const notes = (d.notes || []).filter((n) => !member || !n.member || n.member === member.id);
     // "Add a note" comes first, so it's never folded away with the rest.
     const noteTiles = `<div class="tiles notes" data-fit="notes"><button class="tile add-note" data-note-new><span class="emoji">📝</span><span class="label">Add a note</span></button>${notes.map((n) => this._noteTile(n)).join("")}</div>`;
@@ -2201,6 +2228,8 @@ class FamilyPanel extends HTMLElement {
       bingo: bingo ? this._section("bingo", "Chore bingo", this._bingoBody(bingo)) : "",
       quests: this._questsBody(member),
       pets: this._petsBody(member),
+      auctions: this._auctionsBody(member),
+      reading: this._readingBody(member),
       mood: member && d.mood_check ? this._section("mood", "How was today?", this._moodBody(member)) : "",
       weather: weather ? this._section("weather", "What to wear", `<div class="tiles" data-fit="weather">${this._weatherTile(weather)}</div>`) : "",
       tomorrow: tomorrow ? this._section("tomorrow", "Tomorrow", tomorrow.body, tomorrow.count) : "",
@@ -2600,14 +2629,63 @@ class FamilyPanel extends HTMLElement {
   }
 
   // The goal the whole family works toward together.
-  _familyGoalTile() {
-    const g = this._data.family_goal;
-    if (!g) return "";
-    const left = Math.max(0, g.target - g.progress);
-    return `<div class="tile going-tile${g.reached ? " won" : ""}"><span class="emoji">${emo(g.emoji, g.reached ? "🎉" : "🏆")}</span>
+  _familyGoalTiles() {
+    const goals = this._data.family_goals || (this._data.family_goal ? [this._data.family_goal] : []);
+    return goals.map((g) => {
+      const left = Math.max(0, g.target - g.progress);
+      return `<div class="tile going-tile${g.reached ? " won" : ""}"><span class="emoji">${emo(g.emoji, g.reached ? "🎉" : "🏆")}</span>
       <span class="label">${g.reached ? `We did it: ${esc(g.name)}!` : esc(g.name)}</span>
       ${this._bar(g.progress, g.target)}
       <span class="sub">${g.reached ? "Everyone's chores got us there." : `Together: ${g.progress} of ${g.target} points · ${left} to go`}</span></div>`;
+    });
+  }
+
+  // Saved TV minutes (the screen-time bank), with a button to use some.
+  _bankTile(member) {
+    const bank = this._data.bank || {};
+    if (!member || !(member.id in bank)) return "";
+    const minutes = bank[member.id] || 0;
+    return `<button class="tile going-tile bank" data-bank ${minutes ? "" : "disabled"}><span class="emoji">🏦</span><span class="label">Saved TV time</span>
+      <span class="worth">${minutes} min</span><span class="sub">${minutes ? "Tap to use some today" : "Minutes your TV has left at night are saved here"}</span></button>`;
+  }
+
+  // Their gift ideas, for grandparents and birthdays.
+  _giftTile(member) {
+    if (!member) return "";
+    const ideas = member.gift_ideas || [];
+    return `<button class="tile going-tile gifts" data-gifts><span class="emoji">🎁</span><span class="label">Gift ideas</span>
+      <span class="sub">${ideas.length ? `${ideas.length} on your list` : "Add what you'd like for your birthday"}</span></button>`;
+  }
+
+  // Chores up for auction: the lowest bid does it.
+  _auctionsBody(member) {
+    const now = Date.now();
+    const auctions = (this._data.auctions || []).filter((a) => !member || !a.members || a.members.includes(member.id));
+    if (!auctions.length) return "";
+    const tiles = auctions.map((a) => {
+      if (a.status !== "open") {
+        const who = a.winner ? this._memberById(a.winner)?.name || "Someone" : null;
+        return `<div class="tile auction won"><span class="emoji">${emo(a.emoji, "🔨")}</span><span class="label">${esc(a.name)}</span>
+          <span class="sub">${who ? `Sold to ${esc(who)} for ${pts(a.won_for)}` : "Nobody bid"}</span></div>`;
+      }
+      const mins = Math.max(0, Math.round((new Date(a.closes).getTime() - now) / 60000));
+      const mine = member ? a.bids?.[member.id] : null;
+      return `<button class="tile auction" data-auction="${esc(a.id)}"><span class="emoji">${emo(a.emoji, "🔨")}</span><span class="label">${esc(a.name)}</span>
+        <span class="worth">up to ${pts(a.points)}</span>
+        <span class="sub">${a.lowest != null ? `Lowest bid ${pts(a.lowest)}` : "No bids yet"} · ${mins < 60 ? `${mins} min left` : `closes ${esc(timeText(a.closes.slice(11, 16)))}`}</span>
+        ${mine != null ? `<span class="sub">Your bid: ${pts(mine)}</span>` : `<span class="sub">Tap to bid</span>`}</button>`;
+    }).join("");
+    return this._section("auctions", "Chore auctions", `<p class="muted small">Bid how few points you'd do it for. The lowest bid when time's up gets the chore.</p><div class="tiles" data-fit="auctions">${tiles}</div>`, auctions.length);
+  }
+
+  // The reading log: tap to log minutes read.
+  _readingBody(member) {
+    const rule = this._data.reading;
+    if (!rule) return "";
+    const minutes = (who) => (this._data.reading_today || {})[who] || 0;
+    const sub = member ? `${minutes(member.id)} min today` : `+${pts(rule.points)} for every ${rule.block_minutes} min`;
+    return this._section("reading", "Reading", `<div class="tiles" data-fit="reading"><button class="tile reading" data-reading><span class="emoji">📚</span><span class="label">Log reading</span>
+      <span class="worth">+${pts(rule.points)}</span><span class="sub">every ${rule.block_minutes} min · ${esc(sub)}</span></button></div>`);
   }
 
   _goingFor(member) {
@@ -3071,6 +3149,54 @@ class FamilyPanel extends HTMLElement {
         ${st ? this._statementBody(st) : `<p class="muted">Loading…</p>`}
         <div class="actions"><button class="big" data-close>Close</button>${st ? `<button class="big primary" data-statement-print>Print</button>` : ""}</div></div></div>`;
     }
+    if (s.type === "bid") {
+      const a = (d.auctions || []).find((x) => x.id === s.id);
+      const member = this._memberById(s.member);
+      const people = d.members.filter((m) => !a?.members || a.members.includes(m.id));
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Bid">
+        <h3>${emo(a?.emoji, "🔨")} ${esc(a?.name || "Auction")}</h3>
+        <form data-bid-form>
+          ${member ? "" : `<label class="field"><span>Who's bidding?</span><select name="member_id" required>${people.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>`}
+          <label class="field"><span>How few points would you do it for? (1 to ${esc(a?.points ?? 1)})</span><input type="number" name="points" min="1" max="${esc(a?.points ?? 1)}" required inputmode="numeric" value="${esc(member ? a?.bids?.[member.id] ?? "" : "")}"></label>
+          <p class="muted">${a?.lowest != null ? `The lowest bid so far is ${pts(a.lowest)}.` : "Nobody has bid yet."} The lowest bid when time's up gets the chore; a tie goes to whoever bid first.</p>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button><button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Bid</button></div>
+        </form></div></div>`;
+    }
+    if (s.type === "reading") {
+      const member = this._memberById(s.member);
+      const rule = d.reading || {};
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Log reading">
+        <h3>📚 What did you read${member ? `, ${esc(member.name)}` : ""}?</h3>
+        <form data-reading-form>
+          ${member ? "" : `<label class="field"><span>Who read?</span><select name="member_id" required>${d.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>`}
+          <label class="field"><span>Minutes</span><input type="number" name="minutes" min="1" max="600" required inputmode="numeric" value="${esc(rule.block_minutes || 20)}"></label>
+          <label class="field"><span>Book (optional)</span><input type="text" name="book" maxlength="60"></label>
+          <p class="muted">+${pts(rule.points || 0)} for every ${esc(rule.block_minutes || 0)} minutes${rule.max_minutes ? `, up to ${esc(rule.max_minutes)} minutes a day` : ""}. A parent checks it like a chore.</p>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button><button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Log it</button></div>
+        </form></div></div>`;
+    }
+    if (s.type === "bank") {
+      const member = this._memberById(s.member);
+      const have = (d.bank || {})[s.member] || 0;
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Use saved TV time">
+        <h3>🏦 ${esc(member?.name || "")}'s saved TV time</h3>
+        <form data-bank-form>
+          <label class="field"><span>How many of your ${have} minutes?</span><input type="number" name="minutes" min="1" max="${have}" required inputmode="numeric" value="${Math.min(have, 30)}"></label>
+          <p class="muted">Your TV gets that much more time today.</p>
+          <div class="actions"><button class="big" type="button" data-close>Cancel</button><button class="big primary" type="submit" ${this._busy ? "disabled" : ""}>Use them</button></div>
+        </form></div></div>`;
+    }
+    if (s.type === "gifts") {
+      const member = this._memberById(s.member);
+      const ideas = member?.gift_ideas || [];
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Gift ideas">
+        <h3>🎁 ${esc(member?.name || "")}'s gift ideas</h3>
+        ${ideas.length ? `<ul class="rows gift-list">${ideas.map((i) => `<li><span class="grow">${esc(i)}</span><button class="btn" data-gift-remove="${esc(i)}" aria-label="Take ${esc(i)} off">✕</button></li>`).join("")}</ul>` : `<p class="muted">Nothing yet. What would you like for your birthday?</p>`}
+        <form data-gift-form class="inline"><label class="field grow"><span>Add an idea</span><input type="text" name="text" maxlength="80" required placeholder="A blue bike helmet"></label>
+          <button class="big primary" type="submit" style="align-self:end">Add</button></form>
+        <p class="muted">A parent can share this list, with your wishlist, with grandparents.</p>
+        <div class="actions"><button class="big" data-close>Done</button></div></div></div>`;
+    }
     if (s.type === "give") {
       const member = this._memberById(s.member);
       const g = d.give;
@@ -3531,6 +3657,7 @@ class FamilyPanel extends HTMLElement {
         <label class="field"><span>Until</span><input type="time" name="until_time" value="${esc(r.until_time || "")}"></label>
         <small style="align-self:end">Empty: all day.</small>
       </div>
+      <label class="check"><input type="checkbox" name="beat_clock" ${r.beat_clock ? "checked" : ""}> Beat the clock: +${pts(this._data.settings?.beat_clock_points || 0)} for finishing before it's time to leave <small>(set the points and times under Family)</small></label>
       <label class="check"><input type="checkbox" name="enabled" ${r.enabled !== false ? "checked" : ""}> Show it on the Family dashboard</label>
       <div class="form-actions"><button class="btn primary" type="submit">Save routine</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
@@ -3561,7 +3688,7 @@ class FamilyPanel extends HTMLElement {
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
     const listForm = edit?.collection === "todo_lists" && !edit.item?.id ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
-    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>${this._pickCard()}${this._questsCard()}${this._petsCard()}
+    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>${this._pickCard()}${this._auctionsCard()}${this._questsCard()}${this._petsCard()}
       <div class="card"><h2>Chores from to-do lists</h2>
         <p class="muted">Every open item on these lists is a chore. Put the points at the end of an item to change them, like <b>Feed the dog [5]</b>. When it's marked done, the item is ticked off its list.</p>
         ${lists}${listForm}</div>`;
@@ -3654,7 +3781,7 @@ class FamilyPanel extends HTMLElement {
         <small>Shown with the instructions, so everyone knows what done looks like.</small></div>` : ""}
       ${this._choreExtras(c)}
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
-      ${this._grabField(c.grab)}
+      ${this._grabField(c.grab, c.team)}
       <label class="check"><input type="checkbox" name="turns" data-turns ${c.turns ? "checked" : ""}> They take turns (tick two or more people above)</label>
       <div class="inline" data-turn-fields ${c.turns ? "" : "hidden"}>
         <label class="field"><span>The turn moves on</span><select name="turn_every">${TURN_EVERY.map((t) => `<option value="${t.id}" ${(c.turn_every || "time") === t.id ? "selected" : ""}>${t.label}</option>`).join("")}</select></label>
@@ -3698,11 +3825,12 @@ class FamilyPanel extends HTMLElement {
   }
 
   // Their own chore, or up for grabs among the people ticked.
-  _grabField(grab) {
+  _grabField(grab, team = null) {
+    const teamOption = team === null ? "" : `<option value="team" ${team ? "selected" : ""}>Team chore: each one ticks it, and the points count once they all have</option>`;
     return `<label class="field"><span>How it's done</span><select name="grab">
-      <option value="" ${grab ? "" : "selected"}>Their own chore: each one ticked does it</option>
-      <option value="1" ${grab ? "selected" : ""}>Up for grabs: whoever's first, for extra points</option></select>
-      <small>Their own chores count for the all-done bonus and streaks; up for grabs is extra. Nobody ticked: up for grabs for everyone. Taking turns is always their own chore.</small></label>`;
+      <option value="" ${grab || team ? "" : "selected"}>Their own chore: each one ticked does it</option>
+      <option value="1" ${grab ? "selected" : ""}>Up for grabs: whoever's first, for extra points</option>${teamOption}</select>
+      <small>Their own chores count for the all-done bonus and streaks; up for grabs is extra. Nobody ticked: up for grabs for everyone. Taking turns is always their own chore.${team === null ? "" : " A team chore needs two or more people ticked."}</small></label>`;
   }
 
   // Whose turn a chore is now, from the Family dashboard's view of it.
@@ -3774,25 +3902,70 @@ class FamilyPanel extends HTMLElement {
   }
 
   _familyGoalCard() {
-    const g = this._data.family_goal;
-    const editing = this._edit?.collection === "family_goal";
-    const status = g
-      ? `<div class="rows goal-status"><span class="grow">${emo(g.emoji, "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
-          <small>${g.reached ? "Reached! Hand it out, then start a new one." : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span></div>`
-      : `<p class="empty">No family goal right now.</p>`;
-    const form = editing
+    const goals = this._data.family_goals || [];
+    const editing = this._goalEdit;
+    const rows = goals.map((g) => `<li class="goal-status"><span class="grow">${emo(g.emoji, "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
+        <small>${g.reached ? "Reached! Hand it out, then start it again or remove it." : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span>
+        <button class="btn" data-goal-edit="${esc(g.id)}">${g.reached ? "Start again" : "Change"}</button><button class="btn bad" data-goal-remove="${esc(g.id)}">Remove</button></li>`).join("");
+    const g = editing === "new" ? {} : goals.find((x) => x.id === editing);
+    const form = g
       ? `<form class="edit" data-goal-form>
+          <input type="hidden" name="id" value="${esc(g.id || "")}">
           <div class="inline">
-            ${this._picField(g?.emoji, "🍕")}
-            <label class="field grow"><span>What it's for</span><input name="name" maxlength="60" required value="${esc(g?.name || "")}" placeholder="Pizza night"></label>
-            <label class="field"><span>Points together</span><input type="number" name="target" min="1" max="10000" required value="${esc(g?.target || "")}" placeholder="200" style="width:110px"></label>
+            ${this._picField(g.emoji, "🍕")}
+            <label class="field grow"><span>What it's for</span><input type="text" name="name" maxlength="60" required value="${esc(g.name || "")}" placeholder="Pizza night"></label>
+            <label class="field"><span>Points together</span><input type="number" name="target" min="1" max="10000" required value="${esc(g.target || "")}" placeholder="200" style="width:110px"></label>
           </div>
-          ${g ? `<label class="check"><input type="checkbox" name="restart"> Start counting again from now</label>` : ""}
-          <div class="form-actions"><button class="btn primary" type="submit">Save goal</button><button class="btn" type="button" data-cancel>Cancel</button></div></form>`
-      : `<div class="form-actions"><button class="btn primary" data-new="family_goal">${g ? (g.reached ? "Start a new goal" : "Change the goal") : "Set a family goal"}</button>${g ? `<button class="btn bad" data-goal-remove>Remove</button>` : ""}</div>`;
-    return `<div class="card"><h2>Family goal</h2>
-      <p class="muted">Something the whole family works toward together. Points from everyone's chores count toward it; nobody spends any.</p>
-      ${status}${form}</div>`;
+          ${g.id ? `<label class="check"><input type="checkbox" name="restart" ${g.reached ? "checked" : ""}> Start counting again from now</label>` : ""}
+          <div class="form-actions"><button class="btn primary" type="submit">Save goal</button><button class="btn" type="button" data-goal-edit="">Cancel</button></div></form>`
+      : goals.length < 6 ? `<div class="form-actions"><button class="btn primary" data-goal-edit="new">${goals.length ? "Add another goal" : "Set a family goal"}</button></div>` : "";
+    return `<div class="card"><h2>Family goals</h2>
+      <p class="muted">Things the whole family works toward together, up to six at a time. Points from everyone's chores count toward each one; nobody spends any.</p>
+      ${rows ? `<ul class="rows">${rows}</ul>` : `<p class="empty">No family goal right now.</p>`}${form}</div>`;
+  }
+
+  _auctionsCard() {
+    const auctions = (this._data.auctions || []).filter((a) => a.status === "open");
+    const rows = auctions.map((a) => {
+      const bids = Object.entries(a.bids || {}).sort((x, y) => x[1] - y[1]).map(([id, p]) => `${this._memberById(id)?.name || "?"} ${p}`).join(", ");
+      return `<li><span class="grow">${emo(a.emoji, "🔨")} <b>${esc(a.name)}</b><small>Up to ${pts(a.points)} · closes ${esc(whenText(a.closes))}${bids ? ` · bids: ${esc(bids)}` : " · no bids yet"}</small></span>
+        <button class="btn primary" data-auction-close="${esc(a.id)}">Close now</button><button class="btn bad" data-auction-cancel="${esc(a.id)}">Cancel</button></li>`;
+    }).join("");
+    return `<div class="card"><h2>Chore auctions</h2>
+      <p class="muted">Put a bigger job up for auction. The kids bid how few points they'd do it for; when time's up (or you close it) the lowest bid gets it as a one-off chore worth their bid.</p>
+      ${rows ? `<ul class="rows">${rows}</ul>` : ""}
+      <form class="edit" data-auction-form>
+        <div class="inline">${this._picField(null, "🔨")}<label class="field grow"><span>The chore</span><input type="text" name="name" maxlength="60" required placeholder="Clean out the garage"></label>
+        <label class="field"><span>Up to (points)</span><input type="number" name="points" min="1" max="10000" required value="20" style="width:100px"></label>
+        <label class="field"><span>Bidding for (minutes)</span><input type="number" name="minutes" min="5" max="1440" required value="60" style="width:100px"></label></div>
+        <div class="field"><span>Who can bid</span>${this._whoDropdown(null, { id: "auction-who", label: "Who can bid", everyone: true })}</div>
+        <div class="form-actions"><button class="btn primary" type="submit">Start the auction</button></div></form></div>`;
+  }
+
+  async _shareGifts(memberId) {
+    try {
+      const { text } = await this._ws({ type: `${DOMAIN}/gifts/text`, member_id: memberId });
+      if (navigator.share) {
+        try {
+          await navigator.share({ text });
+          return;
+        } catch (_err) {
+          // Cancelled, or not allowed here: copy it instead.
+        }
+      }
+      await navigator.clipboard.writeText(text);
+      this._toast("Copied. Paste it into a message.");
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+    }
+  }
+
+  _giftsCard() {
+    const members = this._data.members;
+    if (!members.length) return "";
+    const rows = members.map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b><small>${(m.gift_ideas || []).length ? esc((m.gift_ideas || []).join(", ")) : "No gift ideas yet"}${(m.wishes || []).length ? ` · ${m.wishes.length} on their wishlist` : ""}</small></span>
+      <button class="btn" data-gift-share="${esc(m.id)}">Share</button></li>`).join("");
+    return `<div class="card"><h2>Gift ideas</h2><p class="muted">What the kids added under <b>Gift ideas</b>, plus their wishlist. <b>Share</b> sends the list to grandparents or copies it.</p><ul class="rows">${rows}</ul></div>`;
   }
 
   _renderRewards() {
@@ -3808,7 +3981,7 @@ class FamilyPanel extends HTMLElement {
       : `<p class="empty">No rewards yet.</p>`;
     const form = edit?.collection === "rewards" && !edit.item?.id ? this._rewardForm(edit.item) : `<button class="btn primary" data-new="rewards">Add a reward</button>`;
     const b = d.bonus || {};
-    return `${this._familyGoalCard()}${this._mostWantedCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
+    return `${this._familyGoalCard()}${this._mostWantedCard()}${this._giftsCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
       <div class="card"><h2>Bonus points</h2>
         <form class="edit" data-bonus>
           <label class="field"><span>All of their own chores done for the day</span>
@@ -4082,6 +4255,7 @@ class FamilyPanel extends HTMLElement {
       ${this._allowanceCard()}
       ${this._savingCard()}
       ${this._giveCard()}
+      ${this._extrasCard()}
       ${this._funCard()}
       ${this._leaveCard()}
       ${this._calendarCard()}
@@ -4257,7 +4431,10 @@ class FamilyPanel extends HTMLElement {
         ${(this._choices?.tvs || []).length ? `<label class="field"><span>Their chores done unlock</span><span class="inline"><input type="number" name="unlock_minutes" min="0" max="480" value="${esc(m.unlock_minutes || 0)}" style="width:80px" aria-label="Minutes"> min on
           <select name="unlock_tv"><option value="">No TV</option>${this._choices.tvs.map((t) => `<option value="${esc(t.id)}" ${t.id === m.unlock_tv ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
           <label class="check"><input type="checkbox" name="unlock_whole_home" ${m.unlock_whole_home ? "checked" : ""}> whole home</label></span>
-          <small>Once all of their own chores are done for the day, TV Mgmt gives them this much extra screen time.</small></label>` : ""}
+          <small>Once all of their own chores are done for the day, TV Mgmt gives them this much extra screen time.</small></label>
+        <label class="field"><span>Screen-time bank</span><span class="inline"><select name="bank_tv"><option value="">No bank</option>${this._choices.tvs.map((t) => `<option value="${esc(t.id)}" ${t.id === m.bank_tv ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
+          holds up to <input type="number" name="bank_max" min="15" max="600" value="${esc(m.bank_max || 120)}" style="width:80px" aria-label="Most minutes"> min</span>
+          <small>For a TV they use on their own: the minutes it has left at the end of each day are saved, and they can use them another day.</small></label>` : ""}
         <div class="field"><span>Birthday (no year needed)</span><div class="inline">${this._monthDay("birthday", m.birthday, "Birthday")}</div></div>
         <label class="field"><span>Year born (for chores by age)</span><input type="number" name="birth_year" min="1900" max="${new Date().getFullYear()}" value="${esc(m.birth_year ?? "")}" placeholder="Optional" style="width:110px"></label>
         <label class="check" style="align-self:end"><input type="checkbox" name="picture_mode" ${m.picture_mode ? "checked" : ""}> Picture mode <small>(big pictures, tap a chore to hear it)</small></label>
@@ -4556,6 +4733,31 @@ class FamilyPanel extends HTMLElement {
       this._renderOverlay();
       return;
     }
+    if (ds.auction) {
+      this._sheet = { type: "bid", id: ds.auction, member: this._member };
+      this._renderOverlay();
+      return;
+    }
+    if ("reading" in ds) {
+      this._sheet = { type: "reading", member: this._member };
+      this._renderOverlay();
+      return;
+    }
+    if ("bank" in ds) {
+      this._sheet = { type: "bank", member: this._member };
+      this._renderOverlay();
+      return;
+    }
+    if ("gifts" in ds) {
+      this._sheet = { type: "gifts", member: this._member };
+      this._renderOverlay();
+      return;
+    }
+    if (ds.giftRemove !== undefined && this._sheet?.type === "gifts") {
+      const member = this._memberById(this._sheet.member);
+      if (member) this._call({ type: `${DOMAIN}/gift_idea`, member_id: member.id, text: ds.giftRemove, add: false }, "").then(() => this._renderOverlay());
+      return;
+    }
     if ("race" in ds) {
       this._sheet = { type: "race", member: this._member };
       this._renderOverlay();
@@ -4738,8 +4940,17 @@ class FamilyPanel extends HTMLElement {
       this._tab = ds.tab;
       this._edit = null;
       this._render();
-    } else if ("goalRemove" in ds) {
-      this._call({ type: `${DOMAIN}/settings`, family_goal: null }, "Goal removed.");
+    } else if (ds.goalRemove) {
+      this._call({ type: `${DOMAIN}/family_goal/delete`, item_id: ds.goalRemove }, "Goal removed.");
+    } else if (ds.goalEdit !== undefined) {
+      this._goalEdit = ds.goalEdit || null;
+      this._render();
+    } else if (ds.auctionClose) {
+      this._call({ type: `${DOMAIN}/auction/close`, auction_id: ds.auctionClose }, "Auction closed.");
+    } else if (ds.auctionCancel) {
+      this._call({ type: `${DOMAIN}/auction/cancel`, auction_id: ds.auctionCancel }, "Auction cancelled.");
+    } else if (ds.giftShare) {
+      this._shareGifts(ds.giftShare);
     } else if (ds.quick !== undefined && ds.memberId) {
       const button = (this._data.settings?.quick_points || [])[Number(ds.quick)];
       const m = this._memberById(ds.memberId);
@@ -5008,13 +5219,51 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.dataset.goalForm !== undefined) {
       const v = this._formValues(form);
-      const reached = this._data.family_goal?.reached;
-      const ok = await this._call({ type: `${DOMAIN}/settings`, family_goal: { name: v.name, emoji: v.emoji || null, target: Math.round(Number(v.target) || 0) }, restart_goal: !!v.restart || !!reached }, "Saved.");
+      const ok = await this._call({ type: `${DOMAIN}/family_goal/save`, item_id: v.id || null, name: v.name, emoji: v.emoji || null, target: Math.round(Number(v.target) || 0), restart: !!v.restart }, "Saved.");
       if (ok) {
-        this._edit = null;
+        this._goalEdit = null;
         this._render();
       }
       return;
+    }
+    if (form.dataset.auctionForm !== undefined) {
+      const v = this._formValues(form);
+      const members = this._rewardMembers(v);
+      return this._call({ type: `${DOMAIN}/auction/start`, name: v.name, emoji: v.emoji || null, points: Math.round(Number(v.points) || 0), minutes: Math.round(Number(v.minutes) || 0), members }, "Auction started.");
+    }
+    if (form.matches("[data-bid-form]")) {
+      const v = this._formValues(form);
+      const s = this._sheet;
+      const member = this._memberById(v.member_id || s?.member);
+      if (!member || this._busy) return;
+      this._sheet = null;
+      this._renderOverlay();
+      return this._call({ type: `${DOMAIN}/auction/bid`, auction_id: s.id, member_id: member.id, points: Math.round(Number(v.points) || 0) }, `Bid in, ${member.name}!`);
+    }
+    if (form.matches("[data-reading-form]")) {
+      const v = this._formValues(form);
+      const member = this._memberById(v.member_id || this._sheet?.member);
+      if (!member || this._busy) return;
+      this._sheet = null;
+      this._renderOverlay();
+      return this._call({ type: `${DOMAIN}/reading/log`, member_id: member.id, minutes: Math.round(Number(v.minutes) || 0), book: v.book || null }, `Nice reading, ${member.name}! 📚`);
+    }
+    if (form.matches("[data-gift-form]")) {
+      const v = this._formValues(form);
+      const member = this._memberById(this._sheet?.member);
+      if (!member || this._busy || !String(v.text || "").trim()) return;
+      await this._call({ type: `${DOMAIN}/gift_idea`, member_id: member.id, text: v.text, add: true }, "Added.");
+      this._renderOverlay();
+      return;
+    }
+    if (form.matches("[data-bank-form]")) {
+      const v = this._formValues(form);
+      const member = this._memberById(this._sheet?.member);
+      if (!member || this._busy) return;
+      this._sheet = null;
+      this._renderOverlay();
+      const minutes = Math.round(Number(v.minutes) || 0);
+      return this._call({ type: `${DOMAIN}/bank/spend`, member_id: member.id, minutes }, `${minutes} more minutes of TV today, ${member.name}.`);
     }
     if (form.dataset.voiceForm !== undefined) {
       const v = this._formValues(form);
@@ -5156,6 +5405,17 @@ class FamilyPanel extends HTMLElement {
       }
       return this._call({ type: `${DOMAIN}/settings`, give_goal: { name: v.name, emoji: v.emoji || null, target: Math.max(1, Math.round(Number(v.target) || 0)) }, restart_give: !!v.restart, give_percent: Math.max(0, Math.min(50, Math.round(Number(v.give_percent) || 0))) }, "Saved.");
     }
+    if (form.dataset.extrasForm !== undefined) {
+      const v = this._formValues(form);
+      const number = (x) => Math.max(0, Math.round(Number(x) || 0));
+      const percent = (x) => Math.min(100, number(x));
+      return this._call({
+        type: `${DOMAIN}/settings`,
+        reading: { block_minutes: Math.min(240, number(v.reading_block)), points: number(v.reading_points), max_minutes: Math.min(600, number(v.reading_max)) },
+        allowance_rule: { enabled: !!v.rule_enabled, boost_at: percent(v.boost_at), boost: percent(v.boost), cut_below: Math.min(percent(v.cut_below), percent(v.boost_at)), cut: percent(v.cut) },
+        beat_clock_points: number(v.beat_clock_points),
+      }, "Saved.");
+    }
     if (form.dataset.funForm !== undefined) {
       const v = this._formValues(form);
       const number = (x) => Math.max(0, Math.round(Number(x) || 0));
@@ -5240,9 +5500,9 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { min_age: v.min_age === "" || v.min_age == null ? null : Number(v.min_age), max_age: v.max_age === "" || v.max_age == null ? null : Number(v.max_age), timer_minutes: Math.max(0, Math.round(Number(v.timer_minutes) || 0)), timer_bonus: Math.max(0, Math.round(Number(v.timer_bonus) || 0)), remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, photo: v.photo || "", how: v.how || "", streak_days: Math.max(0, Math.round(Number(v.streak_days) || 0)), streak_bonus: Math.max(0, Math.round(Number(v.streak_bonus) || 0)), pool: !!v.pool, done_when: v.done_entity ? { entity_id: v.done_entity.trim(), state: (v.done_state || "").trim() } : null, only_when: v.only_entity ? { entity_id: v.only_entity.trim(), states: String(v.only_states || "").split(",").map((x) => x.trim()).filter(Boolean) } : null, on_done: v.on_done || null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null, from_date: v.from_month && v.from_day ? `${v.from_month}-${v.from_day}` : null, until_date: v.until_month && v.until_day ? `${v.until_month}-${v.until_day}` : null };
+      item = { min_age: v.min_age === "" || v.min_age == null ? null : Number(v.min_age), max_age: v.max_age === "" || v.max_age == null ? null : Number(v.max_age), timer_minutes: Math.max(0, Math.round(Number(v.timer_minutes) || 0)), timer_bonus: Math.max(0, Math.round(Number(v.timer_bonus) || 0)), remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, photo: v.photo || "", how: v.how || "", streak_days: Math.max(0, Math.round(Number(v.streak_days) || 0)), streak_bonus: Math.max(0, Math.round(Number(v.streak_bonus) || 0)), pool: !!v.pool, team: v.grab === "team", done_when: v.done_entity ? { entity_id: v.done_entity.trim(), state: (v.done_state || "").trim() } : null, only_when: v.only_entity ? { entity_id: v.only_entity.trim(), states: String(v.only_states || "").split(",").map((x) => x.trim()).filter(Boolean) } : null, on_done: v.on_done || null, members: v.members || [], grab: v.grab === "1", enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null, from_date: v.from_month && v.from_day ? `${v.from_month}-${v.from_day}` : null, until_date: v.until_month && v.until_day ? `${v.until_month}-${v.until_day}` : null };
     } else if (collection === "routines") {
-      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), members: v.members || [], steps: (v.steps || "").split("\n").map((x) => x.trim()).filter(Boolean), days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, enabled: !!v.enabled };
+      item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), members: v.members || [], steps: (v.steps || "").split("\n").map((x) => x.trim()).filter(Boolean), days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, enabled: !!v.enabled, beat_clock: !!v.beat_clock };
     } else if (collection === "rewards") {
       // All ticked: anyone, including people added later. A shorter list:
       // only those people. Nobody ticked: the reward is unavailable.
@@ -5250,7 +5510,7 @@ class FamilyPanel extends HTMLElement {
     } else if (collection === "controls") {
       item = { entity_id: v.entity_id, name: v.name, emoji: v.emoji, members: v.members || [], confirm: !!v.confirm };
     } else if (collection === "members") {
-      item = { unlock_tv: v.unlock_tv || null, unlock_minutes: Math.max(0, Math.round(Number(v.unlock_minutes) || 0)), unlock_whole_home: !!v.unlock_whole_home, name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)), birthday: v.birthday_month && v.birthday_day ? `${v.birthday_month}-${v.birthday_day}` : null, birth_year: v.birth_year ? Number(v.birth_year) : null, picture_mode: !!v.picture_mode };
+      item = { bank_tv: v.bank_tv || null, bank_max: Math.max(15, Math.min(600, Math.round(Number(v.bank_max) || 120))), unlock_tv: v.unlock_tv || null, unlock_minutes: Math.max(0, Math.round(Number(v.unlock_minutes) || 0)), unlock_whole_home: !!v.unlock_whole_home, name: v.name, emoji: v.emoji, color: v.color, person: v.person || null, allowance: Math.max(0, Math.round(Number(v.allowance) || 0)), birthday: v.birthday_month && v.birthday_day ? `${v.birthday_month}-${v.birthday_day}` : null, birth_year: v.birth_year ? Number(v.birth_year) : null, picture_mode: !!v.picture_mode };
     } else {
       item = { entity_id: v.entity_id || v.entity_id_keep, points: Number(v.points || 0), penalty: v.penalty === "" || v.penalty == null ? null : Number(v.penalty), members: v.members || [], grab: !!v.grab, due_only: !!v.due_only };
       const itemPoints = {};
@@ -5367,7 +5627,10 @@ class FamilyPanel extends HTMLElement {
         const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id, timer_started: timer ? new Date(timer.start).toISOString() : null, ...(s.photo ? { photo: s.photo } : {}), ...((s.helpers || []).length ? { helpers: s.helpers } : {}) });
         if (timer) delete this._timers[s.id];
         const bonus = (res.entry?.bonuses || []).map((b) => (b.points ? ` ${b.title} +${pts(b.points)}` : ` ${b.title}`)).join("");
-        this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
+        const waiting = res.entry?.team_waiting || [];
+        this._toast(waiting.length
+          ? `Great job, ${member.name}! Your ${pts(chore?.points ?? 0)} count once ${namesText(waiting)} ${waiting.length === 1 ? "has" : "have"} done it too.`
+          : `Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
         if ((res.entry?.bonuses || []).some((b) => b.bonus === "all_done")) this._celebrate(member);
         this._badgeToast(member, res.badges);
       } else {

@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] - 2026-11-15
+
+### Added
+
+- **More than one family goal.** Up to six goals at a time, such as Pizza night and a movie projector night. Points from everyone's chores count toward each one, and each has its own bar on the Family dashboard. Your one goal from before becomes the first.
+- **Chore auctions.** Put a bigger job up for auction for a while. The kids bid how few points they'd do it for; when time's up (or you close it) the lowest bid gets it as their chore, worth their bid.
+- **Allowance rules.** Last week's chores can change this week's allowance: up when they finished all their chores every day, down when they finished them on fewer than half the days. The history says why.
+- **Reading log.** Points for every so many minutes read, up to a daily limit. The kids log it (and the book) on the Family dashboard, and you check it like a chore.
+- **Team chores.** Everyone on the chore ticks it, and nobody's points count until they all have. The tile shows how many have done it.
+- **Gift ideas.** The kids add what they'd like on their own page. Under **Rewards**, **Share** sends their ideas and wishlist to grandparents, or copies them.
+- **Screen-time bank.** For a TV a child uses on their own, the minutes TV Mgmt says are left at night are saved, up to a limit, and they can use them another day.
+- **Beat the clock.** Bonus points for finishing a routine (such as Morning) before it's time to leave.
+
+### Changed
+
+- The `family_goal_reached` event now also has the goal's `id`.
+
 ## [2.12.0] - 2026-11-15
 
 ### Added
@@ -427,6 +444,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.13.0]: https://github.com/bisman-automations/ha-family/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/bisman-automations/ha-family/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/bisman-automations/ha-family/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/bisman-automations/ha-family/compare/v2.9.0...v2.10.0

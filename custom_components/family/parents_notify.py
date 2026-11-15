@@ -259,6 +259,11 @@ class ParentNotices:
 
     # ---- buttons pressed on a phone -------------------------------------------------
 
+    def _name(self, user: Any) -> str | None:
+        """A parent's name: their family member's, else their login's."""
+        member_id = self.manager.member_for_user(user.id)
+        return self.manager.member(member_id)["name"] if member_id else user.name
+
     async def async_on_action(self, event: Event) -> None:
         action = str(event.data.get("action") or "")
         if not action.startswith(ACTION_PREFIX):
@@ -273,15 +278,19 @@ class ParentNotices:
         manager = self.manager
         try:
             if action.startswith(ACTION_RIGHT):
-                await manager.async_review(action.removeprefix(ACTION_RIGHT), True)
+                await manager.async_review(
+                    action.removeprefix(ACTION_RIGHT), True, by=self._name(user)
+                )
             elif action.startswith(ACTION_DIDNT):
-                await manager.async_review(action.removeprefix(ACTION_DIDNT), False)
+                await manager.async_review(
+                    action.removeprefix(ACTION_DIDNT), False, by=self._name(user)
+                )
             elif action.startswith(ACTION_YES):
                 await manager.async_approve(action.removeprefix(ACTION_YES), True)
             elif action.startswith(ACTION_NO):
                 await manager.async_approve(action.removeprefix(ACTION_NO), False)
             elif action.startswith(ACTION_GIVEN):
-                manager.mark_given(action.removeprefix(ACTION_GIVEN))
+                manager.mark_given(action.removeprefix(ACTION_GIVEN), self._name(user))
         except HomeAssistantError as err:
             # Undone or checked already: nothing to do.
             _LOGGER.info("Family: %s: %s", action, err)

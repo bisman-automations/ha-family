@@ -54,6 +54,9 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_review,
         ws_meals,
         ws_given,
+        ws_high_five,
+        ws_points_story,
+        ws_history,
         ws_approve,
         ws_adjust,
         ws_hold,
@@ -131,6 +134,20 @@ def _is_parent(hass: HomeAssistant, connection, msg: dict) -> bool:
     return bool(
         manager and manager.passes.valid(msg.get(PASS), user.id if user else None)
     )
+
+
+async def _by(hass: HomeAssistant, connection, msg: dict, manager) -> str | None:
+    """The parent doing this, by name: their own PIN, else their login."""
+    user = connection.user
+    name = manager.passes.name(msg.get(PASS), user.id if user else None)
+    if name:
+        return name
+    if user and user.is_admin:
+        member_id = manager.member_for_user(user.id)
+        if member_id:
+            return manager.member(member_id)["name"]
+        return user.name
+    return None
 
 
 def _require_parent(func):
@@ -227,12 +244,16 @@ async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional(PASS): str,
         vol.Required("member_id"): str,
         vol.Required("chore_id"): str,
+        # When the chore's timer was started on this screen.
+        vol.Optional("timer_started"): vol.Any(None, str),
     }
 )
 @websocket_api.async_response
 @_handler
 async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
-    entry = await manager.async_complete(msg["member_id"], msg["chore_id"])
+    entry = await manager.async_complete(
+        msg["member_id"], msg["chore_id"], msg.get("timer_started")
+    )
     return {
         "entry": entry,
         "points": manager.points(msg["member_id"]),
@@ -355,6 +376,38 @@ async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{DOMAIN}/high_five",
+        vol.Optional(PASS): str,
+        vol.Required("from_id"): str,
+        vol.Required("to_id"): str,
+        vol.Optional("emoji"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_high_five(hass, connection, msg, manager) -> dict[str, Any]:
+    """A thank-you from one member to another; no points (open to everyone)."""
+    return {
+        "entry": manager.kids.high_five(msg["from_id"], msg["to_id"], msg.get("emoji"))
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/points_story",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_points_story(hass, connection, msg, manager) -> dict[str, Any]:
+    """Someone's latest points, before and after each (open to everyone)."""
+    return manager.kids.story(msg["member_id"])
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{DOMAIN}/review",
         vol.Optional(PASS): str,
         vol.Required("entry_id"): str,
@@ -363,6 +416,8 @@ async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("penalty"): vol.Any(
             None, vol.All(int, vol.Range(min=0, max=10000))
         ),
+        # Why it didn't happen, shown in History and to the child.
+        vol.Optional("reason"): vol.Any(None, str),
     }
 )
 @_require_parent
@@ -371,9 +426,31 @@ async def ws_note_remove(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
     return {
         "entry": await manager.async_review(
-            msg["entry_id"], msg["approved"], msg.get("penalty")
+            msg["entry_id"],
+            msg["approved"],
+            msg.get("penalty"),
+            reason=msg.get("reason"),
+            by=await _by(hass, connection, msg, manager),
         )
     }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/history",
+        vol.Optional(PASS): str,
+        # Older than this entry time; leave out for the newest.
+        vol.Optional("before"): str,
+        vol.Optional("limit", default=200): vol.All(int, vol.Range(min=1, max=5000)),
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_history(hass, connection, msg, manager) -> dict[str, Any]:
+    """More of the history, for Show more and the spreadsheet download."""
+    entries, more = manager.history(msg.get("before"), msg["limit"])
+    return {"entries": entries, "more": more}
 
 
 @websocket_api.websocket_command(
@@ -387,7 +464,11 @@ async def ws_review(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.async_response
 @_handler
 async def ws_given(hass, connection, msg, manager) -> dict[str, Any]:
-    return {"entry": manager.mark_given(msg["entry_id"])}
+    return {
+        "entry": manager.mark_given(
+            msg["entry_id"], await _by(hass, connection, msg, manager)
+        )
+    }
 
 
 @websocket_api.websocket_command(
@@ -419,7 +500,12 @@ async def ws_approve(hass, connection, msg, manager) -> dict[str, Any]:
 @websocket_api.async_response
 @_handler
 async def ws_adjust(hass, connection, msg, manager) -> dict[str, Any]:
-    entry = manager.adjust(msg["member_id"], msg["points"], msg.get("reason"))
+    entry = manager.adjust(
+        msg["member_id"],
+        msg["points"],
+        msg.get("reason"),
+        await _by(hass, connection, msg, manager),
+    )
     return {"entry": entry, "points": manager.points(msg["member_id"])}
 
 
@@ -548,6 +634,8 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         ),
         vol.Optional("restart_goal"): bool,
         vol.Optional("reminder_tts"): vol.Any(None, str),
+        vol.Optional("weather_entity"): vol.Any(None, str),
+        vol.Optional("links"): [dict],
         vol.Optional("quick_points"): [
             {
                 vol.Required("label"): str,
@@ -650,6 +738,10 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
         "entities": entities,
         "calendars": calendars,
         "voices": voices,
+        "weathers": [
+            {"entity_id": s.entity_id, "name": s.name}
+            for s in sorted(hass.states.async_all("weather"), key=lambda s: s.name)
+        ],
         "players": players,
     }
 

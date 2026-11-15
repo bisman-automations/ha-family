@@ -1388,6 +1388,9 @@ async def test_parents_check_chores_from_their_phones(
     state = await client.ok("state")
     assert state["to_check"] == []
     assert state["history"][0]["review"] == "approved"
+    # Each entry says the points before and after it.
+    first = state["history"][0]
+    assert first["after"] - first["before"] == first["points"]
     # Checked: its notification is taken away.
     assert sent[-1].data == {
         "message": "clear_notification",

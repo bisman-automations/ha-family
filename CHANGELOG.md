@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-11-14
+
+### Added
+
+- **History, made easier to follow.** On the Parents dashboard's History tab:
+  - Each entry shows that person's points just before and after it, for example 12 → 13.
+  - Entries are grouped by day, with what was earned and taken that day.
+  - **Points over time**: a chart of each person's points over the last four weeks.
+  - A **Type** filter: chores, rewards, bonuses, points taken away, allowance, changed by hand or high fives.
+  - **Done right** on a chore marked Didn't happen, to put it back.
+  - Which parent checked a chore, handed out a reward or changed points ("· by Dana").
+  - **Show more** for older entries, and **Spreadsheet** to download what's shown.
+- **Why it didn't happen.** Marking a chore **Didn't happen** asks why, with quick choices or your own words. The reason shows in History and on the child's page.
+- **New on the Family dashboard:**
+  - **Read it to me**: 🔊 on chores and routine steps reads them aloud. **Picture mode** (per person) shows big pictures instead of words.
+  - **Tomorrow**: tomorrow's chores and events.
+  - **Screen time left** on each TV Mgmt TV and Media Mgmt speaker.
+  - **Chore timer**: a countdown on a chore's tile, with a bonus for beating it.
+  - **High fives**: a no-points thank-you from one person to another.
+  - **Points story**: tap your points to see what earned and spent them, with before → after.
+  - **Family streak**: days in a row everyone finished their own chores.
+  - **What to wear**: today's weather in kid terms, from a weather entity you pick.
+  - **Links**: web pages a parent adds, such as the school lunch menu, opened over the dashboard with no address bar.
+- **Chores by age.** With a person's birthday and year born set, a chore can have a youngest and oldest age; only people that age see and do it.
+
 ## [2.5.0] - 2026-11-14
 
 ### Added
@@ -337,6 +362,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.6.0]: https://github.com/bisman-automations/ha-family/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/bisman-automations/ha-family/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/bisman-automations/ha-family/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bisman-automations/ha-family/compare/v2.2.0...v2.3.0

@@ -55,6 +55,7 @@ GIVEN_DONE = "given"
 # The Family dashboard's sections, in their usual order.
 SECTIONS = (
     "going",
+    "weather",
     "countdowns",
     "vote",
     "chores",
@@ -62,10 +63,13 @@ SECTIONS = (
     "grabs",
     "notes",
     "today",
+    "tomorrow",
     "meals",
     "done",
     "rewards",
     "home",
+    "links",
+    "screen",
     "lately",
 )
 # A reward bought together: the points are held until a parent says yes.
@@ -491,6 +495,77 @@ def balance(entries: Iterable[dict[str, Any]], member_id: str) -> int:
         for e in entries
         if e.get("member") == member_id and e.get("review") != REVIEW_REJECTED
     )
+
+
+def running_balances(
+    entries: Iterable[dict[str, Any]], carried: dict[str, int]
+) -> dict[str, tuple[int, int]]:
+    """Each entry's member's points just before and just after it, by entry id.
+
+    Worked out from the history as it stands now: an entry that didn't happen
+    changes nothing, so its before and after are the same.
+    """
+    totals = {member: int(points) for member, points in carried.items()}
+    result: dict[str, tuple[int, int]] = {}
+    for e in sorted(entries, key=lambda e: e.get("at", "")):
+        member = e.get("member")
+        if not member or not e.get("id"):
+            continue
+        before = totals.get(member, 0)
+        after = before
+        if e.get("review") != REVIEW_REJECTED:
+            after = before + int(e.get("points", 0))
+        totals[member] = after
+        result[e["id"]] = (before, after)
+    return result
+
+
+MAX_REASON = 200
+
+
+def clean_reason(value: Any) -> str | None:
+    """Why a chore didn't happen: trimmed, at most 200 characters, or None."""
+    text = " ".join(str(value or "").split())
+    return text[:MAX_REASON] or None
+
+
+def daily_balances(
+    entries: Iterable[dict[str, Any]],
+    carried: dict[str, int],
+    member_ids: list[str],
+    today: date,
+    days: int,
+) -> dict[str, Any]:
+    """Each member's points at the end of each of the last ``days`` days,
+    oldest first, for a chart. ``{"days": [iso dates], "members": {id: [..]}}``.
+    """
+    dates = [today - timedelta(days=days - 1 - i) for i in range(days)]
+    totals = {m: int(carried.get(m, 0)) for m in member_ids}
+    series: dict[str, list[int]] = {m: [] for m in member_ids}
+    counted = sorted(
+        (
+            e
+            for e in entries
+            if e.get("member") in totals and e.get("review") != REVIEW_REJECTED
+        ),
+        key=lambda e: e.get("at", ""),
+    )
+    index = 0
+    for day in dates:
+        while index < len(counted) and _entry_day(counted[index]) <= day:
+            member = counted[index]["member"]
+            totals[member] += int(counted[index].get("points", 0))
+            index += 1
+        for member in member_ids:
+            series[member].append(totals[member])
+    return {"days": [d.isoformat() for d in dates], "members": series}
+
+
+def _entry_day(entry: dict[str, Any]) -> date:
+    try:
+        return datetime.fromisoformat(entry["at"]).date()
+    except KeyError, TypeError, ValueError:
+        return date.min
 
 
 def clean_name(value: Any, label: str = "Name") -> str:
@@ -1329,3 +1404,225 @@ def vote_winner(options: list[str], votes: dict[str, int]) -> int | None:
     if not any(counts):
         return None
     return counts.index(max(counts))
+
+
+# ---- the Family dashboard's extras (2.6.0) ----------------------------------------
+
+KIND_HIGH_FIVE = "high_five"  # no points: a thank-you from one member to another
+HIGH_FIVE_EMOJI = ("🙌", "⭐", "❤️", "👏", "🎉", "🤝")
+BONUS_TIMER = "timer"  # beat a chore's timer
+MAX_TIMER_MINUTES = 180
+
+
+def clean_timer(minutes: Any) -> int:
+    """A chore's timer in whole minutes: 0 (none) to 180."""
+    try:
+        value = int(minutes or 0)
+    except (TypeError, ValueError) as err:
+        raise ValueError("The timer is a number of minutes") from err
+    if not 0 <= value <= MAX_TIMER_MINUTES:
+        raise ValueError(f"Keep the timer between 0 and {MAX_TIMER_MINUTES} minutes")
+    return value
+
+
+def beat_timer(chore: dict[str, Any], started: str | None, now: datetime) -> bool:
+    """Whether a chore with a timer was finished before it ran out.
+
+    ``started`` is when the timer was started on the screen. A start in the
+    future, or more than the timer (and a few seconds) ago, doesn't count.
+    """
+    minutes = int(chore.get("timer_minutes") or 0)
+    if not minutes or not started:
+        return False
+    try:
+        start = datetime.fromisoformat(started)
+    except TypeError, ValueError:
+        return False
+    if start.tzinfo is None or now.tzinfo is None:
+        return False
+    elapsed = (now - start).total_seconds()
+    return 0 <= elapsed <= minutes * 60 + 5
+
+
+def family_streak(
+    done_days: dict[str, set[date]],
+    has_own: dict[str, Callable[[date], bool]],
+    today: date,
+    limit: int = 400,
+) -> int:
+    """Days in a row everyone with their own chores finished them all.
+
+    A day nobody had their own chores neither breaks nor adds to it. Today
+    counts once everyone who has chores today is done; until then it counts
+    back from yesterday.
+    """
+
+    def day_state(day: date) -> bool | None:
+        busy = [m for m, fn in has_own.items() if fn(day)]
+        if not busy:
+            return None  # a day off for the whole family
+        return all(day in done_days.get(m, set()) for m in busy)
+
+    count = 0
+    day = today
+    if day_state(today) is False:
+        day = today - timedelta(days=1)
+    for _ in range(limit):
+        state = day_state(day)
+        if state is False:
+            break
+        if state:
+            count += 1
+        day -= timedelta(days=1)
+    return count
+
+
+def what_to_wear(
+    temperature: Any, unit: str | None, condition: str | None
+) -> dict[str, str] | None:
+    """Today's weather in kid terms: an emoji and what to wear.
+
+    ``temperature`` in ``unit`` (°F or °C); ``condition`` is Home Assistant's
+    weather condition (rainy, snowy, sunny…). None without a temperature.
+    """
+    try:
+        temp = float(temperature)
+    except TypeError, ValueError:
+        return None
+    celsius = (temp - 32) * 5 / 9 if unit and "F" in unit.upper() else temp
+    condition = (condition or "").lower()
+    if celsius < 0:
+        feel, emoji, wear = "Freezing", "🥶", "a warm coat, hat, gloves and boots"
+    elif celsius < 10:
+        feel, emoji, wear = "Cold", "🧥", "a coat and a hat"
+    elif celsius < 18:
+        feel, emoji, wear = "Cool", "🧶", "a sweater or a jacket"
+    elif celsius < 27:
+        feel, emoji, wear = "Nice", "👕", "a T-shirt; bring a light layer"
+    else:
+        feel, emoji, wear = "Hot", "🩳", "shorts and a T-shirt, and drink water"
+    extra = ""
+    if condition in ("rainy", "pouring", "lightning-rainy"):
+        emoji, extra = "☔", " Bring an umbrella or a rain jacket."
+    elif condition in ("snowy", "snowy-rainy", "hail"):
+        emoji, extra = "❄️", " Wear snow boots."
+    elif condition == "lightning":
+        extra = " Thunderstorms: stay inside when it rumbles."
+    elif condition == "sunny" and celsius >= 18:
+        extra = " Sunscreen and a hat."
+    elif condition == "windy" or condition == "windy-variant":
+        extra = " It's windy."
+    return {
+        "emoji": emoji,
+        "feel": feel,
+        "text": f"{feel}. Wear {wear}.{extra}",
+    }
+
+
+MAX_LINKS = 12
+
+
+def clean_links(raw: Any, member_ids: set[str]) -> list[dict[str, Any]]:
+    """Web pages a parent puts on the Family dashboard (a school menu, say).
+
+    Each is {id, name, emoji, url, member}: a name, an http(s) address, and
+    optionally one member whose page it's on (None: every page).
+    """
+    if not isinstance(raw, list):
+        raise ValueError("Links are a list")
+    links = []
+    for item in raw[:MAX_LINKS]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:40]
+        url = str(item.get("url") or "").strip()
+        if not name and not url:
+            continue
+        if not name:
+            raise ValueError("Give each link a name")
+        if not re.fullmatch(r"https?://[^\s/$.?#][^\s]*", url, re.IGNORECASE):
+            raise ValueError(f"{name}: the address starts with https://")
+        member = item.get("member") or None
+        links.append(
+            {
+                "id": str(item.get("id") or "")[:40] or f"l{len(links) + 1}",
+                "name": name,
+                "emoji": (str(item.get("emoji") or "").strip()[:4]) or None,
+                "url": url[:2000],
+                "member": member if member in member_ids else None,
+            }
+        )
+    return links
+
+
+# ---- chores for some ages (2.6.0) --------------------------------------------------
+
+MAX_AGE = 120
+
+
+def clean_birth_year(value: Any, this_year: int) -> int | None:
+    """The year someone was born (optional, for age-based chores)."""
+    if value in (None, ""):
+        return None
+    try:
+        year = int(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError("The year born is a year, like 2016") from err
+    if not this_year - MAX_AGE <= year <= this_year:
+        raise ValueError("Check the year born")
+    return year
+
+
+def clean_age(value: Any, label: str) -> int | None:
+    """A chore's youngest or oldest age (optional)."""
+    if value in (None, ""):
+        return None
+    try:
+        age = int(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"{label} is a number of years") from err
+    if not 0 <= age <= MAX_AGE:
+        raise ValueError(f"{label} is between 0 and {MAX_AGE}")
+    return age
+
+
+def age_on(member: dict[str, Any], day: date) -> int | None:
+    """A member's age on a day, from their birthday and year born; None
+    without both."""
+    year = member.get("birth_year")
+    birthday = member.get("birthday")
+    if not year or not birthday:
+        return None
+    month, dom = (int(x) for x in birthday.split("-"))
+    had_birthday = (day.month, day.day) >= (month, dom)
+    return day.year - int(year) - (0 if had_birthday else 1)
+
+
+def for_ages(
+    chore: dict[str, Any], members: list[dict[str, Any]], day: date
+) -> dict[str, Any]:
+    """A chore with an age range, narrowed to the people that age on a day.
+
+    Its people (or, with nobody picked, everyone) are kept when their age
+    fits or isn't known. Nobody picked stays up for grabs among those kept.
+    Nobody left: the chore is off for that day. Without an age range the
+    chore is returned as it is.
+    """
+    low, high = chore.get("min_age"), chore.get("max_age")
+    if low is None and high is None:
+        return chore
+    picked = list(chore.get("members") or [])
+    pool = picked or [m["id"] for m in members]
+    by_id = {m["id"]: m for m in members}
+    keep = []
+    for member_id in pool:
+        age = age_on(by_id.get(member_id, {}), day)
+        if age is None or (
+            (low is None or age >= low) and (high is None or age <= high)
+        ):
+            keep.append(member_id)
+    if not keep:
+        return {**chore, "enabled": False}
+    if keep == picked:
+        return chore
+    return {**chore, "members": keep, "grab": bool(chore.get("grab")) or not picked}

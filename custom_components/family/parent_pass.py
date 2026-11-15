@@ -199,6 +199,13 @@ class ParentPasses:
         found.expires = now + PASS_SECONDS
         return True
 
+    def name(self, token: str | None, user_id: str | None) -> str | None:
+        """Whose own PIN opened a live pass, if it was someone's own."""
+        found = self._passes.get(token) if token else None
+        if found is None or found.user_id != user_id:
+            return None
+        return found.by
+
     def lock(self, token: str | None) -> None:
         """End a pass (Back to Family, or the screen went idle)."""
         if token:

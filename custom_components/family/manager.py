@@ -51,6 +51,7 @@ from .const import (
 )
 from .countdowns import Countdowns
 from .dinner_vote import DinnerVote
+from .kid_board import KidBoard
 from .live_activity import ChoreActivity
 from .parent_pass import ParentPasses
 from .parents_notify import ParentNotices
@@ -64,6 +65,8 @@ from .voice import Voice
 _LOGGER = logging.getLogger(__name__)
 SAVE_DELAY = 2
 TODO_PREFIX = "todo:"
+HISTORY_PAGE = 200  # history entries sent at a time
+BALANCE_DAYS = 28  # days in the points-over-time chart
 
 
 class FamilyError(HomeAssistantError):
@@ -101,6 +104,14 @@ class FamilyStore(Store[dict[str, Any]]):
 
 def _id() -> str:
     return uuid4().hex[:12]
+
+
+def _set(entry: dict[str, Any], key: str, value: Any) -> None:
+    """Set a field, or drop it when there's nothing to say."""
+    if value:
+        entry[key] = value
+    else:
+        entry.pop(key, None)
 
 
 def _now_iso() -> str:
@@ -142,6 +153,7 @@ class FamilyManager:
         self.passes = ParentPasses(self)
         self.trades = Trades(self)
         self.countdowns = Countdowns(self)
+        self.kids = KidBoard(self)
         self.requests = RewardRequests(self)
         self.vote = DinnerVote(self)
         self.away = Away(self)
@@ -574,7 +586,7 @@ class FamilyManager:
         """Dashboard chores and the open items of every chore to-do list."""
         now = dt_util.now()
         chores = [
-            self._effective(c, now)
+            self._effective(model.for_ages(c, self.members, now.date()), now)
             for c in self.chores
             # Kept on a to-do list and set to show only when due: its item's
             # due date decides (no date, or not linked yet: it shows).
@@ -701,7 +713,9 @@ class FamilyManager:
             return set()
         return model.done_by(chore, self.entries, now)
 
-    async def async_complete(self, member_id: str, chore_id: str) -> dict[str, Any]:
+    async def async_complete(
+        self, member_id: str, chore_id: str, timer_started: str | None = None
+    ) -> dict[str, Any]:
         """A member did a chore: points straight away, a parent checks later."""
         member = self.member(member_id)
         chore = self.chore(chore_id)
@@ -740,6 +754,23 @@ class FamilyManager:
         if chore.get("source") == "todo":
             await self._async_set_todo(chore["todo_entity"], chore["todo_uid"], True)
         bonuses = self._earn_bonuses(member, entry)
+        if model.beat_timer(chore, timer_started, now):
+            timer = {
+                "bonus": model.BONUS_TIMER,
+                "title": "Beat the timer",
+                "points": int(chore.get("timer_bonus") or 0),
+            }
+            self.entries.append(
+                {
+                    "id": _id(),
+                    "at": _now_iso(),
+                    "kind": model.KIND_BONUS,
+                    "member": member_id,
+                    "for_entry": entry["id"],
+                    **timer,
+                }
+            )
+            bonuses.append(timer)
         self._changed()
         if not parent:
             self.notices.chore_done(entry, member)
@@ -884,6 +915,10 @@ class FamilyManager:
             1 for c in self._own_left(member_id, own, now) if model.hours_over(c, now)
         )
 
+    def has_own(self, member_id: str) -> Callable[[date], bool]:
+        """Public for the family streak (``kid_board``)."""
+        return self._has_own(member_id)
+
     def _has_own(self, member_id: str) -> Callable[[date], bool]:
         """Whether a day had any of this member's own dashboard chores (one
         taken in turns isn't counted: whose turn it was isn't kept)."""
@@ -895,7 +930,7 @@ class FamilyManager:
                 model.is_own(c, member_id)
                 and not c.get("turns")
                 and model.on_day(c, day)
-                for c in self.chores
+                for c in (model.for_ages(c, self.members, day) for c in self.chores)
             )
 
         return has_own
@@ -913,16 +948,27 @@ class FamilyManager:
         )
 
     async def async_review(
-        self, entry_id: str, approved: bool, penalty: int | None = None
+        self,
+        entry_id: str,
+        approved: bool,
+        penalty: int | None = None,
+        *,
+        reason: str | None = None,
+        by: str | None = None,
     ) -> dict[str, Any]:
         """A parent checked a chore. Not done: its points are taken back, and
-        a penalty on top (``penalty``, else the chore's, else the family's)."""
+        a penalty on top (``penalty``, else the chore's, else the family's).
+
+        ``reason`` says why it didn't happen; ``by`` is the parent's name.
+        """
         entry = self._entry(entry_id)
         if entry.get("kind") != model.KIND_CHORE:
             raise FamilyError("Only chores are checked")
         entry.pop("auto", None)  # a parent checked it now
         entry["review"] = model.REVIEW_APPROVED if approved else model.REVIEW_REJECTED
         entry["reviewed_at"] = _now_iso()
+        _set(entry, "reviewed_by", by)
+        _set(entry, "reason", None if approved else model.clean_reason(reason))
         # A bonus this chore earned goes (or comes back) with it.
         for bonus in self.entries:
             if bonus.get("for_entry") == entry_id and bonus["kind"] == model.KIND_BONUS:
@@ -952,6 +998,8 @@ class FamilyManager:
                         "points": -taken,
                         "for_entry": entry_id,
                     }
+                    | ({"reason": entry["reason"]} if entry.get("reason") else {})
+                    | ({"by": by} if by else {})
                 )
         chore_id = entry.get("chore_id", "")
         if chore_id.startswith(TODO_PREFIX):
@@ -1054,6 +1102,18 @@ class FamilyManager:
             if tts is not None and not str(tts).startswith("tts."):
                 raise FamilyError("Pick a text-to-speech voice")
             self.settings["reminder_tts"] = tts
+        if "links" in raw:
+            try:
+                self.settings["links"] = model.clean_links(
+                    raw.get("links") or [], {m["id"] for m in self.members}
+                )
+            except ValueError as err:
+                raise FamilyError(str(err)) from err
+        if "weather_entity" in raw:
+            weather = raw.get("weather_entity") or None
+            if weather is not None and not str(weather).startswith("weather."):
+                raise FamilyError("Pick a weather entity")
+            self.settings["weather_entity"] = weather
         if "live_from" in raw:
             self.settings["live_from"] = model.clean_time(raw["live_from"], "Show from")
         if "quick_points" in raw:
@@ -1556,12 +1616,13 @@ class FamilyManager:
             raise FamilyError(f"Couldn't give the music time: {err}") from err
 
     @callback
-    def mark_given(self, entry_id: str) -> dict[str, Any]:
+    def mark_given(self, entry_id: str, by: str | None = None) -> dict[str, Any]:
         entry = self._entry(entry_id)
         # Bought together: the whole group's handed out.
         for each in self._group(entry["group"]) if entry.get("group") else [entry]:
             each["given"] = model.GIVEN_DONE
             each["given_at"] = _now_iso()
+            _set(each, "given_by", by)
         self._changed()
         self.notices.clear(entry_id)
         return entry
@@ -1630,7 +1691,13 @@ class FamilyManager:
         return member
 
     @callback
-    def adjust(self, member_id: str, points: int, reason: str | None) -> dict[str, Any]:
+    def adjust(
+        self,
+        member_id: str,
+        points: int,
+        reason: str | None,
+        by: str | None = None,
+    ) -> dict[str, Any]:
         """Add or take away points by hand (or from an automation)."""
         member = self.member(member_id)
         points = model.clean_points(points, minimum=-model.MAX_POINTS)
@@ -1645,6 +1712,7 @@ class FamilyManager:
             or ("Bonus points" if points > 0 else "Points taken away"),
             "points": points,
         }
+        _set(entry, "by", by)
         self.entries.append(entry)
         self._changed()
         return entry
@@ -1679,10 +1747,16 @@ class FamilyManager:
             "color": raw.get("color")
             or MEMBER_COLORS[len(self.members) % len(MEMBER_COLORS)],
             "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            # Big pictures and chores read aloud, for kids who can't read yet.
+            "picture_mode": bool(raw.get("picture_mode")),
             # Points added every week (0: none).
             "allowance": model.clean_points(raw.get("allowance") or 0, "Allowance"),
             # "MM-DD": a countdown, a birthday bonus and a happy birthday.
             "birthday": model.clean_month_day(raw.get("birthday"), "Birthday"),
+            # Optional: with the birthday, their age for age-based chores.
+            "birth_year": model.clean_birth_year(
+                raw.get("birth_year"), dt_util.now().year
+            ),
             # Chosen on the Family dashboard, not here: kept as it is.
             "goal": next(
                 (m.get("goal") for m in self.members if m["id"] == member_id), None
@@ -1713,6 +1787,10 @@ class FamilyManager:
         if todo_list is not None and not str(todo_list).startswith("todo."):
             raise FamilyError("Pick a to-do list")
         members = self._known_members(raw.get("members"))
+        low = model.clean_age(raw.get("min_age"), "Youngest age")
+        high = model.clean_age(raw.get("max_age"), "Oldest age")
+        if low is not None and high is not None and low > high:
+            raise FamilyError("The youngest age is more than the oldest")
         turns = bool(raw.get("turns"))
         turn_every = raw.get("turn_every") or model.TURN_EVERY_TIME
         if turns and len(members) < 2:
@@ -1762,6 +1840,14 @@ class FamilyManager:
                 for e in raw.get("remind_speakers") or []
                 if str(e).startswith("media_player.")
             ],
+            # Only for people this age (either may be left out).
+            "min_age": low,
+            "max_age": high,
+            # A countdown on the tile (0: none), and points for beating it.
+            "timer_minutes": model.clean_timer(raw.get("timer_minutes")),
+            "timer_bonus": model.clean_points(
+                raw.get("timer_bonus") or 0, "The timer bonus"
+            ),
         }
         self._upsert(self.chores, chore)
         self._changed()
@@ -2205,6 +2291,11 @@ class FamilyManager:
             if self.settings.get("point_value")
             else None,
             "trades": self.trades.snapshot(),
+            "tomorrow": self.kids.tomorrow(),
+            "screen": self.kids.screen(),
+            "weather": self.kids.weather(),
+            "family_streak": self.kids.family_streak(today),
+            "links": self.settings.get("links") or [],
             "countdowns": self.countdowns.snapshot(today),
             "vote": self.vote.snapshot(),
             "requests": self.requests.snapshot(),
@@ -2244,6 +2335,7 @@ class FamilyManager:
                 "calendars": list(self.settings.get("calendars") or []),
                 "quick_points": list(self.settings.get("quick_points") or []),
                 "reminder_tts": self.settings.get("reminder_tts"),
+                "weather_entity": self.settings.get("weather_entity"),
                 "saving_percent": int(self.settings.get("saving_percent") or 0),
                 "saving_max": int(self.settings.get("saving_max") or 0),
                 "birthday_points": int(self.settings.get("birthday_points") or 0),
@@ -2299,10 +2391,32 @@ class FamilyManager:
             result["to_approve"] = sorted(
                 approve.values(), key=lambda r: r["at"], reverse=True
             )
-            result["history"] = sorted(
-                self.entries, key=lambda e: e["at"], reverse=True
-            )[:200]
+            result["history"], result["history_more"] = self.history()
+            result["balance_days"] = model.daily_balances(
+                self.entries,
+                self.carried,
+                [m["id"] for m in self.members],
+                dt_util.now().date(),
+                BALANCE_DAYS,
+            )
         return result
+
+    def history(
+        self, before: str | None = None, limit: int = HISTORY_PAGE
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Newest first, older than ``before`` (an entry's time), with each
+        entry's points before and after it. Also whether there's more."""
+        balances = model.running_balances(self.entries, self.carried)
+        newest = sorted(self.entries, key=lambda e: e["at"], reverse=True)
+        if before:
+            newest = [e for e in newest if e["at"] < before]
+        page = [
+            {**e, "before": balances[e["id"]][0], "after": balances[e["id"]][1]}
+            if e.get("id") in balances
+            else dict(e)
+            for e in newest[:limit]
+        ]
+        return page, len(newest) > limit
 
     def _todo_item_rows(self, todo: dict[str, Any]) -> list[dict[str, Any]]:
         """The list's open items and their points, for the Parents dashboard."""

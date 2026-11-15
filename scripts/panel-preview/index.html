@@ -27,10 +27,10 @@ const ago = (m) => new Date(now - m * 60000).toISOString();
 let members = [
   { id: "a", name: "Alex", emoji: "🦖", color: "#3F51B5", person: "person.alex", streak: 4, points: 42, picture: null, to_check: 1, badges: [{ key: "first_chore", emoji: "🌱", name: "First chore", text: "Did a first chore", at: "2026-10-01" }, { key: "chores_10", emoji: "⭐", name: "10 chores", text: "Did 10 chores", at: "2026-10-09" }, { key: "streak_3", emoji: "🔥", name: "3-day streak", text: "All their own chores 3 days running", at: "2026-11-11" }] },
   { id: "b", name: "Sam", emoji: "🦄", color: "#E91E63", person: null, points: 15, picture: null, to_check: 0, goal: "ice" },
-  { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0 },
+  { id: "c", name: "Riley", emoji: "", color: "#009688", person: null, points: 8, picture: null, to_check: 0, picture_mode: true },
 ];
 let allChores = [
-  { id: "bed", name: "Make your bed", emoji: "🛏️", points: 5, repeat: "daily", members: ["a", "b", "c"], enabled: true },
+  { id: "bed", name: "Make your bed", emoji: "🛏️", points: 5, repeat: "daily", members: ["a", "b", "c"], enabled: true, timer_minutes: 5, timer_bonus: 2 },
   { id: "dishes", name: "Empty the dishwasher", emoji: "🍽️", points: 10, repeat: "daily", members: ["a", "b"], enabled: true, turns: true, turn_every: "day", turn_first: "a" },
   { id: "teeth", name: "Brush your teeth", emoji: "🪥", points: 1, repeat: "daily", members: [], enabled: true, from_time: "06:00", until_time: "23:59" },
   { id: "trash", name: "Take out the trash", emoji: "🗑️", points: 4, repeat: "weekly", members: ["c"], enabled: true, days: [1] },
@@ -62,7 +62,9 @@ let entries = [
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
   { id: "e3a", at: ago(15), kind: "reward", member: "a", reward_id: "toy", title: "A new toy", points: -60, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
   { id: "e3c", at: ago(15), kind: "reward", member: "c", reward_id: "toy", title: "A new toy", points: -40, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
-  { id: "e3", at: ago(1500), kind: "chore", member: "c", title: "Feed the dog", points: 3, review: "rejected" },
+  { id: "e3", at: ago(1500), kind: "chore", member: "c", title: "Feed the dog", points: 3, review: "rejected", reason: "Bowl still empty", reviewed_by: "Dana" },
+  { id: "e4", at: ago(1600), kind: "adjust", member: "a", title: "💛 Kind to a sibling", points: 2, by: "Dana" },
+  { id: "e5", at: ago(1700), kind: "high_five", member: "b", from: "a", title: "🙌", points: 0 },
 ];
 const st = (entity_id, state, attributes) => ({ entity_id, state, attributes: { friendly_name: entity_id, ...attributes } });
 let states = {
@@ -73,6 +75,8 @@ let states = {
   "media_player.kitchen_speaker": st("media_player.kitchen_speaker", "playing", { friendly_name: "Kitchen speaker", media_title: "Happy songs" }),
   "sensor.outside_temperature": st("sensor.outside_temperature", "38", { friendly_name: "Outside", unit_of_measurement: "°F" }),
   "climate.upstairs": st("climate.upstairs", "heat", { friendly_name: "Upstairs" }),
+  "sensor.family_room_tv_time_remaining_today": st("sensor.family_room_tv_time_remaining_today", "25", { unit_of_measurement: "min" }),
+  "sensor.kids_room_time_remaining_today": st("sensor.kids_room_time_remaining_today", "unknown", { unit_of_measurement: "min" }),
 };
 const KINDS = { scene: "run", light: "toggle", cover: "open", lock: "lock", media_player: "media", sensor: "view", climate: "view" };
 let controls = [
@@ -190,7 +194,16 @@ const countdownRows = () => {
   }
   return out.sort((x, y) => x.days - y.days || x.name.localeCompare(y.name));
 };
+// Each person's points at the end of the last 28 days (like model.daily_balances).
+const balanceDays = () => ({ days: Array.from({ length: 28 }, (_, i) => dayIso(i - 27)), members: Object.fromEntries(members.map((m, j) => [m.id, Array.from({ length: 28 }, (_, i) => Math.max(0, Math.round(m.points - 27 + i + Math.sin(i / 3 + j) * 6)))])) });
 const extras = () => ({
+  tomorrow: { date: dayIso(1), away: false, events: laterEvents.filter((e) => (e.all_day ? e.start <= dayIso(1) && dayIso(1) < e.end : iso(new Date(e.start)) === dayIso(1))), chores: { a: [{ id: "bed", name: "Make your bed", emoji: "🛏️", points: 5 }, { id: "dishes", name: "Empty the dishwasher", emoji: "🍽️", points: 10, from_time: "16:00" }], b: [{ id: "bed", name: "Make your bed", emoji: "🛏️", points: 5 }], c: [{ id: "bed", name: "Make your bed", emoji: "🛏️", points: 5 }] } },
+  screen: [{ kind: "tv", name: "Family Room TV", entity_id: "sensor.family_room_tv_time_remaining_today" }, { kind: "music", name: "Kids Room", entity_id: "sensor.kids_room_time_remaining_today" }],
+  weather: settings.weather_entity === null ? null : { entity_id: "weather.home", temperature: 38, unit: "°F", condition: "rainy", emoji: "☔", feel: "Cold", text: "Cold. Wear a coat and a hat. Bring an umbrella or a rain jacket." },
+  family_streak: 3,
+  links: settings.links || [{ id: "l1", name: "School lunch", emoji: "🍎", url: "https://example.com/menu", member: null }],
+  balance_days: balanceDays(),
+  history_more: false,
   countdowns: countdownRows(),
   vote: vote && { ...vote, counts: vote.options.map((_o, i) => Object.values(vote.votes).filter((v) => v === i).length) },
   requests,
@@ -218,7 +231,7 @@ const state = () => ({
   upcoming: Array.from({ length: 7 }, (_, i) => ({ date: dayIso(i), events: i === 0 ? todayEvents : laterEvents.filter((e) => (e.all_day ? e.start <= dayIso(i) && dayIso(i) < e.end : iso(new Date(e.start)) === dayIso(i))) })),
   to_approve: Object.values(entries.filter((e) => e.given === "to_approve").reduce((g, e) => { (g[e.group] ||= { group: e.group, at: e.at, title: e.title, reward_id: e.reward_id, points: e.total, shares: [] }).shares.push({ member: e.member, points: -e.points }); return g; }, {})), notes: [...notes].sort((a, b) => (a.at < b.at ? 1 : -1)), money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null,
   meals: Array.from({ length: 7 }, (_, i) => ({ date: dayIso(i), ...(meals[dayIso(i)] || {}) })),
-  to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e, i, all) => e.given === "to_give" && (!e.group || all.findIndex((x) => x.group === e.group && x.given === "to_give") === i)), history: [...entries].reverse(),
+  to_check: entries.filter((e) => e.review === "pending"), to_give: entries.filter((e, i, all) => e.given === "to_give" && (!e.group || all.findIndex((x) => x.group === e.group && x.given === "to_give") === i)), history: (() => { const t = {}; return [...entries].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).map((e) => { const before = t[e.member] || 0; const after = e.review === "rejected" ? before : before + (e.points || 0); t[e.member] = after; return { ...e, before, after }; }).reverse(); })(),
 });
 window.hass = {
   states, user: { is_admin: IS_ADMIN },
@@ -291,7 +304,7 @@ window.hass = {
     if (t === "shopping") { const want = [...new Set(Array.from({ length: 7 }, (_v, i) => meals[dayIso(i)]?.ingredients || "").join("\n").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (!want.length) throw { message: "No meals in the coming days list anything to buy" }; settings.shopping_list = msg.entity_id; return { added: want.filter((x) => x.toLowerCase() !== "milk"), skipped: want.filter((x) => x.toLowerCase() === "milk") }; }
     if (t === "calendar/add") { if (!settings.calendars.some((c) => c.entity_id === msg.entity_id)) throw { message: "Pick one of the family's calendars" }; return { event: { title: msg.title } }; }
     if (t === "report") return { report: { from: dayIso(-((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), until: dayIso(6 - ((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), weeks_ago: msg.weeks_ago || 0, days_away: 0, money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null, members: members.map((x, i) => ({ id: x.id, name: x.name, emoji: x.emoji, color: x.color, chores: 12 - i * 3, top_chores: [{ name: "Make your bed", times: 6 - i }, { name: "Set the table", times: 3 }], earned: 60 - i * 15, spent: 25 - i * 5, bonuses: 10, rewards: i ? [] : ["Ice cream", "15 minutes of TV"], all_done_days: 4 - i, badges: i ? [] : [{ key: "streak7", emoji: "🔥", name: "A week in a row", text: "" }], points: x.points, streak: x.streak || 0 })) } };
-    if (t === "choices") return { voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
+    if (t === "choices") return { weathers: [{ entity_id: "weather.home", name: "Home" }], voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
     if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: isParent(msg), by: null }; notes.push(n); return { note: n }; }
     if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && !IS_ADMIN) throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
     if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); const buy = [...new Set((msg.ingredients || "").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (buy.length) day.ingredients = buy.join("\n"); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
@@ -353,9 +366,14 @@ window.hass = {
       if ("bonus_all_done" in msg) bonus = { all_done: msg.bonus_all_done, streak_days: msg.streak_days, streak: msg.streak_bonus };
       return { settings };
     }
+    if (t === "high_five") { if (msg.from_id === msg.to_id) throw { message: "Send a high five to someone else" }; const e = { id: "h" + entries.length, at: new Date().toISOString(), kind: "high_five", member: msg.to_id, from: msg.from_id, title: msg.emoji || "🙌", points: 0 }; entries.push(e); return { entry: e }; }
+    if (t === "points_story") { const m = members.find((x) => x.id === msg.member_id); const st = state(); return { member: m.id, points: m.points, entries: st.history.filter((e) => e.member === m.id && e.kind !== "high_five").slice(0, 30) }; }
+    if (t === "history") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const all = state().history.filter((e) => !msg.before || e.at < msg.before); return { entries: all.slice(0, msg.limit || 200), more: all.length > (msg.limit || 200) }; }
     if (t === "review") {
       const e = entries.find((x) => x.id === msg.entry_id);
       e.review = msg.approved ? "approved" : "rejected";
+      e.reviewed_by = "Dana";
+      if (msg.approved) delete e.reason; else if (msg.reason) e.reason = msg.reason;
       const mm = members.find((x) => x.id === e.member);
       if (!msg.approved) {
         mm.points -= e.points;

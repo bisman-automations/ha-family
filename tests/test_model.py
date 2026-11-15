@@ -540,3 +540,26 @@ def test_old_rewards_become_everyone_and_an_empty_list_stays_empty():
     empty = {"id": "old", "members": []}
     assert model.normalize_reward(empty)["members"] == []
     assert model.normalize_reward({"members": None})["members"] is None
+
+
+def test_running_balances() -> None:
+    entries = [
+        {"id": "b", "member": "m1", "at": "2026-11-14T13:00:00", "points": -5},
+        {"id": "a", "member": "m1", "at": "2026-11-14T12:00:00", "points": 3},
+        {
+            "id": "c",
+            "member": "m1",
+            "at": "2026-11-14T14:00:00",
+            "points": 2,
+            "review": model.REVIEW_REJECTED,
+        },
+        {"id": "d", "member": "m2", "at": "2026-11-14T14:00:00", "points": 4},
+        {"id": "e", "member": "m1", "at": "2026-11-14T15:00:00", "points": 1},
+    ]
+    assert model.running_balances(entries, {"m1": 10}) == {
+        "a": (10, 13),
+        "b": (13, 8),
+        "c": (8, 8),
+        "d": (0, 4),
+        "e": (8, 9),
+    }

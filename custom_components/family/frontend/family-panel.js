@@ -219,6 +219,24 @@ const PICK_EMOJIS = ["🧹", "🧽", "🧼", "🧺", "🪣", "🧴", "🗑️", 
   "🪥", "🛁", "🚿", "🚽", "👕", "🧦", "👟", "🐶", "🐱", "🐟", "🐰", "🌱", "🌻", "🍂", "❄️", "🚗", "🛒", "📦", "🔧", "💡",
   "📺", "🎮", "🍦", "🍕", "🍿", "🎬", "💰", "🎁", "⭐", "🏆", "🎉", "❤️"];
 
+// A photo from the camera, made small enough to send: a JPEG data URL at
+// most 1024 pixels across.
+async function shrinkPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
+    const scale = Math.min(1, 1024 / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 const DIDNT_REASONS = ["Not done", "Not finished", "Not done well", "Done by someone else"];
 const HIGH_FIVES = ["🙌", "⭐", "❤️", "👏", "🎉", "🤝"];
 // The local day of an ISO time, as YYYY-MM-DD.
@@ -306,6 +324,8 @@ const SECTIONS = [
   ["countdowns", "Coming up"],
   ["vote", "What's for dinner?"],
   ["chores", "My chores"],
+  ["pick", "Pick your chores"],
+  ["claims", "Who did this?"],
   ["routines", "Routines"],
   ["grabs", "Up for grabs"],
   ["notes", "Notes"],
@@ -676,6 +696,13 @@ const STYLES = `
   .matrix .totals th { text-align: left; font-weight: 500; }
   .matrix .totals td { font-weight: 600; }
   .rows { list-style: none; margin: 0; padding: 0; }
+  details.speakers { margin: 6px 0; }
+  details.speakers summary { cursor: pointer; padding: 8px 0; }
+  details.speakers .speaker-find { width: 100%; max-width: 360px; margin: 6px 0; padding: 8px 10px; font: inherit; border-radius: 8px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: inherit; }
+  details.speakers label[hidden] { display: none; }
+  .rows li { scroll-margin-top: 72px; }
+  .rows li.edit-row { display: block; padding: 4px 0 16px; border-top: none; }
+  .rows li.edit-row > form { margin: 0; padding: 16px; border-radius: 12px; background: var(--secondary-background-color, rgba(127,127,127,0.08)); }
   .rows li { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--fam-divider); }
   .rows li:first-child { border-top: 0; }
   .rows .grow { flex: 1; min-width: 180px; }
@@ -759,6 +786,32 @@ const STYLES = `
   .items input { width: 100px; }
   .penalty { display: inline-flex; gap: 6px; align-items: center; }
   .pic-field { display: inline-flex; }
+  .wall { padding: 8px; }
+  .wall-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .wall-head h1 { font-size: clamp(28px, 4vw, 56px); margin: 0 0 16px; font-weight: 500; }
+  .wall-streak { font-size: clamp(18px, 2vw, 30px); }
+  .wall-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .wall-col { background: var(--card-background-color, #fff); border-radius: 20px; padding: 18px; border-top: 8px solid var(--c, var(--primary-color)); }
+  .wall-who { display: flex; align-items: center; gap: 14px; }
+  .wall-who .avatar { width: 72px; height: 72px; font-size: 40px; }
+  .wall-name { font-size: clamp(24px, 2.4vw, 40px); font-weight: 600; }
+  .wall-points { font-size: clamp(20px, 2vw, 32px); }
+  .wall-progress { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; font-size: clamp(16px, 1.6vw, 24px); }
+  .wall-progress .bar { flex: 1; height: 14px; }
+  .wall-list { list-style: none; padding: 0; margin: 10px 0 0; font-size: clamp(18px, 1.9vw, 30px); }
+  .wall-list li { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+  .wall-list li.done { opacity: 0.55; }
+  .wall-list li.done .wall-done { text-decoration: line-through; }
+  .wall-mark { width: 1.2em; text-align: center; color: var(--c, var(--primary-color)); font-weight: 700; }
+  .wall-extra { font-size: clamp(16px, 1.6vw, 26px); margin: 16px 4px 0; }
+  .photo-take { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 8px 0; }
+  .photo-preview { max-width: 100%; max-height: 240px; border-radius: 12px; }
+  .photo-full { max-width: 100%; max-height: 70vh; border-radius: 12px; display: block; margin: 0 auto 12px; }
+  .photo-btn { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .pick-turn { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+  .tile.pick.picked { opacity: 0.75; border-color: var(--c, var(--fam-divider)); }
+  .tile.pick:disabled { opacity: 0.5; }
+  .rows.owed li { border-top: none; }
   .pic-btn { width: 48px; height: 48px; padding: 0; font-size: 26px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; }
   .pic-btn ha-icon, .pic-tile ha-icon { --mdc-icon-size: 28px; }
   .pic-empty { opacity: 0.45; }
@@ -1427,6 +1480,18 @@ class FamilyPanel extends HTMLElement {
         <div class="form-actions"><button class="btn primary" type="submit">Set away</button></div></form>`}</div>`;
   }
 
+  // Pick your chores: how much each one picks a week.
+  _pickCard() {
+    if (!this._data.picks) return "";
+    const st = this._data.settings || {};
+    return `<div class="card"><h2>Pick your chores</h2>
+      <p class="muted">Chores ticked <b>In the pick-your-chores pool</b> are nobody's until someone picks them on the Family dashboard. Whoever has picked the fewest points this week goes next. The picks start again every Monday.</p>
+      <form class="inline" data-pick-form>
+        <label class="field"><span>Points each picks a week</span><input type="number" name="pick_points" min="0" max="10000" value="${esc(st.pick_points || 0)}" style="width:110px"></label>
+        <small style="align-self:end">0: no limit, they pick until the pool is empty.</small>
+        <button class="btn" type="submit">Save</button></form></div>`;
+  }
+
   _savingCard() {
     const st = this._data.settings || {};
     return `<div class="card"><h2>Saving and birthday bonuses</h2>
@@ -1750,7 +1815,9 @@ class FamilyPanel extends HTMLElement {
     // which has no toolbar) at the top of the page.
     const slot = this.shadowRoot.querySelector(".switch-slot");
     if (slot) slot.innerHTML = this._switchBar();
-    main.innerHTML = (slot ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : this._renderFamily());
+    const wall = this._mode !== "parents" && this._isWall();
+    main.classList.toggle("wall-main", wall);
+    main.innerHTML = (slot || wall ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : wall ? this._renderWall() : this._renderFamily());
     if (this._mode === "parents") this._foldCards();
     this._fit();
     this._renderOverlay();
@@ -1888,6 +1955,8 @@ class FamilyPanel extends HTMLElement {
       going: goingFor.length ? this._section("going", "Going for", `<div class="tiles going" data-fit="going">${goingFor.join("")}</div>`) : "",
       chores: member && (mine.length || (own.total && !hide) || this._tradesFor(member).length) ? this._section("chores", "My chores", mineBody, mine.length) : "",
       grabs: grabs.length || (!member && !hide) ? this._section("grabs", "Up for grabs", grabBody, grabs.length) : "",
+      pick: this._pickBody(member),
+      claims: (d.claims || []).length ? this._section("claims", "Who did this?", `<div class="tiles" data-fit="claims">${d.claims.map((c) => `<button class="tile claim" data-claim="${esc(c.id)}"><span class="emoji">${emo(c.emoji, "🤖")}</span><span class="label">${esc(c.name)}</span><span class="worth">+${pts(c.points)}</span><span class="sub">Done by a device. Was it you?</span></button>`).join("")}</div>`, d.claims.length) : "",
       routines: routines.length ? this._section("routines", "Routines", `<div class="tiles" data-fit="routines">${routines.map((r) => this._routineTile(r, member)).join("")}</div>`, routines.length) : "",
       notes: this._section("notes", "Notes", noteTiles, notes.length),
       today: events.length || (d.has_calendars && !hide) ? this._section("today", "Today", eventTiles, events.length, `<button class="btn sec-extra" data-days>Next few days</button>`) : "",
@@ -1923,6 +1992,70 @@ class FamilyPanel extends HTMLElement {
     const birthdays = d.members.filter((m) => m.birthday_today && (!member || m.id !== member.id));
     if (birthdays.length) rows.push(`<p class="banner birthday">🎂 Happy birthday, ${esc(namesText(birthdays.map((m) => m.name)))}!</p>`);
     return rows.join("");
+  }
+
+  // Pick your chores: whose turn it is, the chores left in the pool, and
+  // (on someone's page) the ones they picked.
+  _pickBody(member) {
+    const picks = this._data.picks;
+    if (!picks) return "";
+    const next = this._memberById(picks.next);
+    const left = picks.pool.filter((c) => !c.picked_by);
+    const mine = member ? picks.pool.filter((c) => c.picked_by === member.id) : picks.pool.filter((c) => c.picked_by);
+    if (!left.length && !mine.length) return "";
+    const turn = next
+      ? `<p class="pick-turn">${this._avatar(next, true)}<span><b>${esc(next.name)}</b>, it's your turn to pick${picks.target ? ` (up to ${pts(picks.target)} each this week)` : ""}.</span></p>`
+      : `<p class="pick-turn">All picked for this week.</p>`;
+    const tiles = [
+      ...left.map((c) => {
+        const allowed = next && (!c.members.length || c.members.includes(next.id));
+        return `<button class="tile pick" data-pick="${esc(c.id)}" ${allowed ? "" : "disabled"}><span class="emoji">${emo(c.emoji, "🧹")}</span><span class="label">${esc(c.name)}</span><span class="worth">+${pts(c.points)}</span>${allowed ? `<span class="sub">Tap to pick it</span>` : ""}</button>`;
+      }),
+      ...mine.map((c) => {
+        const m = this._memberById(c.picked_by);
+        return `<div class="tile pick picked"${m ? ` style="--c:${esc(m.color)}"` : ""}><span class="emoji">${emo(c.emoji, "🧹")}</span><span class="label">${esc(c.name)}</span><span class="worth">+${pts(c.points)}</span><span class="sub">${esc(m ? `${m.name}'s this week` : "Picked")}</span></div>`;
+      }),
+    ];
+    return this._section("pick", "Pick your chores", `${turn}<div class="tiles" data-fit="pick">${tiles.join("")}</div>`, left.length);
+  }
+
+  // The wall view: for a TV or a tablet on the wall, read from across the
+  // room. A card with `wall: true`, or the Family page at #wall.
+  _isWall() {
+    if (this._config?.wall) return true;
+    try {
+      return window.location.hash === "#wall";
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  _renderWall() {
+    const d = this._data;
+    const now = new Date();
+    const columns = d.members.map((m) => {
+      const open = d.chores.filter((c) => !c.grab && c.can.includes(m.id));
+      const done = (d.done_today || []).filter((e) => e.member === m.id && e.kind === "chore");
+      const own = m.own_today || { total: 0, left: 0 };
+      const finished = own.total ? own.total - own.left : 0;
+      return `<section class="wall-col" style="--c:${esc(m.color)}">
+        <div class="wall-who">${this._avatar(m)}<div><div class="wall-name">${esc(m.name)}</div><div class="wall-points">⭐ ${esc(pts(m.points))}</div></div></div>
+        ${own.total ? `<div class="wall-progress">${this._bar(finished, own.total)}<span>${own.left ? `${finished} of ${own.total}` : "All done! 🎉"}</span></div>` : ""}
+        <ul class="wall-list">
+          ${open.map((c) => `<li><span class="wall-mark">○</span>${emo(c.emoji)} ${esc(c.name)}</li>`).join("")}
+          ${done.map((e) => `<li class="done"><span class="wall-mark">✓</span><span class="wall-done">${esc(e.title)}</span></li>`).join("")}
+          ${!open.length && !done.length ? `<li class="muted">Nothing today</li>` : ""}
+        </ul></section>`;
+    });
+    const grabs = d.chores.filter((c) => c.grab);
+    const events = d.today || [];
+    return `<div class="wall">
+      <header class="wall-head"><h1>${esc(now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }))}</h1>
+        ${d.family_streak ? `<span class="wall-streak">🔥 ${d.family_streak} ${d.family_streak === 1 ? "day" : "days"} in a row</span>` : ""}</header>
+      <div class="wall-cols">${columns.join("")}</div>
+      ${grabs.length ? `<p class="wall-extra">Up for grabs: ${grabs.map((c) => `${emo(c.emoji)} ${esc(c.name)} +${pts(c.points)}`).join(" · ")}</p>` : ""}
+      ${events.length ? `<p class="wall-extra">Today: ${events.map((e) => `${esc(eventTime(e))} ${esc(e.title)}`).join(" · ")}</p>` : ""}
+    </div>`;
   }
 
   _countdownTile(c) {
@@ -2447,6 +2580,19 @@ class FamilyPanel extends HTMLElement {
         <iframe src="${esc(link.url)}" title="${esc(link.name)}" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
         <p class="muted">Blank page? That site doesn't allow showing it here: <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">open it in a new tab</a>.</p></div></div>`;
     }
+    if (s.type === "photo") {
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Photo">
+        ${s.url === null ? `<p class="muted">Loading…</p>` : s.url ? `<img class="photo-full" src="${esc(s.url)}" alt="Photo of the chore">` : `<p class="muted">That photo is gone: photos are kept for two weeks.</p>`}
+        <div class="actions"><button class="big" data-close>Close</button></div></div></div>`;
+    }
+    if (s.type === "claim") {
+      const claim = (d.claims || []).find((c) => c.id === s.id);
+      if (!claim) return "";
+      return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who did this?">
+        <h3>Who did ${esc(claim.name)}?</h3><p>+${pts(claim.points)}</p>
+        ${this._people(d.members, "data-claim-member", null)}
+        <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
+    }
     if (s.type === "pic") {
       const tile = (v, words) => `<button type="button" class="pic-tile" data-pic-choose="${esc(v)}" data-pic-words="${esc(words)}" title="${esc(words.split(" ")[0])}">${emo(v)}</button>`;
       return `<div class="sheet-bg" data-close><div class="sheet pic-sheet" role="dialog" aria-modal="true" aria-label="Pick a picture">
@@ -2594,10 +2740,17 @@ class FamilyPanel extends HTMLElement {
           ${this._people(can, "data-sheet-member", null)}
           <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
       }
+      const photo = chore.photo
+        ? `<div class="photo-take">${s.photo ? `<img class="photo-preview" src="${esc(s.photo)}" alt="Your photo">` : ""}
+            <label class="big photo-btn">📷 ${s.photo ? "Take another" : "Take a photo"}<input type="file" accept="image/*" capture="environment" data-photo-input hidden></label>
+            ${chore.photo === "need" && !s.photo ? `<p class="muted">Take a photo to show it's done.</p>` : ""}</div>`
+        : "";
+      const blocked = this._busy || (chore.photo === "need" && !s.photo);
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Chore done">
         <h3>${esc(chore.name)}</h3><p>Done, ${esc(member.name)}? That's +${pts(chore.points)}.</p>
+        ${photo}
         <div class="actions"><button class="big" data-close>Not yet</button>
-        <button class="big primary" data-confirm ${this._busy ? "disabled" : ""}>Yes, it's done!</button></div></div></div>`;
+        <button class="big primary" data-confirm ${blocked ? "disabled" : ""}>Yes, it's done!</button></div></div></div>`;
     }
     const reward = d.rewards.find((r) => r.id === s.id);
     if (!reward) return "";
@@ -2752,6 +2905,7 @@ class FamilyPanel extends HTMLElement {
           .map((e) => {
             const m = this._memberById(e.member);
             return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: <b>${esc(e.title)}</b><small>${esc(whenText(e.at))} · +${pts(e.points)} given</small></span>
+              ${e.photo ? `<button class="btn" data-photo-view="${esc(e.id)}">📷 Photo</button>` : ""}
               <button class="btn good" data-review="${esc(e.id)}" data-approved="1">Done right</button>
               <span class="penalty"><input type="number" min="0" max="10000" data-penalty-for="${esc(e.id)}" placeholder="${esc(e.penalty ?? d.settings?.penalty ?? 0)}" aria-label="Extra points to take if it didn't happen">
               <button class="btn bad" data-didnt="${esc(e.id)}">Didn't happen</button></span></li>`;
@@ -2771,8 +2925,16 @@ class FamilyPanel extends HTMLElement {
           })
           .join("")}</ul></div>`
       : "";
+    const owed = Object.entries(d.owed || {}).filter(([, money]) => money > 0);
+    const owedRows = owed.length
+      ? `<ul class="rows owed">${owed.map(([id, money]) => {
+          const m = this._memberById(id);
+          return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")} is owed <b>${esc(`${d.money?.currency || ""}${money.toFixed(2)}`)}</b><small>Cash outs not paid yet, added up</small></span>
+            <button class="btn primary" data-paid-all="${esc(id)}">Paid it all</button></li>`;
+        }).join("")}</ul>`
+      : "";
     const give = d.to_give.length
-      ? `<ul class="rows">${d.to_give
+      ? `${owedRows}<ul class="rows">${d.to_give
           .map((e) => {
             const people = (e.together || [e.member]).map((id) => this._memberById(id)).filter(Boolean);
             const who = people.length ? namesText(people.map((m) => m.name)) : "Someone";
@@ -2861,14 +3023,33 @@ class FamilyPanel extends HTMLElement {
               <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
               <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="1" ${i === last ? "disabled" : ""} aria-label="Move down">↓</button>
               <button class="btn" data-edit="routines" data-id="${esc(r.id)}">Edit</button>
-              <button class="btn bad" data-delete="routines" data-id="${esc(r.id)}">Remove</button></li>`;
+              <button class="btn bad" data-delete="routines" data-id="${esc(r.id)}">Remove</button></li>${this._inline("routines", r.id)}`;
           })
           .join("")}</ul>`
       : `<p class="empty">No routines yet. A morning or bedtime checklist is a good start.</p>`;
-    const form = edit?.collection === "routines" ? this._routineForm(edit.item) : `<button class="btn primary" data-new="routines">Add a routine</button>`;
+    const form = edit?.collection === "routines" && !edit.item?.id ? this._routineForm(edit.item) : `<button class="btn primary" data-new="routines">Add a routine</button>`;
     return `<div class="card"><h2>Routines</h2>
       <p class="muted">A checklist someone works through on the Family dashboard, one step at a time. Ticking the last step finishes it: the points are given straight away and it waits under <b>To check</b>, like a chore. Ticked steps start fresh each day.</p>
       ${rows}${form}</div>`;
+  }
+
+  // The form for the item being edited, opened right under its row, so the
+  // rows after it move down until it's saved or cancelled.
+  _inline(collection, id) {
+    const edit = this._edit;
+    if (edit?.collection !== collection || !id || edit.item?.id !== id) return "";
+    const form = { routines: "_routineForm", chores: "_choreForm", todo_lists: "_listForm", rewards: "_rewardForm", controls: "_controlForm", members: "_memberForm" }[collection];
+    return `<li class="edit-row">${this[form](edit.item)}</li>`;
+  }
+
+  // A pool chore's pick this week, and Put back for a parent.
+  _poolStatus(c) {
+    if (!c.pool) return "";
+    const row = (this._data.picks?.pool || []).find((p) => p.id === c.id);
+    const who = row?.picked_by ? this._memberById(row.picked_by) : null;
+    return who
+      ? `<span class="pill">Picked by ${esc(who.name)}</span><button class="btn" data-unpick="${esc(c.id)}">Put back</button>`
+      : `<span class="pill">In the pool</span>`;
   }
 
   _routineForm(item) {
@@ -2901,11 +3082,12 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${emo(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
               <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""}${c.from_date ? ` · ${esc(monthDayText(c.from_date))} to ${esc(monthDayText(c.until_date))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
+              ${this._poolStatus(c)}
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
-              <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
+              <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>${this._inline("chores", c.id)}`)
           .join("")}</ul>`
       : `<p class="empty">No chores added here yet.</p>`;
-    const choreForm = edit?.collection === "chores" ? this._choreForm(edit.item) : `<button class="btn primary" data-new="chores">Add a chore</button>`;
+    const choreForm = edit?.collection === "chores" && !edit.item?.id ? this._choreForm(edit.item) : `<button class="btn primary" data-new="chores">Add a chore</button>`;
     const lists = d.todo_lists.length
       ? `<ul class="rows">${d.todo_lists
           .map((t) => {
@@ -2913,12 +3095,12 @@ class FamilyPanel extends HTMLElement {
             return `<li><span class="grow"><b>${esc(t.name)}</b><small>+${pts(t.points)} each unless the item says otherwise${own ? ` · ${own} with their own points` : ""} · ${esc(t.grab || !t.members?.length ? `Up for grabs: ${this._whoText(t.members)}` : `Their own: ${this._whoText(t.members)}`)}${t.due_only ? " · only when due" : ""}</small></span>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Points for items</button>
               <button class="btn" data-edit="todo_lists" data-id="${esc(t.id)}">Edit</button>
-              <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>`;
+              <button class="btn bad" data-delete="todo_lists" data-id="${esc(t.id)}">Remove</button></li>${this._inline("todo_lists", t.id)}`;
           })
           .join("")}</ul>`
       : `<p class="empty">No to-do lists yet.</p>`;
-    const listForm = edit?.collection === "todo_lists" ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
-    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>
+    const listForm = edit?.collection === "todo_lists" && !edit.item?.id ? this._listForm(edit.item) : `<button class="btn primary" data-new="todo_lists">Add a to-do list</button>`;
+    return `${this._boostCard()}${this._choreMatrix()}<div class="card"><h2>Chores</h2>${chores}${choreForm}</div>${this._pickCard()}
       <div class="card"><h2>Chores from to-do lists</h2>
         <p class="muted">Every open item on these lists is a chore. Put the points at the end of an item to change them, like <b>Feed the dog [5]</b>. When it's marked done, the item is ticked off its list.</p>
         ${lists}${listForm}</div>`;
@@ -3003,6 +3185,7 @@ class FamilyPanel extends HTMLElement {
         ${this._monthDay("from", c.from_date, "From")} ${this._monthDay("until", c.until_date, "until")}</div>
         <small>Only between these days, every year (they can wrap past New Year: December to March). Empty: all year. Rake leaves in the fall, shovel the walk in the winter.</small></div>
       ${this._remindField(c)}
+      ${this._choreExtras(c)}
       <div class="field"><span>Who can do it</span>${this._whoChecks(c.members)}</div>
       ${this._grabField(c.grab)}
       <label class="check"><input type="checkbox" name="turns" data-turns ${c.turns ? "checked" : ""}> They take turns (tick two or more people above)</label>
@@ -3013,6 +3196,30 @@ class FamilyPanel extends HTMLElement {
       <label class="check"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Show it on the Family dashboard</label>
       <div class="form-actions"><button class="btn primary" type="submit">Save chore</button><button class="btn" type="button" data-cancel>Cancel</button></div>
     </form>`;
+  }
+
+  // A photo when it's done, a streak bonus, the weekly pool, and a device
+  // that finishes it.
+  _choreExtras(c) {
+    const finishers = this._choices?.finishers || [];
+    const done = c.done_when || {};
+    return `<div class="inline">
+        <label class="field"><span>Photo when it's done</span><select name="photo">
+          <option value="" ${c.photo ? "" : "selected"}>No photo</option>
+          <option value="ask" ${c.photo === "ask" ? "selected" : ""}>Ask for one (they can skip it)</option>
+          <option value="need" ${c.photo === "need" ? "selected" : ""}>Needs one</option></select></label>
+        <label class="field"><span>Bonus every … days in a row</span><input type="number" name="streak_days" min="0" max="60" value="${esc(c.streak_days || 0)}" style="width:110px"></label>
+        <label class="field"><span>Streak bonus points</span><input type="number" name="streak_bonus" min="0" max="10000" value="${esc(c.streak_bonus || 0)}" style="width:110px"></label>
+      </div>
+      <small>A photo shows under <b>To check</b>. The streak counts days (weeks, for a weekly chore) the same person did it in a row; 0: no streak bonus.</small>
+      <label class="check"><input type="checkbox" name="pool" ${c.pool ? "checked" : ""}> In the pick-your-chores pool: nobody's until someone picks it for the week</label>
+      <div class="inline">
+        <label class="field grow"><span>Done when this device…</span><input type="text" name="done_entity" list="family-finishers" value="${esc(done.entity_id || "")}" placeholder="Search: robot vacuum, dishwasher door…" autocomplete="off"></label>
+        <label class="field"><span>…changes to</span><input type="text" name="done_state" list="family-finisher-states" value="${esc(done.state || "")}" placeholder="docked" style="width:140px"></label>
+      </div>
+      <datalist id="family-finishers">${finishers.map((f) => `<option value="${esc(f.entity_id)}">${esc(f.name)}</option>`).join("")}</datalist>
+      <datalist id="family-finisher-states">${["docked", "returning", "idle", "on", "off", "open", "closed"].map((x) => `<option value="${x}"></option>`).join("")}</datalist>
+      <small>Optional. Whoever started the device from Home Assistant gets the points; if that's not known, the Family dashboard asks <b>Who did this?</b></small>`;
   }
 
   // Their own chore, or up for grabs among the people ticked.
@@ -3059,8 +3266,13 @@ class FamilyPanel extends HTMLElement {
     const players = this._choices?.players || [];
     const voice = this._data.settings?.reminder_tts;
     const picked = new Set(c.remind_speakers || []);
+    // Picked speakers first; the list folds away, as a home can have dozens.
+    const sorted = [...players].sort((a, b) => Number(picked.has(b.entity_id)) - Number(picked.has(a.entity_id)));
+    const names = sorted.filter((p) => picked.has(p.entity_id)).map((p) => p.name);
     const boxes = players.length
-      ? `<div class="inline">${players.map((p) => `<label class="check"><input type="checkbox" name="remind_speakers" value="${esc(p.entity_id)}" ${picked.has(p.entity_id) ? "checked" : ""}> ${esc(p.name)}</label>`).join("")}</div>`
+      ? `<details class="speakers"><summary>Speakers: <b>${esc(names.length ? namesText(names) : "none picked")}</b></summary>
+          ${players.length > 8 ? `<input type="search" class="speaker-find" data-speaker-find placeholder="Find a speaker" aria-label="Find a speaker">` : ""}
+          <div class="inline">${sorted.map((p) => `<label class="check" data-speaker-name="${esc(p.name.toLowerCase())}"><input type="checkbox" name="remind_speakers" value="${esc(p.entity_id)}" ${picked.has(p.entity_id) ? "checked" : ""}> ${esc(p.name)}</label>`).join("")}</div></details>`
       : `<small>No speakers in Home Assistant yet.</small>`;
     return `<div class="field"><span>Say it on a speaker</span>
       <label class="field"><span>At</span><input type="time" name="remind_time" value="${esc(c.remind_time || "")}" style="max-width:160px"></label>
@@ -3116,10 +3328,10 @@ class FamilyPanel extends HTMLElement {
           .map((r) => `<li><span class="grow">${r.emoji ? `${emo(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
               <small>${this._rewardLine(r)}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
-              <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
+              <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>${this._inline("rewards", r.id)}`)
           .join("")}</ul>`
       : `<p class="empty">No rewards yet.</p>`;
-    const form = edit?.collection === "rewards" ? this._rewardForm(edit.item) : `<button class="btn primary" data-new="rewards">Add a reward</button>`;
+    const form = edit?.collection === "rewards" && !edit.item?.id ? this._rewardForm(edit.item) : `<button class="btn primary" data-new="rewards">Add a reward</button>`;
     const b = d.bonus || {};
     return `${this._familyGoalCard()}<div class="card"><h2>Rewards</h2>${rows}${form}</div>
       <div class="card"><h2>Bonus points</h2>
@@ -3192,11 +3404,11 @@ class FamilyPanel extends HTMLElement {
               <button class="btn" data-move="controls" data-id="${esc(c.id)}" data-offset="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
               <button class="btn" data-move="controls" data-id="${esc(c.id)}" data-offset="1" ${i === last ? "disabled" : ""} aria-label="Move down">↓</button>
               <button class="btn" data-edit="controls" data-id="${esc(c.id)}">Edit</button>
-              <button class="btn bad" data-delete="controls" data-id="${esc(c.id)}">Remove</button></li>`;
+              <button class="btn bad" data-delete="controls" data-id="${esc(c.id)}">Remove</button></li>${this._inline("controls", c.id)}`;
           })
           .join("")}</ul>`
       : `<p class="empty">Nothing yet. Add scenes, lights, blinds or anything else the family should be able to use or see.</p>`;
-    const form = edit?.collection === "controls" ? this._controlForm(edit.item) : `<button class="btn primary" data-new="controls">Add to the dashboard</button>`;
+    const form = edit?.collection === "controls" && !edit.item?.id ? this._controlForm(edit.item) : `<button class="btn primary" data-new="controls">Add to the dashboard</button>`;
     return `<div class="card"><h2>Home</h2>
       <p class="muted">These show on the Family dashboard under <b>Home</b>. Anyone at the Family dashboard can use them, so only add what the kids may use. Sensors, thermostats and the weather are only shown.</p>
       ${rows}${form}</div>`;
@@ -3383,10 +3595,10 @@ class FamilyPanel extends HTMLElement {
                 : `<button class="btn" data-hold-open="${esc(m.id)}">Hold rewards</button>`}
               <button class="btn" data-edit="members" data-id="${esc(m.id)}">Edit</button>
               <button class="btn bad" data-delete="members" data-id="${esc(m.id)}">Remove</button>
-              ${this._holdFor === m.id ? this._holdForm(m) : ""}</li>`)
+              ${this._holdFor === m.id ? this._holdForm(m) : ""}</li>${this._inline("members", m.id)}`)
           .join("")}</ul>`
       : `<p class="empty">No family members yet.</p>`;
-    const form = edit?.collection === "members" ? this._memberForm(edit.item) : `<button class="btn primary" data-new="members">Add a family member</button>`;
+    const form = edit?.collection === "members" && !edit.item?.id ? this._memberForm(edit.item) : `<button class="btn primary" data-new="members">Add a family member</button>`;
     return `<div class="card"><h2>Family</h2>
       <p class="muted">Link someone to their Home Assistant person to use its picture. If they log in to Home Assistant, the Family dashboard opens on their own page.</p>
       ${rows}${form}</div>
@@ -3403,7 +3615,8 @@ class FamilyPanel extends HTMLElement {
         <p class="muted">It has a <b>Home</b> tab for everyone and a tab for each family member, and the tabs follow when you add, rename or remove someone here. You can add your own tabs and cards to it in Home Assistant; they're kept. You can also add the <b>Family</b> card to any dashboard yourself, for everyone or for one person.</p>
         ${this._data.is_admin
           ? `<button class="btn primary" data-make-dashboard ${this._busy ? "disabled" : ""}>${this._hasDashboard ? "Update the Family dashboard" : "Make a Family dashboard"}</button>`
-          : `<p class="muted">Making or updating it needs an administrator's login.</p>`}</div>
+          : `<p class="muted">Making or updating it needs an administrator's login.</p>`}
+        <p class="muted"><b>Wall view</b> is for a TV or a tablet on the wall: everyone's points and today's chores, big enough to read across the room. Open the Family page with <code>#wall</code> at the end of its address, or add the Family card with <code>wall: true</code>.</p></div>
       ${this._pinCard()}`;
   }
 
@@ -3649,6 +3862,43 @@ class FamilyPanel extends HTMLElement {
       this._renderOverlay();
       return;
     }
+    if (ds.photoView) {
+      this._sheet = { type: "photo", url: null };
+      this._renderOverlay();
+      this._ws({ type: `${DOMAIN}/photo`, entry_id: ds.photoView }).then((res) => {
+        if (this._sheet?.type !== "photo") return;
+        this._sheet.url = res.url || "";
+        this._renderOverlay();
+      }).catch((err) => this._toast(err?.message || String(err), true));
+      return;
+    }
+    if (ds.unpick) {
+      this._call({ type: `${DOMAIN}/unpick`, chore_id: ds.unpick }, "Put back in the pool.");
+      return;
+    }
+    if (ds.paidAll) {
+      this._call({ type: `${DOMAIN}/paid_all`, member_id: ds.paidAll }, "Marked as paid.");
+      return;
+    }
+    if (ds.pick) {
+      const picks = this._data.picks;
+      const who = picks?.next;
+      if (!who) return;
+      this._call({ type: `${DOMAIN}/pick`, member_id: who, chore_id: ds.pick }, `${this._memberById(who)?.name || "They"} picked it.`);
+      return;
+    }
+    if (ds.claim) {
+      this._sheet = { type: "claim", id: ds.claim };
+      this._renderOverlay();
+      return;
+    }
+    if (ds.claimMember && this._sheet?.type === "claim") {
+      const claim = this._sheet.id;
+      this._sheet = null;
+      this._renderOverlay();
+      this._call({ type: `${DOMAIN}/claim`, claim_id: claim, member_id: ds.claimMember }, `Thanks, ${this._memberById(ds.claimMember)?.name || ""}!`);
+      return;
+    }
     if ("picPick" in ds) {
       const field = el.closest(".pic-field");
       this._picTarget = { el: field, key: field?.dataset.picKey, form: field?.closest("form")?.className || "" };
@@ -3788,8 +4038,9 @@ class FamilyPanel extends HTMLElement {
       const chore = this._data.chores.find((c) => c.id === ds.chore);
       const only = chore?.can?.length === 1 ? chore.can[0] : null;
       const who = this._member && chore?.can?.includes(this._member) ? this._member : only;
-      this._sheet = { type: "chore", id: ds.chore, member: who, quick: !!who };
-      if (who) this._confirm();
+      // A chore that asks for a photo always opens the sheet, to take it.
+      this._sheet = { type: "chore", id: ds.chore, member: who, quick: !!who && !chore?.photo };
+      if (who && !chore?.photo) this._confirm();
       else this._renderOverlay();
     } else if (ds.routine) {
       this._sheet = { type: "routine", id: ds.routine, member: this._member || null };
@@ -3880,6 +4131,7 @@ class FamilyPanel extends HTMLElement {
       this._edit = { collection: ds.edit, item: list.find((x) => x.id === ds.id) };
       this._rewardKind = null;
       this._render();
+      this.shadowRoot.querySelector(".edit-row")?.previousElementSibling?.scrollIntoView?.({ block: "start", behavior: "smooth" });
     } else if ("cancel" in ds) {
       this._edit = null;
       this._render();
@@ -3949,6 +4201,17 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    if (ev.target.dataset.photoInput !== undefined) {
+      const file = ev.target.files?.[0];
+      if (file && this._sheet) {
+        shrinkPhoto(file).then((url) => {
+          if (!this._sheet) return;
+          this._sheet.photo = url;
+          this._renderOverlay();
+        }).catch(() => this._toast("That photo couldn't be read. Try again.", true));
+      }
+      return;
+    }
     if (ev.target.dataset.holdChoice !== undefined) {
       const form = ev.target.closest("form");
       const reason = form?.querySelector('[name="reason"]')?.value || "";
@@ -4024,6 +4287,11 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onInput(ev) {
+    if (ev.target?.dataset?.speakerFind !== undefined) {
+      const q = ev.target.value.trim().toLowerCase();
+      for (const label of ev.target.closest("details").querySelectorAll("[data-speaker-name]")) label.hidden = !!q && !label.dataset.speakerName.includes(q);
+      return;
+    }
     if (ev.target?.dataset?.picSearch !== undefined) {
       this._filterPics(ev.target.value);
       return;
@@ -4222,6 +4490,10 @@ class FamilyPanel extends HTMLElement {
       if (ok) form.reset();
       return;
     }
+    if (form.dataset.pickForm !== undefined) {
+      const v = this._formValues(form);
+      return this._call({ type: `${DOMAIN}/settings`, pick_points: Math.max(0, Math.round(Number(v.pick_points) || 0)) }, "Saved.");
+    }
     if (form.dataset.savingForm !== undefined) {
       const v = this._formValues(form);
       const number = (x) => Math.max(0, Math.round(Number(x) || 0));
@@ -4267,7 +4539,7 @@ class FamilyPanel extends HTMLElement {
     const v = this._formValues(form);
     let item;
     if (collection === "chores") {
-      item = { min_age: v.min_age === "" || v.min_age == null ? null : Number(v.min_age), max_age: v.max_age === "" || v.max_age == null ? null : Number(v.max_age), timer_minutes: Math.max(0, Math.round(Number(v.timer_minutes) || 0)), timer_bonus: Math.max(0, Math.round(Number(v.timer_bonus) || 0)), remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null, from_date: v.from_month && v.from_day ? `${v.from_month}-${v.from_day}` : null, until_date: v.until_month && v.until_day ? `${v.until_month}-${v.until_day}` : null };
+      item = { min_age: v.min_age === "" || v.min_age == null ? null : Number(v.min_age), max_age: v.max_age === "" || v.max_age == null ? null : Number(v.max_age), timer_minutes: Math.max(0, Math.round(Number(v.timer_minutes) || 0)), timer_bonus: Math.max(0, Math.round(Number(v.timer_bonus) || 0)), remind_time: v.remind_time || null, remind_speakers: v.remind_speakers || [], name: v.name, emoji: v.emoji, points: Number(v.points || 0), penalty: v.penalty === "" ? null : Number(v.penalty), repeat: v.repeat, repeat_days: Number(v.repeat_days || 1), todo_list: v.todo_list || null, due_only: !!v.due_only && !!v.todo_list, photo: v.photo || "", streak_days: Math.max(0, Math.round(Number(v.streak_days) || 0)), streak_bonus: Math.max(0, Math.round(Number(v.streak_bonus) || 0)), pool: !!v.pool, done_when: v.done_entity ? { entity_id: v.done_entity.trim(), state: (v.done_state || "").trim() } : null, members: v.members || [], grab: !!v.grab, enabled: !!v.enabled, days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, turns: !!v.turns, turn_every: v.turn_every || "time", turn_first: v.turn_first || null, from_date: v.from_month && v.from_day ? `${v.from_month}-${v.from_day}` : null, until_date: v.until_month && v.until_day ? `${v.until_month}-${v.until_day}` : null };
     } else if (collection === "routines") {
       item = { name: v.name, emoji: v.emoji, points: Number(v.points || 0), members: v.members || [], steps: (v.steps || "").split("\n").map((x) => x.trim()).filter(Boolean), days: (v.days || []).map(Number), from_time: v.from_time || null, until_time: v.until_time || null, enabled: !!v.enabled };
     } else if (collection === "rewards") {
@@ -4391,7 +4663,7 @@ class FamilyPanel extends HTMLElement {
       if (s.type === "chore") {
         const chore = this._data.chores.find((c) => c.id === s.id);
         const timer = this._timers?.[s.id];
-        const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id, timer_started: timer ? new Date(timer.start).toISOString() : null });
+        const res = await this._ws({ type: `${DOMAIN}/complete`, member_id: s.member, chore_id: s.id, timer_started: timer ? new Date(timer.start).toISOString() : null, ...(s.photo ? { photo: s.photo } : {}) });
         if (timer) delete this._timers[s.id];
         const bonus = (res.entry?.bonuses || []).map((b) => (b.points ? ` ${b.title} +${pts(b.points)}` : ` ${b.title}`)).join("");
         this._toast(`Great job, ${member.name}! +${pts(chore?.points ?? 0)}.${bonus} (${res.points} now)`, false, res.entry?.id);
@@ -4426,7 +4698,8 @@ class FamilyCard extends FamilyPanel {
     this._panel = { config: { mode: "family" } };
   }
 
-  // `member`: a family member's id, to show only their page.
+  // `member`: a family member's id, to show only their page. `wall`: the
+  // big wall view, for a TV or a tablet on the wall.
   setConfig(config) {
     this._config = config || {};
     this._pinned = this._config.member || null;

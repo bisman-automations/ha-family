@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-11-15
+
+### Added
+
+- **Photos of chores done.** A chore can ask for a photo when it's marked done, or need one. The camera opens on the Family dashboard, and **📷 Photo** shows it under **To check**. Photos are kept for two weeks.
+- **A chore's own streak.** **Bonus every … days in a row** gives a chore's streak points each time the same person has done it that many days (weeks, for a weekly chore) running.
+- **Pick your chores.** Chores in the pick-your-chores pool are nobody's until someone picks them for the week. **Pick your chores** on the Family dashboard shows whose turn it is (whoever has picked the fewest points goes next), with an optional limit on how many points each picks.
+- **Money owed.** Under **Rewards and cash outs to hand out**, each person's unpaid cash outs are added up, with **Paid it all**.
+- **Wall view.** A big view of everyone's points and today's chores for a TV or a tablet on the wall: `/family#wall`, or the Family card with `wall: true`.
+- **Chores a device finishes.** **Done when this device… changes to** marks a chore done when, say, the robot vacuum docks or the dishwasher door opens. Whoever started the device from Home Assistant gets the points; otherwise **Who did this?** on the Family dashboard asks.
+
+### Changed
+
+- **Editing opens in place.** **Edit** on a chore, to-do list, reward, routine, Home tile or family member opens its form right under it, pushing the ones below down until you save or cancel, instead of at the bottom of the list.
+- **Speakers fold away.** In a chore's **Say it on a speaker**, the speakers are a list you open, showing the ones picked when it's closed, with the picked ones first and a search box when there are many.
+
 ## [2.8.0] - 2026-11-15
 
 ### Added
@@ -374,6 +390,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.9.0]: https://github.com/bisman-automations/ha-family/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/bisman-automations/ha-family/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/bisman-automations/ha-family/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/bisman-automations/ha-family/compare/v2.5.0...v2.6.0

@@ -102,6 +102,7 @@ async def test_badges(hass: HomeAssistant, client) -> None:
     keys = {b["key"] for b in done["badges"]}
     assert "first_chore" in keys
     assert "all_done" in keys
+    await hass.async_block_till_done()
     assert {e.data["badge"] for e in events} >= {"first_chore", "all_done"}
     state = await client.ok("state")
     badges = state["members"][0]["badges"]

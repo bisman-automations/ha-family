@@ -59,6 +59,8 @@ SECTIONS = (
     "countdowns",
     "vote",
     "chores",
+    "pick",
+    "claims",
     "routines",
     "grabs",
     "notes",
@@ -1641,3 +1643,69 @@ def for_ages(
     if keep == picked:
         return chore
     return {**chore, "members": keep, "grab": bool(chore.get("grab")) or not picked}
+
+
+# ---- 2.9.0: photos, a chore's own streak, picking chores, money owed ---------------
+
+# A chore can ask for a photo when it's marked done: "" no, "ask" (can skip),
+# "need" (can't be marked done without one).
+PHOTO_CHOICES = ("", "ask", "need")
+BONUS_CHORE_STREAK = "chore_streak"  # the same chore so many days (weeks) running
+MAX_STREAK_DAYS = 60
+
+
+def clean_photo(value: Any) -> str:
+    return value if value in PHOTO_CHOICES else ""
+
+
+def chore_streak(
+    entries: Iterable[dict[str, Any]],
+    member_id: str,
+    chore_id: str,
+    today: date,
+    weekly: bool = False,
+) -> int:
+    """How many days (weeks, for a weekly chore) in a row, up to today, the
+    member did this chore. One that didn't happen doesn't count."""
+    seen: set[date] = set()
+    for e in entries:
+        if (
+            e.get("member") == member_id
+            and e.get("kind") == KIND_CHORE
+            and e.get("chore_id") == chore_id
+            and e.get("review") != REVIEW_REJECTED
+        ):
+            day = _entry_day(e)
+            seen.add(week_start(day) if weekly else day)
+    step = timedelta(weeks=1) if weekly else timedelta(days=1)
+    current = week_start(today) if weekly else today
+    count = 0
+    while current in seen:
+        count += 1
+        current -= step
+    return count
+
+
+def next_picker(
+    order: list[str], picked: dict[str, str], points: dict[str, int]
+) -> str | None:
+    """Who picks a chore next: whoever has picked the fewest points this
+    week, the first in ``order`` on a tie. None when nobody's left to pick."""
+    if not order:
+        return None
+    totals = dict.fromkeys(order, 0)
+    for chore_id, member in picked.items():
+        if member in totals:
+            totals[member] += points.get(chore_id, 0)
+    return min(order, key=lambda m: (totals[m], order.index(m)))
+
+
+def money_owed(entries: Iterable[dict[str, Any]]) -> dict[str, float]:
+    """Cash outs not paid yet, added up for each member."""
+    owed: dict[str, float] = {}
+    for e in entries:
+        if e.get("kind") == KIND_CASHOUT and e.get("given") == GIVEN_PENDING:
+            owed[e["member"]] = round(
+                owed.get(e["member"], 0) + float(e.get("money") or 0), 2
+            )
+    return owed

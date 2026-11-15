@@ -53,6 +53,11 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_note_remove,
         ws_review,
         ws_review_all,
+        ws_photo,
+        ws_pick,
+        ws_unpick,
+        ws_claim,
+        ws_paid_all,
         ws_meals,
         ws_given,
         ws_high_five,
@@ -247,13 +252,15 @@ async def ws_routine_step(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Required("chore_id"): str,
         # When the chore's timer was started on this screen.
         vol.Optional("timer_started"): vol.Any(None, str),
+        # A photo of it done (a JPEG data URL), for chores that ask.
+        vol.Optional("photo"): vol.Any(None, str),
     }
 )
 @websocket_api.async_response
 @_handler
 async def ws_complete(hass, connection, msg, manager) -> dict[str, Any]:
     entry = await manager.async_complete(
-        msg["member_id"], msg["chore_id"], msg.get("timer_started")
+        msg["member_id"], msg["chore_id"], msg.get("timer_started"), msg.get("photo")
     )
     return {
         "entry": entry,
@@ -651,6 +658,7 @@ async def ws_move(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("saving_percent"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("saving_max"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("birthday_points"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("pick_points"): vol.Any(None, vol.Coerce(int)),
         vol.Optional("section_order"): [str],
         vol.Optional("hide_empty_sections"): bool,
         vol.Optional("family_goal"): vol.Any(
@@ -702,6 +710,19 @@ async def ws_settings(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_meals(hass, connection, msg, manager) -> dict[str, Any]:
     """A day's meals (empty clears them)."""
     return {"meals": manager.save_meals(msg["date"], msg)}
+
+
+# Devices whose state can mark a chore done (a robot vacuum docked, a door).
+FINISHER_DOMAINS = (
+    "vacuum",
+    "lawn_mower",
+    "binary_sensor",
+    "sensor",
+    "switch",
+    "input_boolean",
+    "valve",
+    "cover",
+)
 
 
 @websocket_api.websocket_command(
@@ -772,6 +793,14 @@ async def ws_choices(hass, connection, msg, manager) -> dict[str, Any]:
             for s in sorted(hass.states.async_all("weather"), key=lambda s: s.name)
         ],
         "players": players,
+        # Devices that can finish a chore, with the states they can be in.
+        "finishers": [
+            {"entity_id": s.entity_id, "name": s.name, "state": s.state}
+            for s in sorted(
+                hass.states.async_all(FINISHER_DOMAINS),
+                key=lambda s: (s.domain, s.name.casefold()),
+            )
+        ],
     }
 
 
@@ -1157,3 +1186,85 @@ async def ws_calendar_add(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_report(hass, connection, msg, manager) -> dict[str, Any]:
     """A week for each family member, to print or share."""
     return {"report": week_report(manager, msg.get("weeks_ago", 0))}
+
+
+# ---- 2.9.0: photos, picking chores, chores a device finishes, money owed ---------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/photo",
+        vol.Optional(PASS): str,
+        vol.Required("entry_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_photo(hass, connection, msg, manager) -> dict[str, Any]:
+    """A chore's photo, as a data URL (None once it's gone)."""
+    return {"url": await manager.photos.async_read(msg["entry_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/pick",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+        vol.Required("chore_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_pick(hass, connection, msg, manager) -> dict[str, Any]:
+    """Someone picks a chore from the pool for the week (open to everyone)."""
+    return manager.picks.pick(msg["member_id"], msg["chore_id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/unpick",
+        vol.Optional(PASS): str,
+        vol.Required("chore_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_unpick(hass, connection, msg, manager) -> dict[str, Any]:
+    manager.picks.unpick(msg["chore_id"])
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/claim",
+        vol.Optional(PASS): str,
+        vol.Required("claim_id"): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_claim(hass, connection, msg, manager) -> dict[str, Any]:
+    """ "It was me": a chore a device finished, for whoever did it."""
+    entry = await manager.done_when.async_claim(msg["claim_id"], msg["member_id"])
+    return {"entry": entry, "points": manager.points(msg["member_id"])}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/paid_all",
+        vol.Optional(PASS): str,
+        vol.Required("member_id"): str,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_paid_all(hass, connection, msg, manager) -> dict[str, Any]:
+    return {
+        "paid": manager.mark_all_paid(
+            msg["member_id"], await _by(hass, connection, msg, manager)
+        )
+    }

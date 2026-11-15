@@ -36,7 +36,7 @@ let allChores = [
   { id: "trash", name: "Take out the trash", emoji: "🗑️", points: 4, repeat: "weekly", members: ["c"], enabled: true, days: [1] },
   { id: "room", name: "Tidy your room", emoji: "🧸", points: 15, repeat: "weekly", members: ["c"], enabled: true },
   { id: "plants", name: "Water the plants", emoji: "🪴", points: 3, repeat: "after_days", repeat_days: 3, todo_list: "todo.chores", members: [], enabled: true },
-  { id: "vacuum", name: "Vacuum upstairs", emoji: "mdi:vacuum", points: 3, repeat: "weekly", members: [], enabled: true },
+  { id: "vacuum", name: "Vacuum upstairs", emoji: "mdi:vacuum", points: 3, repeat: "weekly", members: [], enabled: true, photo: "need", done_when: { entity_id: "vacuum.upstairs", state: "docked" } },
   { id: "table", name: "Set the table", emoji: "🍴", points: 2, repeat: "daily", members: [], enabled: true },
   { id: "toys", name: "Pick up toys", emoji: "🧩", points: 2, repeat: "daily", members: ["a", "c"], grab: true, enabled: true },
   { id: "laundry", name: "Fold laundry", emoji: "👕", points: 5, repeat: "weekly", members: [], enabled: true },
@@ -59,7 +59,8 @@ const cantGet = (reward, member) => {
   return `${member.name} can't get ${reward.name}. A parent hasn't included them`;
 };
 let entries = [
-  { id: "e1", at: ago(30), kind: "chore", member: "a", chore_id: "bed", title: "Make your bed", points: 5, review: "pending" },
+  { id: "e1", at: ago(30), kind: "chore", member: "a", chore_id: "bed", title: "Make your bed", points: 5, review: "pending", photo: true },
+  { id: "c9", at: ago(120), kind: "cashout", member: "a", title: "Cash out $2.00", points: -20, money: 2, given: "to_give" },
   { id: "e1b", at: ago(45), kind: "chore", member: "b", chore_id: "dishes", title: "Empty the dishwasher", points: 3, review: "pending" },
   { id: "e2", at: ago(200), kind: "reward", member: "b", title: "Ice cream", points: -25, given: "to_give" },
   { id: "e3a", at: ago(15), kind: "reward", member: "a", reward_id: "toy", title: "A new toy", points: -60, given: "to_approve", group: "g1", together: ["a", "c"], total: 100 },
@@ -218,11 +219,30 @@ const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "review_all", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const PARENT_ONLY = ["request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "review_all", "unpick", "paid_all", "photo", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 // Trades for today (like trades.py): offered, taken, approved.
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
+// Pick your chores: the pool, this week's picks, and whose turn it is (like picks.py).
+let picked = { mow: "b" };
+const poolChores = [
+  { id: "mow", name: "Mow the lawn", emoji: "mdi:mower", points: 10, members: ["a", "b"] },
+  { id: "windows", name: "Wash the windows", emoji: "🪟", points: 6, members: ["a", "b"] },
+  { id: "garage", name: "Sweep the garage", emoji: "mdi:garage", points: 4, members: ["a", "b"] },
+];
+const nextPicker = () => {
+  const order = ["a", "b"].filter((id) => poolChores.some((c) => !picked[c.id] && c.members.includes(id)));
+  if (!order.length) return null;
+  const total = (id) => poolChores.filter((c) => picked[c.id] === id).reduce((n, c) => n + c.points, 0);
+  return order.reduce((best, id) => (total(id) < total(best) ? id : best));
+};
+let claims = [{ id: "cl1", chore_id: "vacuum", name: "Vacuum upstairs", emoji: "mdi:robot-vacuum", points: 3, day: dayIso(0), at: new Date().toISOString() }];
+// A small drawn picture standing in for a chore photo.
+const SAMPLE_PHOTO = (() => { const c = document.createElement("canvas"); c.width = 320; c.height = 200; const g = c.getContext("2d"); g.fillStyle = "#cfe8ff"; g.fillRect(0, 0, 320, 200); g.fillStyle = "#7a5"; g.fillRect(40, 110, 240, 70); g.fillStyle = "#fff"; g.fillRect(60, 80, 200, 40); return c.toDataURL("image/jpeg", 0.8); })();
 const state = () => ({
+  picks: { week: "this", next: nextPicker(), target: 0, pool: poolChores.map((c) => ({ ...c, picked_by: picked[c.id] || null })) },
+  claims,
+  owed: entries.filter((e) => e.kind === "cashout" && e.given === "to_give").reduce((o, e) => { o[e.member] = Math.round(((o[e.member] || 0) + e.money) * 100) / 100; return o; }, {}),
   members: members.map((m) => ({ ...m, own_today: ownToday(m.id) })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: null, is_admin: IS_ADMIN, parent: false, pin_set: pinSet(), pins: IS_ADMIN ? { family: !!familyPin, mine: !!ownPins.parent, parents: Object.values(ownPins).map((o) => o.name).sort() } : null, trades: trades.map((t) => ({ ...t })), weeks: weeks(),
   all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
@@ -306,7 +326,7 @@ window.hass = {
     if (t === "shopping") { const want = [...new Set(Array.from({ length: 7 }, (_v, i) => meals[dayIso(i)]?.ingredients || "").join("\n").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (!want.length) throw { message: "No meals in the coming days list anything to buy" }; settings.shopping_list = msg.entity_id; return { added: want.filter((x) => x.toLowerCase() !== "milk"), skipped: want.filter((x) => x.toLowerCase() === "milk") }; }
     if (t === "calendar/add") { if (!settings.calendars.some((c) => c.entity_id === msg.entity_id)) throw { message: "Pick one of the family's calendars" }; return { event: { title: msg.title } }; }
     if (t === "report") return { report: { from: dayIso(-((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), until: dayIso(6 - ((new Date().getDay() + 6) % 7) - 7 * (msg.weeks_ago || 0)), weeks_ago: msg.weeks_ago || 0, days_away: 0, money: settings.point_value ? { value: settings.point_value, currency: settings.currency } : null, members: members.map((x, i) => ({ id: x.id, name: x.name, emoji: x.emoji, color: x.color, chores: 12 - i * 3, top_chores: [{ name: "Make your bed", times: 6 - i }, { name: "Set the table", times: 3 }], earned: 60 - i * 15, spent: 25 - i * 5, bonuses: 10, rewards: i ? [] : ["Ice cream", "15 minutes of TV"], all_done_days: 4 - i, badges: i ? [] : [{ key: "streak7", emoji: "🔥", name: "A week in a row", text: "" }], points: x.points, streak: x.streak || 0 })) } };
-    if (t === "choices") return { weathers: [{ entity_id: "weather.home", name: "Home" }], voices: [{ entity_id: "tts.piper", name: "Piper" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
+    if (t === "choices") return { weathers: [{ entity_id: "weather.home", name: "Home" }], voices: [{ entity_id: "tts.piper", name: "Piper" }], finishers: [{ entity_id: "vacuum.upstairs", name: "Upstairs vacuum", state: "docked" }, { entity_id: "binary_sensor.dishwasher_door", name: "Dishwasher door", state: "off" }], players: [{ entity_id: "media_player.kitchen", name: "Kitchen speaker" }, { entity_id: "media_player.living_room", name: "Living room speaker" }], people: [{ entity_id: "person.alex", name: "Alex Sample" }, { entity_id: "person.sam", name: "Sam Sample" }, { entity_id: "person.riley", name: "Riley Sample" }], todo_lists: [{ entity_id: "todo.chores", name: "Chores" }, { entity_id: "todo.groceries", name: "Groceries" }], tvs: [{ id: "fam", name: "Family Room TV" }], speakers: [{ id: "kids", name: "Kids Room" }], notify: [{ service: "mobile_app_parent_phone", name: "Parent phone" }, { service: "mobile_app_other_phone", name: "Other phone" }], entities: Object.values(states).map((s) => ({ entity_id: s.entity_id, name: s.attributes.friendly_name, domain: s.entity_id.split(".")[0] })).concat([{ entity_id: "switch.fountain", name: "Garden fountain", domain: "switch" }]), calendars: [{ entity_id: "calendar.alex_school", name: "Alex's school" }, { entity_id: "calendar.family", name: "Family" }, { entity_id: "calendar.holidays", name: "Holidays" }] };
     if (t === "note/add") { if (!msg.text.trim()) throw { message: "Write something for the note" }; const n = { id: "n" + Date.now(), text: msg.text.trim().replace(/\s+/g, " "), member: msg.member_id || null, until: msg.until || null, at: new Date().toISOString(), parent: isParent(msg), by: null }; notes.push(n); return { note: n }; }
     if (t === "note/remove") { const n = notes.find((x) => x.id === msg.note_id); if (!n) throw { message: "That note is already gone" }; if (n.parent && !IS_ADMIN) throw { message: "Only a parent can take down a parent's note" }; notes = notes.filter((x) => x !== n); return {}; }
     if (t === "meals") { const day = {}; for (const k of ["breakfast", "lunch", "dinner"]) if ((msg[k] || "").trim()) day[k] = msg[k].trim(); const buy = [...new Set((msg.ingredients || "").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean))]; if (buy.length) day.ingredients = buy.join("\n"); if (Object.keys(day).length) meals[msg.date] = day; else delete meals[msg.date]; return { meals: day }; }
@@ -394,6 +414,11 @@ window.hass = {
       }
       return { checked };
     }
+    if (t === "pick") { if (picked[msg.chore_id]) throw { message: "That was already picked" }; if (nextPicker() !== msg.member_id) throw { message: "It's not their turn to pick" }; picked[msg.chore_id] = msg.member_id; return { chore_id: msg.chore_id, member_id: msg.member_id, next: nextPicker() }; }
+    if (t === "unpick") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; delete picked[msg.chore_id]; return {}; }
+    if (t === "claim") { const c = claims.find((x) => x.id === msg.claim_id); if (!c) throw { message: "Someone already said it was them" }; claims = claims.filter((x) => x !== c); const mm = members.find((x) => x.id === msg.member_id); mm.points += c.points; entries.push({ id: "n" + entries.length, at: new Date().toISOString(), kind: "chore", member: mm.id, chore_id: c.chore_id, title: c.name, points: c.points, review: "pending" }); return { entry: {}, points: mm.points }; }
+    if (t === "paid_all") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; let n = 0; for (const e of entries) if (e.kind === "cashout" && e.member === msg.member_id && e.given === "to_give") { e.given = "given"; n += 1; } return { paid: n }; }
+    if (t === "photo") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const e = entries.find((x) => x.id === msg.entry_id); return { url: e?.photo ? SAMPLE_PHOTO : null }; }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
     if (t === "save" && msg.collection === "routines" && !(msg.item.steps || []).length) throw { message: "Give the routine at least one step" };
     if (t === "save") { const list = { chores: allChores, rewards, members, controls, routines }[msg.collection]; if (list) { const i = list.findIndex((x) => x.id === msg.item.id); const item = { id: msg.item.id || "x" + Date.now(), points: 0, members: [], ...msg.item }; if (msg.collection === "rewards" && !Object.hasOwn(msg.item, "members")) item.members = i >= 0 ? (list[i].members ?? null) : null; if (msg.collection === "rewards" && Array.isArray(item.members)) { const ids = members.map((m) => m.id); const known = item.members.filter((id) => ids.includes(id)); item.members = ids.length && known.length === ids.length ? null : known; } if (i >= 0) list[i] = { ...list[i], ...item }; else list.push(item); if (msg.collection === "rewards") { for (const person of members) { if (person.goal === item.id && item.members != null && !item.members.includes(person.id)) person.goal = null; } } } return { item: msg.item }; }

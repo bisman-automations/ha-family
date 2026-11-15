@@ -51,10 +51,13 @@ from .const import (
 )
 from .countdowns import Countdowns
 from .dinner_vote import DinnerVote
+from .done_when import DoneWhen
 from .kid_board import KidBoard
 from .live_activity import ChoreActivity
 from .parent_pass import ParentPasses
 from .parents_notify import ParentNotices
+from .photos import Photos
+from .picks import Picks
 from .reminders import ChoreReminders
 from .reward_requests import RewardRequests
 from .routines import Routines
@@ -114,6 +117,19 @@ def _set(entry: dict[str, Any], key: str, value: Any) -> None:
         entry.pop(key, None)
 
 
+def _done_when(raw: Any) -> dict[str, str] | None:
+    """A chore's device and the state that means it's done, or None."""
+    if not isinstance(raw, dict) or not raw.get("entity_id"):
+        return None
+    entity_id = str(raw["entity_id"])
+    state = str(raw.get("state") or "").strip()
+    if "." not in entity_id:
+        raise FamilyError("Pick the device that finishes the chore")
+    if not state:
+        raise FamilyError("Pick what the device shows when it's done")
+    return {"entity_id": entity_id, "state": state[:60]}
+
+
 def _now_iso() -> str:
     return dt_util.now().isoformat()
 
@@ -158,6 +174,9 @@ class FamilyManager:
         self.vote = DinnerVote(self)
         self.away = Away(self)
         self.boosts = Boosts(self)
+        self.photos = Photos(self)
+        self.picks = Picks(self)
+        self.done_when = DoneWhen(self)
         self.new_badges: list[dict[str, Any]] = []
         self.voice = Voice(self)
         self._seen_chores: tuple | None = None
@@ -194,6 +213,8 @@ class FamilyManager:
         self.countdowns.load(data)
         self.requests.load(data)
         self.vote.load(data)
+        self.picks.load(data)
+        self.done_when.load(data)
         # Streaks count days with all of one's own chores done from this day;
         # before it, any chore, as they used to.
         if "streak_rule_from" not in self.settings:
@@ -208,6 +229,7 @@ class FamilyManager:
         self._watch_todo_lists()
         await self.async_refresh_todo()
         self.calendar.watch()
+        self.done_when.watch()
         await self.calendar.async_refresh()
         self.async_allowance()
         await self.voice.async_start()
@@ -230,6 +252,8 @@ class FamilyManager:
             **self.countdowns.data(),
             **self.requests.data(),
             **self.vote.data(),
+            **self.picks.data(),
+            **self.done_when.data(),
         }
 
     @callback
@@ -414,6 +438,7 @@ class FamilyManager:
         self.voice.stop()
         self.calendar.stop()
         self.live.stop()
+        self.done_when.stop()
         if self._unsub_todo:
             self._unsub_todo()
             self._unsub_todo = None
@@ -456,6 +481,9 @@ class FamilyManager:
     @callback
     def async_allowance(self, _now: Any = None) -> None:
         """Give each member their weekly allowance, once a week (hourly check)."""
+        self.hass.async_create_background_task(
+            self.photos.async_prune(), "family photo prune"
+        )
         changed = self._prune_board()
         now = dt_util.now()
         if savings.give_birthday_bonus(self, now):
@@ -671,6 +699,8 @@ class FamilyManager:
                 members=[turn],
                 turn=turn,
             )
+        # In the pick-your-chores pool: whoever picked it this week does it.
+        chore = self.picks.apply(chore)
         # Traded today, with a parent's yes: whoever took it does it.
         return chore if chore["grab"] else self.trades.apply(chore)
 
@@ -687,7 +717,11 @@ class FamilyManager:
             return []  # away: nothing to do
         result = []
         for chore in self.all_chores():
-            if not chore.get("enabled", True) or not model.available(chore, now):
+            if (
+                not chore.get("enabled", True)
+                or chore.get("unpicked")
+                or not model.available(chore, now)
+            ):
                 continue
             done = self._done(chore, now)
             can = [m["id"] for m in self.members if model.can_do(m["id"], chore, done)]
@@ -714,12 +748,23 @@ class FamilyManager:
         return model.done_by(chore, self.entries, now)
 
     async def async_complete(
-        self, member_id: str, chore_id: str, timer_started: str | None = None
+        self,
+        member_id: str,
+        chore_id: str,
+        timer_started: str | None = None,
+        photo: str | None = None,
     ) -> dict[str, Any]:
-        """A member did a chore: points straight away, a parent checks later."""
+        """A member did a chore: points straight away, a parent checks later.
+
+        ``photo``: a JPEG data URL, for chores that ask for one."""
         member = self.member(member_id)
         chore = self.chore(chore_id)
         now = dt_util.now()
+        if chore.get("unpicked"):
+            raise FamilyError(f"Nobody picked {chore['name']} this week yet")
+        picture = self.photos.decode(photo) if photo else None
+        if picture is None and chore.get("photo") == "need":
+            raise FamilyError(f"Take a photo to show {chore['name']} is done")
         if self.away.on(now.date()):
             raise FamilyError("Chores are off while the family is away")
         if not model.available(chore, now):
@@ -744,6 +789,9 @@ class FamilyManager:
         }
         if factor > 1:
             entry["boost"] = factor
+        if picture is not None:
+            await self.photos.async_save(entry["id"], picture)
+            entry["photo"] = True
         parent = await self._is_parent(member)
         if parent:
             # A parent's own chore: nobody needs to check it.
@@ -771,6 +819,8 @@ class FamilyManager:
                 }
             )
             bonuses.append(timer)
+        if streak := self._chore_streak_bonus(chore, entry, now):
+            bonuses.append(streak)
         self._changed()
         if not parent:
             self.notices.chore_done(entry, member)
@@ -799,6 +849,39 @@ class FamilyManager:
         if bonuses:
             entry = {**entry, "bonuses": bonuses}
         return entry
+
+    def _chore_streak_bonus(
+        self, chore: dict[str, Any], entry: dict[str, Any], now
+    ) -> dict[str, Any] | None:
+        """Points for doing the same chore so many days (or, for a weekly
+        chore, weeks) in a row. Kept with the chore like the other bonuses."""
+        every = int(chore.get("streak_days") or 0)
+        points = int(chore.get("streak_bonus") or 0)
+        if not every or not points:
+            return None
+        weekly = chore.get("repeat") == model.REPEAT_WEEKLY
+        count = model.chore_streak(
+            self.entries, entry["member"], chore["id"], now.date(), weekly
+        )
+        if not model.streak_bonus_due(count, every):
+            return None
+        unit = "weeks" if weekly else "days"
+        bonus = {
+            "bonus": model.BONUS_CHORE_STREAK,
+            "title": f"{chore['name']}: {count} {unit} in a row",
+            "points": points,
+        }
+        self.entries.append(
+            {
+                "id": _id(),
+                "at": _now_iso(),
+                "kind": model.KIND_BONUS,
+                "member": entry["member"],
+                "for_entry": entry["id"],
+                **bonus,
+            }
+        )
+        return bonus
 
     async def _is_parent(self, member: dict[str, Any]) -> bool:
         """Whether this member's person is a Home Assistant administrator:
@@ -1203,6 +1286,10 @@ class FamilyManager:
             self.settings["saving_max"] = model.clean_points(
                 raw.get("saving_max") or 0, "Most a week"
             )
+        if "pick_points" in raw:
+            self.settings["pick_points"] = model.clean_points(
+                raw.get("pick_points") or 0, "Points each picks"
+            )
         if "birthday_points" in raw:
             self.settings["birthday_points"] = model.clean_points(
                 raw.get("birthday_points") or 0, "Birthday points"
@@ -1253,6 +1340,8 @@ class FamilyManager:
         ]
         self._changed()
         self.notices.clear(group or entry_id)
+        if entry.get("photo"):
+            await self.photos.async_delete(entry_id)
 
     # ---- rewards --------------------------------------------------------------
 
@@ -1658,6 +1747,26 @@ class FamilyManager:
         return entry
 
     @callback
+    def mark_all_paid(self, member_id: str, by: str | None = None) -> int:
+        """Every cash out a member is owed, paid."""
+        self.member(member_id)
+        paid = [
+            e
+            for e in self.entries
+            if e.get("kind") == model.KIND_CASHOUT
+            and e["member"] == member_id
+            and e.get("given") == model.GIVEN_PENDING
+        ]
+        for entry in paid:
+            entry["given"] = model.GIVEN_DONE
+            entry["given_at"] = _now_iso()
+            _set(entry, "given_by", by)
+            self.notices.clear(entry["id"])
+        if paid:
+            self._changed()
+        return len(paid)
+
+    @callback
     def cash_out(self, member_id: str, points: Any) -> dict[str, Any]:
         """A member turns points into money; a parent pays it out.
 
@@ -1878,9 +1987,28 @@ class FamilyManager:
             "timer_bonus": model.clean_points(
                 raw.get("timer_bonus") or 0, "The timer bonus"
             ),
+            # Ask for a photo when it's marked done ("", "ask", "need").
+            "photo": model.clean_photo(raw.get("photo")),
+            # Points for doing it so many days (weeks) in a row (0: none).
+            "streak_days": min(
+                model.clean_points(raw.get("streak_days") or 0, "Days in a row"),
+                model.MAX_STREAK_DAYS,
+            ),
+            "streak_bonus": model.clean_points(
+                raw.get("streak_bonus") or 0, "The streak bonus"
+            ),
+            # In the weekly pick-your-chores pool: nobody's until picked.
+            "pool": bool(raw.get("pool")),
+            # Done when a device changes to a state (a robot vacuum docked).
+            "done_when": _done_when(raw.get("done_when")),
         }
+        if chore["pool"] and chore["turns"]:
+            raise FamilyError(
+                "A chore is either picked from the pool or taken in turns"
+            )
         self._upsert(self.chores, chore)
         self._changed()
+        self.done_when.watch()
         return chore
 
     def _reward_members(
@@ -2093,11 +2221,15 @@ class FamilyManager:
     async def async_delete(self, collection: str, item_id: str) -> None:
         items = self._collection(collection)
         items[:] = [i for i in items if i["id"] != item_id]
+        if collection == "chores":
+            self.done_when.forget_chore(item_id)
+            self.done_when.watch()
         if collection == "members":
             self.routines.forget_member(item_id)
             self.countdowns.forget_member(item_id)
             self.requests.forget_member(item_id)
             self.vote.forget_member(item_id)
+            self.picks.forget_member(item_id)
             for chore in [*self.chores, *self.todo_lists, *self.controls]:
                 chore["members"] = [m for m in chore.get("members", []) if m != item_id]
             # Drop them from rewards they were picked for. An empty list stays
@@ -2331,6 +2463,8 @@ class FamilyManager:
             "requests": self.requests.snapshot(),
             "boosts": self.boosts.snapshot(),
             "away": self.away.snapshot(),
+            "picks": self.picks.snapshot(),
+            "claims": self.done_when.snapshot(),
             "me": self.member_for_user(user_id),
             "is_admin": is_admin,
             "parent": bool(is_admin if parent is None else parent),
@@ -2344,6 +2478,7 @@ class FamilyManager:
             "family_goal": self.family_goal(),
         }
         if is_admin if parent is None else parent:
+            result["owed"] = model.money_owed(self.entries)
             result["settings"] = {
                 "auto_check": self.settings.get("auto_check"),
                 "penalty": int(self.settings.get("penalty") or 0),
@@ -2369,6 +2504,7 @@ class FamilyManager:
                 "saving_percent": int(self.settings.get("saving_percent") or 0),
                 "saving_max": int(self.settings.get("saving_max") or 0),
                 "birthday_points": int(self.settings.get("birthday_points") or 0),
+                "pick_points": int(self.settings.get("pick_points") or 0),
                 "shopping_list": self.settings.get("shopping_list"),
             }
             result["weeks"] = model.weekly_stats(

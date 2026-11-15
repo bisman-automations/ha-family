@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-11-15
+
+### Added
+
+- **Icons for chores.** A chore's picture can now be an icon as well as an emoji, for chores that have no emoji, such as vacuuming. Tap the picture to pick one: search over a hundred chore and home icons (vacuum, robot vacuum, mop, dishwasher, laundry, dog, lawn mower, snow shovel…), tap an emoji, or type any emoji. Any of Home Assistant's icons works, by its full name (such as `mdi:washing-machine`). Rewards, routines, family members, quick points, the family goal, countdowns, links and to-do items pick their pictures the same way.
+
 ## [2.7.0] - 2026-11-15
 
 ### Added
@@ -368,6 +374,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.8.0]: https://github.com/bisman-automations/ha-family/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/bisman-automations/ha-family/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/bisman-automations/ha-family/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/bisman-automations/ha-family/compare/v2.4.0...v2.5.0

@@ -62,7 +62,7 @@ class Routines:
         routine = {
             "id": raw.get("id") or uuid.uuid4().hex[:12],
             "name": model.clean_name(raw.get("name"), "The routine's name"),
-            "emoji": (raw.get("emoji") or "").strip()[:8] or None,
+            "emoji": model.clean_emoji(raw.get("emoji")),
             "points": model.clean_points(raw.get("points") or 0),
             "members": self.manager.known_members(raw.get("members")),
             "steps": steps,

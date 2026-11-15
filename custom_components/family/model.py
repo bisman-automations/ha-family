@@ -589,6 +589,21 @@ def clean_points(value: Any, label: str = "Points", minimum: int = 0) -> int:
 
 MAX_QUICK_POINTS = 12
 
+# A picture is an emoji, or one of Home Assistant's icons ("mdi:vacuum").
+ICON_PATTERN = re.compile(r"^mdi:[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_ICON_LENGTH = 64
+
+
+def clean_emoji(value: Any, length: int = 8) -> str | None:
+    """An emoji, shortened to ``length`` characters, or a Home Assistant
+    icon kept whole. Empty is None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if ICON_PATTERN.match(text.lower()) and len(text) <= MAX_ICON_LENGTH:
+        return text.lower()
+    return text[:length] or None
+
 
 def quick_points(raw: Any) -> list[dict[str, Any]]:
     """Parents' one-tap points buttons: a label, an optional emoji, points
@@ -609,7 +624,7 @@ def quick_points(raw: Any) -> list[dict[str, Any]]:
         result.append(
             {
                 "label": label,
-                "emoji": str(row.get("emoji") or "").strip()[:8],
+                "emoji": clean_emoji(row.get("emoji")) or "",
                 "points": points,
                 "members": (
                     None
@@ -1095,7 +1110,7 @@ def clean_goal(raw: Any) -> dict[str, Any] | None:
         raise ValueError("The goal must be at least 1 point")
     return {
         "name": name,
-        "emoji": str(raw.get("emoji") or "").strip()[:8] or None,
+        "emoji": clean_emoji(raw.get("emoji")),
         "target": target,
     }
 
@@ -1547,7 +1562,7 @@ def clean_links(raw: Any, member_ids: set[str]) -> list[dict[str, Any]]:
             {
                 "id": str(item.get("id") or "")[:40] or f"l{len(links) + 1}",
                 "name": name,
-                "emoji": (str(item.get("emoji") or "").strip()[:4]) or None,
+                "emoji": clean_emoji(item.get("emoji"), 4),
                 "url": url[:2000],
                 "member": member if member in member_ids else None,
             }

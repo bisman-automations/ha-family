@@ -83,7 +83,7 @@ class RewardRequests:
             "id": uuid4().hex[:12],
             "member": member_id,
             "name": model.clean_name(name, "What you'd like"),
-            "emoji": (str(emoji or "")).strip()[:4] or None,
+            "emoji": model.clean_emoji(emoji, 4),
             "points": model.optional_points(points, "Points"),
             "at": dt_util.now().isoformat(),
             "status": PENDING,

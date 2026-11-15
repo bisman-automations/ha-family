@@ -1776,7 +1776,7 @@ class FamilyManager:
             "person": person,
             "color": raw.get("color")
             or MEMBER_COLORS[len(self.members) % len(MEMBER_COLORS)],
-            "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            "emoji": model.clean_emoji(raw.get("emoji"), 4),
             # Big pictures and chores read aloud, for kids who can't read yet.
             "picture_mode": bool(raw.get("picture_mode")),
             # Points added every week (0: none).
@@ -1844,7 +1844,7 @@ class FamilyManager:
             if repeat == model.REPEAT_AFTER_DAYS
             else None,
             "enabled": bool(raw.get("enabled", True)),
-            "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            "emoji": model.clean_emoji(raw.get("emoji"), 4),
             # Also kept on this to-do list; None: not on any list.
             "todo_list": todo_list,
             # With a to-do list: show only when its item is due today or
@@ -1927,7 +1927,7 @@ class FamilyManager:
             "name": model.clean_name(raw.get("name"), "The reward's name"),
             "points": model.clean_points(raw.get("points", 0), "Its cost"),
             "kind": kind,
-            "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            "emoji": model.clean_emoji(raw.get("emoji"), 4),
             # Each person at most once a day or a week; None: any time.
             "limit": raw.get("limit")
             if raw.get("limit") in model.REWARD_LIMITS
@@ -1988,7 +1988,7 @@ class FamilyManager:
         for name, emoji in (raw.get("item_emojis") or {}).items():
             if not (key := model.item_key(name)):
                 continue
-            if text := str(emoji or "").strip()[:8]:
+            if text := model.clean_emoji(emoji):
                 emojis[key] = text
             else:
                 emojis.pop(key, None)
@@ -2033,7 +2033,7 @@ class FamilyManager:
             "entity_id": entity_id,
             # Blank: use the entity's own name, and follow its renames.
             "name": (raw.get("name") or "").strip()[:60] or None,
-            "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            "emoji": model.clean_emoji(raw.get("emoji"), 4),
             "members": self._known_members(raw.get("members")),
             "confirm": bool(raw.get("confirm")),
         }

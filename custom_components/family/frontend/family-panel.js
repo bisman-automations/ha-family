@@ -31,7 +31,7 @@ function familyViews(views, members) {
   // An existing tab keeps whatever was added to it; only its name follows.
   const tab = (path, title, card) => (old.has(path) ? { ...old.get(path), title } : { title, path, type: "panel", cards: [card] });
   const home = tab(HOME_VIEW, "Home", { type: "custom:family-card" });
-  const people = members.map((m) => tab(`${MEMBER_VIEW}${m.id}`, m.emoji ? `${m.emoji} ${m.name}` : m.name, { type: "custom:family-card", member: m.id }));
+  const people = members.map((m) => tab(`${MEMBER_VIEW}${m.id}`, emoText(m.emoji) ? `${emoText(m.emoji)} ${m.name}` : m.name, { type: "custom:family-card", member: m.id }));
   const others = (views || []).filter((v) => v.path !== HOME_VIEW && !String(v.path || "").startsWith(MEMBER_VIEW));
   return [home, ...people, ...others];
 }
@@ -153,6 +153,72 @@ const kindMatches = (kind, e) =>
     : kind === "penalty" ? e.kind === "penalty" || (e.kind === "adjust" && e.points < 0)
     : e.kind === kind);
 // Quick reasons a chore didn't happen.
+// A picture is an emoji, or one of Home Assistant's icons ("mdi:vacuum").
+const ICON_RE = /^mdi:[a-z0-9]+(-[a-z0-9]+)*$/;
+const isIcon = (v) => typeof v === "string" && ICON_RE.test(v);
+// The picture as HTML: the icon drawn, or the emoji escaped.
+const emo = (v, fallback = "") => {
+  const x = v || fallback;
+  if (!x) return "";
+  return isIcon(x) ? `<ha-icon class="pic" icon="${esc(x)}"></ha-icon>` : esc(x);
+};
+// The picture in plain text (a toast, a tab's title): icons can't be shown.
+const emoText = (v) => (isIcon(v) ? "" : v || "");
+
+// Icons for the picker: [icon, words to find it by]. Any other icon works
+// too: type its name, such as mdi:washing-machine.
+const PICK_ICONS = [
+  ["mdi:vacuum", "vacuum hoover floor carpet"], ["mdi:robot-vacuum", "robot vacuum roomba"], ["mdi:broom", "sweep broom floor"],
+  ["mdi:wiper", "wipe mop counter"], ["mdi:bucket", "bucket mop clean"], ["mdi:spray-bottle", "spray clean wipe"],
+  ["mdi:spray", "spray clean"], ["mdi:liquid-spot", "spill wipe"], ["mdi:silverware-clean", "dishes clean"],
+  ["mdi:dishwasher", "dishwasher dishes load unload"], ["mdi:silverware-fork-knife", "table set dinner"], ["mdi:silverware", "silverware cutlery"],
+  ["mdi:pot-steam", "cook dinner pot"], ["mdi:chef-hat", "cook chef"], ["mdi:stove", "stove cook"],
+  ["mdi:microwave", "microwave"], ["mdi:fridge", "fridge clean"], ["mdi:coffee-maker", "coffee"],
+  ["mdi:food-apple", "fruit snack lunch"], ["mdi:food", "food meal"], ["mdi:bread-slice", "lunch sandwich"],
+  ["mdi:baby-bottle", "baby bottle"], ["mdi:cup-water", "water drink"], ["mdi:glass-cocktail", "drink"],
+  ["mdi:washing-machine", "laundry wash clothes"], ["mdi:tumble-dryer", "dryer laundry"], ["mdi:hanger", "hang clothes closet"],
+  ["mdi:tshirt-crew", "clothes shirt fold"], ["mdi:shoe-formal", "shoes polish"], ["mdi:basket", "laundry basket"],
+  ["mdi:basket-fill", "laundry basket put away"], ["mdi:iron", "iron clothes"], ["mdi:shoe-sneaker", "shoes"],
+  ["mdi:bed", "bed make bedroom"], ["mdi:bed-king", "bed make"], ["mdi:bunk-bed", "bunk bed"],
+  ["mdi:bed-empty", "bed sheets change"], ["mdi:sofa", "couch sofa living room tidy"], ["mdi:wardrobe", "closet wardrobe"],
+  ["mdi:toy-brick", "toys lego tidy pick up"], ["mdi:teddy-bear", "toys teddy"], ["mdi:puzzle", "puzzle toys"],
+  ["mdi:bookshelf", "books shelf tidy"], ["mdi:book-open-variant", "read reading book"], ["mdi:book-education", "homework study"],
+  ["mdi:pencil", "homework write"], ["mdi:school", "school"], ["mdi:bag-personal", "backpack school bag"],
+  ["mdi:calculator", "math homework"], ["mdi:piano", "piano practice music"], ["mdi:guitar-acoustic", "guitar practice music"],
+  ["mdi:violin", "violin practice"], ["mdi:music", "music practice"], ["mdi:laptop", "computer laptop"],
+  ["mdi:toothbrush", "teeth brush"], ["mdi:tooth", "teeth floss dentist"], ["mdi:shower-head", "shower"],
+  ["mdi:bathtub", "bath"], ["mdi:toilet", "toilet bathroom clean"], ["mdi:hand-wash", "wash hands"],
+  ["mdi:hair-dryer", "hair brush comb dry"], ["mdi:face-man-shimmer", "wash face"], ["mdi:pill", "medicine vitamins"],
+  ["mdi:trash-can", "trash bin garbage"], ["mdi:delete-empty", "empty bin"], ["mdi:recycle", "recycling"],
+  ["mdi:compost", "compost"], ["mdi:package-variant", "boxes package"], ["mdi:mailbox", "mail"],
+  ["mdi:dog", "dog feed walk pet"], ["mdi:dog-side", "dog walk"], ["mdi:cat", "cat feed pet"],
+  ["mdi:fish", "fish feed tank"], ["mdi:rabbit", "rabbit pet"], ["mdi:paw", "pet paw"],
+  ["mdi:bone", "dog bone treat"], ["mdi:egg", "chickens eggs"], ["mdi:horse", "horse"],
+  ["mdi:grass", "lawn grass"], ["mdi:mower", "mow lawn mower"], ["mdi:mower-bag", "mow lawn"],
+  ["mdi:leaf", "leaves rake garden"], ["mdi:flower", "flowers garden"], ["mdi:watering-can", "water plants garden"],
+  ["mdi:sprout", "plants garden"], ["mdi:shovel", "shovel dig snow"], ["mdi:snowflake", "snow shovel"],
+  ["mdi:tree", "yard tree"], ["mdi:hammer-wrench", "fix tools"], ["mdi:tools", "tools fix"],
+  ["mdi:car-wash", "car wash"], ["mdi:car", "car clean"], ["mdi:bike", "bike"],
+  ["mdi:window-closed-variant", "windows clean"], ["mdi:door", "door"], ["mdi:stairs", "stairs"],
+  ["mdi:home", "house home"], ["mdi:home-floor-1", "upstairs downstairs"], ["mdi:garage", "garage"],
+  ["mdi:lightbulb", "lights off"], ["mdi:power-plug-off", "unplug"], ["mdi:cart", "shopping groceries"],
+  ["mdi:baby-carriage", "baby"], ["mdi:human-child", "kids help sibling"], ["mdi:hand-heart", "kind help"],
+  ["mdi:run", "exercise run"], ["mdi:soccer", "soccer sport"], ["mdi:basketball", "basketball sport"],
+  ["mdi:swim", "swim"], ["mdi:yoga", "yoga stretch"], ["mdi:sleep", "sleep bedtime"],
+  ["mdi:alarm", "wake up alarm"], ["mdi:weather-sunny", "morning"], ["mdi:weather-night", "night bedtime"],
+  ["mdi:television", "tv screen time"], ["mdi:gamepad-variant", "games video"], ["mdi:tablet", "tablet ipad"],
+  ["mdi:ice-cream", "ice cream treat"], ["mdi:candy", "candy treat"], ["mdi:pizza", "pizza"],
+  ["mdi:popcorn", "movie popcorn"], ["mdi:movie-open", "movie"], ["mdi:cash", "money cash"],
+  ["mdi:piggy-bank", "save money"], ["mdi:gift", "gift present"], ["mdi:star", "star"],
+  ["mdi:trophy", "trophy win"], ["mdi:medal", "medal"], ["mdi:heart", "heart love"],
+  ["mdi:party-popper", "party"], ["mdi:cake-variant", "cake birthday"], ["mdi:tent", "camp sleepover"],
+  ["mdi:beach", "beach trip"], ["mdi:airplane", "trip travel"], ["mdi:map-marker", "outing place"],
+];
+// Chore emojis, for screens that show emojis best.
+const PICK_EMOJIS = ["🧹", "🧽", "🧼", "🧺", "🪣", "🧴", "🗑️", "♻️", "🍽️", "🥣", "🍳", "🥪", "🛏️", "🧸", "📚", "✏️", "🎒", "🎹",
+  "🪥", "🛁", "🚿", "🚽", "👕", "🧦", "👟", "🐶", "🐱", "🐟", "🐰", "🌱", "🌻", "🍂", "❄️", "🚗", "🛒", "📦", "🔧", "💡",
+  "📺", "🎮", "🍦", "🍕", "🍿", "🎬", "💰", "🎁", "⭐", "🏆", "🎉", "❤️"];
+
 const DIDNT_REASONS = ["Not done", "Not finished", "Not done well", "Done by someone else"];
 const HIGH_FIVES = ["🙌", "⭐", "❤️", "👏", "🎉", "🤝"];
 // The local day of an ISO time, as YYYY-MM-DD.
@@ -692,6 +758,24 @@ const STYLES = `
   .items li:first-child { border-top: 0; }
   .items input { width: 100px; }
   .penalty { display: inline-flex; gap: 6px; align-items: center; }
+  .pic-field { display: inline-flex; }
+  .pic-btn { width: 48px; height: 48px; padding: 0; font-size: 26px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; }
+  .pic-btn ha-icon, .pic-tile ha-icon { --mdc-icon-size: 28px; }
+  .pic-empty { opacity: 0.45; }
+  .quick-edit .pic-btn, .items .pic-btn { width: 40px; height: 40px; font-size: 20px; }
+  .pic-sheet { max-height: 85vh; overflow-y: auto; text-align: left; }
+  .pic-sheet h4 { margin: 14px 0 6px; }
+  .pic-sheet form { margin-top: 14px; align-items: flex-end; }
+  .tile .emoji ha-icon.pic, .goal-card .emoji ha-icon.pic, .pic-btn ha-icon, .pic-tile ha-icon { color: var(--primary-color, #03a9f4); }
+  .pic-sheet input[type=search] { width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit; border-radius: 10px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: inherit; }
+  .pic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+  .pic-tile { height: 52px; font-size: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid var(--divider-color, #ddd); background: var(--card-background-color, #fff); color: var(--primary-text-color); cursor: pointer; }
+  .pic-tile[hidden] { display: none; }
+  .pic-own { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .pic-own[hidden] { display: none; }
+  ha-icon.pic { --mdc-icon-size: 1em; width: 1em; height: 1em; display: inline-flex; vertical-align: -0.125em; }
+  .tile .emoji ha-icon.pic, .goal-card .emoji ha-icon.pic { --mdc-icon-size: 1em; }
+  .avatar ha-icon.pic { --mdc-icon-size: 60%; width: 60%; height: 60%; }
   .check-all { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0 12px; border-bottom: 1px solid var(--divider-color, #e0e0e0); margin-bottom: 4px; }
   .penalty input { width: 72px; }
   .penalty-setting { margin-top: 12px; align-items: flex-end; }
@@ -961,10 +1045,21 @@ class FamilyPanel extends HTMLElement {
     return this._data?.members.find((m) => m.id === id);
   }
 
+  // A picture field: a button showing the emoji or icon, which opens the
+  // picker. The value is in a hidden input with the given attributes.
+  _pic(attrs, value, placeholder = "+", label = "Picture") {
+    const key = attrs.replace(/[^\w-]/g, "");
+    return `<span class="pic-field" data-pic-key="${esc(key)}"><input type="hidden" ${attrs} value="${esc(value || "")}"><button type="button" class="pic-btn" data-pic-pick aria-label="${esc(label)}" title="Pick an emoji or an icon">${value ? emo(value) : `<span class="pic-empty">${esc(placeholder)}</span>`}</button></span>`;
+  }
+
+  _picField(value, placeholder) {
+    return `<div class="field"><span>Picture</span>${this._pic('name="emoji"', value, placeholder)}</div>`;
+  }
+
   _avatar(m, small = false) {
     const inner = m.picture
       ? `<img src="${esc(this._hass.hassUrl ? this._hass.hassUrl(m.picture) : m.picture)}" alt="">`
-      : esc(m.emoji || m.name.slice(0, 1).toUpperCase());
+      : emo(m.emoji, m.name.slice(0, 1).toUpperCase());
     return `<span class="avatar${small ? " small" : ""}" style="--c:${esc(m.color)}">${inner}</span>`;
   }
 
@@ -1059,7 +1154,7 @@ class FamilyPanel extends HTMLElement {
   _goalBar(m) {
     const goal = this._goal(m);
     if (!goal) return "";
-    return `<span class="goal-mini" title="Saving for ${esc(goal.name)}">${goal.emoji ? esc(goal.emoji) : "🎯"} ${this._bar(m.points, goal.points)}</span>`;
+    return `<span class="goal-mini" title="Saving for ${esc(goal.name)}">${emo(goal.emoji, "🎯")} ${this._bar(m.points, goal.points)}</span>`;
   }
 
   _rewardSub(r) {
@@ -1182,7 +1277,7 @@ class FamilyPanel extends HTMLElement {
       <ul class="rows">${pending
         .map((r) => {
           const m = this._memberById(r.member);
-          return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: ${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b><small>${esc(whenText(r.at))}${r.points != null ? ` · they think ${pts(r.points)}` : ""}</small></span>
+          return `<li>${m ? this._avatar(m, true) : ""}<span class="grow">${esc(m?.name || "Someone")}: ${r.emoji ? `${emo(r.emoji)} ` : ""}<b>${esc(r.name)}</b><small>${esc(whenText(r.at))}${r.points != null ? ` · they think ${pts(r.points)}` : ""}</small></span>
             <input type="number" min="0" max="10000" data-request-points="${esc(r.id)}" value="${esc(r.points ?? "")}" placeholder="Points" aria-label="What ${esc(r.name)} costs" style="width:100px">
             <button class="btn good" data-request-decide="${esc(r.id)}" data-yes="1">Yes</button>
             <button class="btn bad" data-request-decide="${esc(r.id)}" data-yes="0">No</button></li>`;
@@ -1270,7 +1365,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.countdowns
           .map((c) => {
             const m = this._memberById(c.member);
-            return `<li><span class="grow">${esc(c.emoji || "📅")} <b>${esc(c.name)}</b><small>${esc(dayText(c.date, -1))} · ${esc(daysLeftText(c.days))}${m && !c.birthday ? ` · for ${esc(m.name)}` : ""}${c.birthday ? " · from their birthday" : ""}</small></span>
+            return `<li><span class="grow">${emo(c.emoji, "📅")} <b>${esc(c.name)}</b><small>${esc(dayText(c.date, -1))} · ${esc(daysLeftText(c.days))}${m && !c.birthday ? ` · for ${esc(m.name)}` : ""}${c.birthday ? " · from their birthday" : ""}</small></span>
               ${c.birthday ? "" : `<button class="btn bad" data-countdown-delete="${esc(c.id)}">Remove</button>`}</li>`;
           })
           .join("")}</ul>`
@@ -1281,7 +1376,7 @@ class FamilyPanel extends HTMLElement {
       <form class="edit" data-countdown-form>
         <div class="inline">
           <label class="field grow"><span>Counting down to</span><input type="text" name="name" maxlength="60" required placeholder="Beach trip"></label>
-          <label class="field"><span>Emoji</span><input type="text" name="emoji" size="3" placeholder="🏖️"></label>
+          ${this._picField("", "🏖️")}
           <label class="field"><span>Day</span><input type="date" name="date" min="${esc(localDayIso(0))}" required></label>
           <label class="field"><span>For</span><select name="member"><option value="">Everyone</option>${d.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>
         </div>
@@ -1379,7 +1474,7 @@ class FamilyPanel extends HTMLElement {
         const chores = m.top_chores.map((c) => `${esc(c.name)}${c.times > 1 ? ` ×${c.times}` : ""}`).join(", ");
         const cash = r.money ? ` (${esc(money(m.points, r.money))})` : "";
         return `<section class="report-person" style="--c:${esc(m.color || "#3F51B5")}">
-          <h4>${esc(m.emoji || "")} ${esc(m.name)}</h4>
+          <h4>${emo(m.emoji, "")} ${esc(m.name)}</h4>
           <div class="report-nums"><span><b>${m.chores}</b> chores</span><span><b>+${m.earned}</b> earned</span><span><b>${m.spent}</b> spent</span><span><b>${m.points}</b> now${cash}</span><span>🔥 <b>${m.streak}</b> in a row</span></div>
           ${chores ? `<p>Chores: ${chores}</p>` : ""}
           ${m.all_done_days ? `<p>All done on ${m.all_done_days} ${m.all_done_days === 1 ? "day" : "days"}.</p>` : ""}
@@ -1701,7 +1796,7 @@ class FamilyPanel extends HTMLElement {
             const pictures = member?.picture_mode && c.emoji;
             const sayIt = `<button class="say-btn" data-say="${esc(c.name)}" aria-label="Read ${esc(c.name)} aloud" title="Read it to me">🔊</button>`;
             return `<div class="tile chore${pictures ? " pictures" : ""}"${pictures ? ` data-say="${esc(c.name)}"` : ""}>
-              ${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}
+              ${c.emoji ? `<span class="emoji">${emo(c.emoji)}</span>` : ""}
               <span class="label">${esc(c.name)}</span>${this._timerBit(c)}
               ${(c.list || c.on_list) && !own ? `<span class="sub">${esc(c.list || c.on_list)}</span>` : ""}${c.turn && !member ? `<span class="sub">${esc(this._memberById(c.turn)?.name || "Someone")}'s turn</span>` : c.turn ? `<span class="sub">Your turn</span>` : ""}${c.until_time ? `<span class="sub">Until ${esc(timeText(c.until_time))}</span>` : ""}${who}
               ${c.traded ? `<span class="sub">Traded from ${esc(this._tradeFrom(c.traded))}</span>` : ""}
@@ -1731,7 +1826,7 @@ class FamilyPanel extends HTMLElement {
             // Not enough yet: a tap offers to save up for it.
             return `<button class="tile${short ? " short" : ""}${goal ? " goal" : ""}" data-reward="${esc(r.id)}" ${used ? "disabled" : ""}>
               ${goal ? `<span class="sub goal-tag">🎯 Saving for this</span>` : ""}
-              ${r.emoji ? `<span class="emoji">${esc(r.emoji)}</span>` : ""}
+              ${r.emoji ? `<span class="emoji">${emo(r.emoji)}</span>` : ""}
               <span class="label">${esc(r.name)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
               <span class="worth">${pts(r.points)}</span>
               ${bar}${note ? `<span class="sub">${esc(note)}</span>` : ""}</button>`;
@@ -1786,7 +1881,7 @@ class FamilyPanel extends HTMLElement {
     const sections = {
       weather: weather ? this._section("weather", "What to wear", `<div class="tiles" data-fit="weather">${this._weatherTile(weather)}</div>`) : "",
       tomorrow: tomorrow ? this._section("tomorrow", "Tomorrow", tomorrow.body, tomorrow.count) : "",
-      links: links.length ? this._section("links", "Links", `<div class="tiles" data-fit="links">${links.map((l) => `<button class="tile link" data-link="${esc(l.id)}"><span class="emoji">${esc(l.emoji || "🔗")}</span><span class="label">${esc(l.name)}</span></button>`).join("")}</div>`, links.length) : "",
+      links: links.length ? this._section("links", "Links", `<div class="tiles" data-fit="links">${links.map((l) => `<button class="tile link" data-link="${esc(l.id)}"><span class="emoji">${emo(l.emoji, "🔗")}</span><span class="label">${esc(l.name)}</span></button>`).join("")}</div>`, links.length) : "",
       screen: screens.length ? this._section("screen", "Screen time left", `<div class="tiles" data-fit="screen" data-screen-tiles>${this._screenTiles()}</div>`) : "",
       countdowns: countdowns.length ? this._section("countdowns", "Coming up", `<div class="tiles" data-fit="countdowns">${countdowns.map((c) => this._countdownTile(c)).join("")}</div>`, countdowns.length) : "",
       vote: vote ? this._section("vote", vote.status === "open" ? "What's for dinner?" : "Dinner", this._voteBody(vote, member)) : "",
@@ -1833,7 +1928,7 @@ class FamilyPanel extends HTMLElement {
   _countdownTile(c) {
     const m = this._memberById(c.member);
     return `<div class="tile countdown${c.days <= 0 ? " won" : ""}"${m ? ` style="--c:${esc(m.color)}"` : ""}>
-      <span class="emoji">${esc(c.emoji || "📅")}</span><span class="label">${esc(c.name)}</span>
+      <span class="emoji">${emo(c.emoji, "📅")}</span><span class="label">${esc(c.name)}</span>
       <span class="worth">${esc(daysLeftText(c.days))}</span>
       <span class="sub">${esc(dayText(c.date, -1))}</span></div>`;
   }
@@ -1864,7 +1959,7 @@ class FamilyPanel extends HTMLElement {
     const mine = (this._data.requests || []).filter((r) => r.member === member.id);
     const tiles = mine.map((r) => {
       const status = r.status === "pending" ? "Waiting for a parent" : r.status === "approved" ? `Yes! ${pts(r.points)}, in your rewards` : "Not this time";
-      return `<div class="tile request ${esc(r.status)}"><span class="emoji">${esc(r.emoji || "🙏")}</span><span class="label">${esc(r.name)}</span>
+      return `<div class="tile request ${esc(r.status)}"><span class="emoji">${emo(r.emoji, "🙏")}</span><span class="label">${esc(r.name)}</span>
         <span class="sub">${esc(status)}</span>${r.status === "pending" ? `<button class="note-x" data-request-cancel="${esc(r.id)}" aria-label="Take back ${esc(r.name)}">✕</button>` : ""}</div>`;
     });
     return `<div class="tiles requests"><button class="tile ask" data-ask><span class="emoji">🙏</span><span class="label">Ask for something</span><span class="sub">A parent says yes or no</span></button>${tiles.join("")}</div>`;
@@ -1893,7 +1988,7 @@ class FamilyPanel extends HTMLElement {
 
   _tradesBlock(member) {
     const rows = this._tradesFor(member).map((t) => {
-      const chore = `${t.emoji ? `${esc(t.emoji)} ` : ""}<b>${esc(t.chore)}</b> +${pts(t.points)}`;
+      const chore = `${t.emoji ? `${emo(t.emoji)} ` : ""}<b>${esc(t.chore)}</b> +${pts(t.points)}`;
       if (t.from === member.id) {
         const taker = t.to ? this._memberById(t.to)?.name || "someone" : "anyone";
         const text = t.status === "taken" ? `${esc(taker)} took it · waiting for a parent` : `Offered to ${esc(taker)}`;
@@ -1921,7 +2016,7 @@ class FamilyPanel extends HTMLElement {
           .filter(Boolean)
           .map((m) => `<span class="pill${r.finished.includes(m.id) ? " won" : ""}">${esc(m.name)} ${r.finished.includes(m.id) ? "✓" : `${done(m.id)}/${total}`}</span>`)
           .join("")}</span>`;
-    return `<button class="tile routine-tile${finished ? " won" : ""}" data-routine="${esc(r.id)}"><span class="emoji">${esc(r.emoji || "📋")}</span>
+    return `<button class="tile routine-tile${finished ? " won" : ""}" data-routine="${esc(r.id)}"><span class="emoji">${emo(r.emoji, "📋")}</span>
       <span class="label">${esc(r.name)}</span>${people}${r.points ? `<span class="worth">+${pts(r.points)}</span>` : ""}</button>`;
   }
 
@@ -1929,7 +2024,7 @@ class FamilyPanel extends HTMLElement {
     const s = this._sheet;
     const r = (this._data.routines || []).find((x) => x.id === s.id);
     if (!r) return "";
-    const head = `<h3>${esc(r.emoji || "📋")} ${esc(r.name)}</h3>`;
+    const head = `<h3>${emo(r.emoji, "📋")} ${esc(r.name)}</h3>`;
     if (!s.member) {
       const people = r.who.map((id) => this._memberById(id)).filter(Boolean);
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(r.name)}">${head}
@@ -1983,7 +2078,7 @@ class FamilyPanel extends HTMLElement {
     const g = this._data.family_goal;
     if (!g) return "";
     const left = Math.max(0, g.target - g.progress);
-    return `<div class="tile going-tile${g.reached ? " won" : ""}"><span class="emoji">${esc(g.emoji || (g.reached ? "🎉" : "🏆"))}</span>
+    return `<div class="tile going-tile${g.reached ? " won" : ""}"><span class="emoji">${emo(g.emoji, g.reached ? "🎉" : "🏆")}</span>
       <span class="label">${g.reached ? `We did it: ${esc(g.name)}!` : esc(g.name)}</span>
       ${this._bar(g.progress, g.target)}
       <span class="sub">${g.reached ? "Everyone's chores got us there." : `Together: ${g.progress} of ${g.target} points · ${left} to go`}</span></div>`;
@@ -2013,7 +2108,7 @@ class FamilyPanel extends HTMLElement {
     }
     const goal = this._goal(member);
     if (goal) {
-      tiles.push(`<button class="tile going-tile" data-reward="${esc(goal.id)}"><span class="emoji">${esc(goal.emoji || "🎯")}</span>
+      tiles.push(`<button class="tile going-tile" data-reward="${esc(goal.id)}"><span class="emoji">${emo(goal.emoji, "🎯")}</span>
         <span class="label">Saving for ${esc(goal.name)}</span>${this._bar(member.points, goal.points)}
         <span class="sub">${member.points >= goal.points ? "You have enough! Tap to get it." : `${member.points} of ${goal.points} · ${goal.points - member.points} more to go`}</span></button>`);
     }
@@ -2108,7 +2203,7 @@ class FamilyPanel extends HTMLElement {
       const chores = (t.chores || {})[member.id] || [];
       if (!chores.length && !events.length) return null;
       const tiles = chores
-        .map((c) => `<div class="tile tomorrow">${c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : ""}<span class="label">${esc(c.name)}</span>${c.from_time ? `<span class="sub">From ${esc(timeText(c.from_time))}</span>` : ""}<span class="worth">+${pts(c.points)}</span></div>`)
+        .map((c) => `<div class="tile tomorrow">${c.emoji ? `<span class="emoji">${emo(c.emoji)}</span>` : ""}<span class="label">${esc(c.name)}</span>${c.from_time ? `<span class="sub">From ${esc(timeText(c.from_time))}</span>` : ""}<span class="worth">+${pts(c.points)}</span></div>`)
         .join("");
       return { body: `<div class="tiles" data-fit="tomorrow">${tiles}${eventTiles}</div>`, count: chores.length + events.length };
     }
@@ -2141,7 +2236,7 @@ class FamilyPanel extends HTMLElement {
 
   _weatherTile(w) {
     const temp = w.temperature != null ? `${Math.round(Number(w.temperature))}${w.unit || "°"}` : "";
-    return `<div class="tile weather"><span class="emoji">${esc(w.emoji)}</span><span class="label">${esc(temp)} · ${esc(w.feel)}</span><span class="sub">${esc(w.text)}</span></div>`;
+    return `<div class="tile weather"><span class="emoji">${emo(w.emoji)}</span><span class="label">${esc(temp)} · ${esc(w.feel)}</span><span class="sub">${esc(w.text)}</span></div>`;
   }
 
   async _openStory(memberId) {
@@ -2277,7 +2372,7 @@ class FamilyPanel extends HTMLElement {
       .map((c) => {
         seen[c.entity_id] = this._hass?.states?.[c.entity_id];
         const v = this._controlView(c);
-        const icon = c.emoji ? `<span class="emoji">${esc(c.emoji)}</span>` : `<ha-icon class="icon" icon="${esc(v.icon)}"></ha-icon>`;
+        const icon = c.emoji ? `<span class="emoji">${emo(c.emoji)}</span>` : `<ha-icon class="icon" icon="${esc(v.icon)}"></ha-icon>`;
         const body = `${icon}<span class="label">${esc(v.name)}</span>${v.text ? `<span class="state">${esc(v.text)}</span>` : ""}`;
         if (!v.action) return `<div class="tile control view${v.disabled ? " off" : ""}">${body}</div>`;
         return `<button class="tile control${v.on ? " on" : ""}" data-control="${esc(c.id)}" ${v.disabled ? "disabled" : ""}>${body}
@@ -2348,9 +2443,23 @@ class FamilyPanel extends HTMLElement {
       const link = (d.links || []).find((l) => l.id === s.id);
       if (!link) return "";
       return `<div class="sheet-bg" data-close><div class="sheet link-sheet" role="dialog" aria-modal="true" aria-label="${esc(link.name)}">
-        <div class="link-head"><h3>${esc(link.emoji || "🔗")} ${esc(link.name)}</h3><button class="big" data-close>Close</button></div>
+        <div class="link-head"><h3>${emo(link.emoji, "🔗")} ${esc(link.name)}</h3><button class="big" data-close>Close</button></div>
         <iframe src="${esc(link.url)}" title="${esc(link.name)}" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
         <p class="muted">Blank page? That site doesn't allow showing it here: <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">open it in a new tab</a>.</p></div></div>`;
+    }
+    if (s.type === "pic") {
+      const tile = (v, words) => `<button type="button" class="pic-tile" data-pic-choose="${esc(v)}" data-pic-words="${esc(words)}" title="${esc(words.split(" ")[0])}">${emo(v)}</button>`;
+      return `<div class="sheet-bg" data-close><div class="sheet pic-sheet" role="dialog" aria-modal="true" aria-label="Pick a picture">
+        <h3>Pick a picture</h3>
+        <input type="search" data-pic-search placeholder="Find an icon: vacuum, dishes, dog…" aria-label="Find an icon">
+        <div class="pic-own" hidden><button type="button" class="pic-tile" data-pic-choose=""></button><span class="muted">Use this icon</span></div>
+        <h4>Icons</h4><div class="pic-grid">${PICK_ICONS.map(([v, words]) => tile(v, words)).join("")}</div>
+        <p class="pic-none muted" hidden>No icon called that. Try another word, or type a full icon name such as mdi:washing-machine.</p>
+        <h4 class="pic-emoji-head">Emojis</h4><div class="pic-grid emojis">${PICK_EMOJIS.map((v) => tile(v, "")).join("")}</div>
+        <form class="inline" data-pic-form><label class="field grow"><span>Or type any emoji</span><input type="text" name="pic" maxlength="8" placeholder="🧹"></label>
+          <button class="btn" type="submit">Use it</button></form>
+        <div class="actions"><button class="big" type="button" data-pic-choose="">No picture</button><button class="big" type="button" data-close>Cancel</button></div>
+      </div></div>`;
     }
     if (s.type === "didnt_all") {
       const extra = s.ids.reduce((sum, id) => sum + (s.penalties[id] ?? 0), 0);
@@ -2503,7 +2612,7 @@ class FamilyPanel extends HTMLElement {
     if (member.points < reward.points) {
       const saving = member.goal === reward.id;
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Save up">
-        <h3>${esc(reward.emoji || "")} ${esc(reward.name)}</h3>
+        <h3>${emo(reward.emoji, "")} ${esc(reward.name)}</h3>
         <p>${esc(member.name)} has ${member.points} of ${pts(reward.points)}: ${reward.points - member.points} more to go.${saving ? "" : " Save up for it?"}</p>
         ${this._bar(member.points, reward.points)}
         <div class="actions" style="margin-top:18px"><button class="big" data-close>Not now</button>
@@ -2546,7 +2655,7 @@ class FamilyPanel extends HTMLElement {
     else line = picked.map((id) => `${esc(this._memberById(id).name)} ${shares[id]}`).join(" · ");
     const ready = shares && !broke.length;
     return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Get it together">
-      <h3>${esc(reward.emoji || "")} ${esc(reward.name)}</h3><p>Get it together: ${pts(reward.points)}, shared. A parent says yes first, and until then the points are held.</p>
+      <h3>${emo(reward.emoji, "")} ${esc(reward.name)}</h3><p>Get it together: ${pts(reward.points)}, shared. A parent says yes first, and until then the points are held.</p>
       ${this._people(people, "data-together", picked)}
       <p class="split${ready ? " ready" : ""}">${line}</p>
       <div class="actions"><button class="big" data-close>Cancel</button>
@@ -2599,7 +2708,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows quick">${people
           .map((m) => `<li>${this._avatar(m, true)}<span class="grow"><b>${esc(m.name)}</b><small>${pts(m.points)}</small></span>
             <span class="quick-buttons">${forMember(m)
-              .map(([b, i]) => `<button class="btn ${b.points > 0 ? "good" : "bad"}" data-quick="${i}" data-member-id="${esc(m.id)}" ${this._busy ? "disabled" : ""}>${b.emoji ? `${esc(b.emoji)} ` : ""}${esc(b.label)} ${b.points > 0 ? "+" : "−"}${Math.abs(b.points)}</button>`)
+              .map(([b, i]) => `<button class="btn ${b.points > 0 ? "good" : "bad"}" data-quick="${i}" data-member-id="${esc(m.id)}" ${this._busy ? "disabled" : ""}>${b.emoji ? `${emo(b.emoji)} ` : ""}${esc(b.label)} ${b.points > 0 ? "+" : "−"}${Math.abs(b.points)}</button>`)
               .join("")}</span></li>`)
           .join("")}</ul>`
       : `<p class="empty">${buttons.length && d.members.length ? "None of the buttons is for anyone yet. Change the buttons to pick who each is for." : d.members.length ? "No buttons yet. Add a few for the things you want to notice, good and not so good." : "Add your family first."}</p>`;
@@ -2614,7 +2723,7 @@ class FamilyPanel extends HTMLElement {
     return `<form class="edit" data-quick-form>
       <p class="muted">Use a minus for points taken away, like −1. Leave a row empty to remove it. Up to 12 buttons.${family ? " Each button is for everyone unless you untick people: it then shows only for whoever is still ticked." : ""}</p>
       <ul class="rows quick-edit">${rows
-        .map((b, i) => `<li><input type="text" class="item-emoji" name="emoji" maxlength="8" value="${esc(b.emoji || "")}" placeholder="+" aria-label="Emoji">
+        .map((b, i) => `<li>${this._pic(`name="emoji" data-quick-row="${i}"`, b.emoji, "+", "Picture")}
           <input type="text" class="grow" name="label" maxlength="40" value="${esc(b.label || "")}" placeholder="Kind to a sibling" aria-label="What it's for">
           <input type="number" name="points" min="-10000" max="10000" value="${esc(b.points)}" placeholder="2" aria-label="Points" style="width:90px">${family ? `<span class="quick-who">${this._whoDropdown(b.members, { id: `quick-who-${i}`, label: "Who it's for", everyone: true })}</span>` : ""}</li>`)
         .join("")}</ul>
@@ -2747,7 +2856,7 @@ class FamilyPanel extends HTMLElement {
           .map((r, i) => {
             const who = (r.members || []).map((id) => this._memberById(id)?.name).filter(Boolean);
             const when = [r.days?.length && r.days.length < 7 ? r.days.map((x) => DAYS[x]).join(", ") : "Every day", r.from_time || r.until_time ? `${r.from_time ? timeText(r.from_time) : "…"} to ${r.until_time ? timeText(r.until_time) : "…"}` : ""].filter(Boolean).join(" · ");
-            return `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>${r.enabled === false ? " <small>(hidden)</small>" : ""}
+            return `<li><span class="grow">${r.emoji ? `${emo(r.emoji)} ` : ""}<b>${esc(r.name)}</b>${r.enabled === false ? " <small>(hidden)</small>" : ""}
               <small>${r.steps.length} ${r.steps.length === 1 ? "step" : "steps"} · +${pts(r.points)} when finished · ${esc(who.length ? namesText(who) : "Everyone")} · ${esc(when)}</small></span>
               <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
               <button class="btn" data-move="routines" data-id="${esc(r.id)}" data-offset="1" ${i === last ? "disabled" : ""} aria-label="Move down">↓</button>
@@ -2767,7 +2876,7 @@ class FamilyPanel extends HTMLElement {
     return `<form class="edit" data-form="routines" data-id="${esc(r.id || "")}">
       <div class="inline">
         <label class="field"><span>Routine</span><input type="text" name="name" value="${esc(r.name)}" required placeholder="Morning"></label>
-        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(r.emoji || "")}" size="3" placeholder="🌅"></label>
+        ${this._picField(r.emoji, "🌅")}
         <label class="field"><span>Points when finished</span><input type="number" name="points" min="0" max="10000" value="${esc(r.points)}"></label>
       </div>
       <label class="field"><span>Steps, one on each line</span><textarea name="steps" rows="6" required placeholder="🛏️ Make your bed&#10;👕 Get dressed&#10;🪥 Brush your teeth&#10;🎒 Pack your bag">${esc((r.steps || []).join("\n"))}</textarea>
@@ -2790,7 +2899,7 @@ class FamilyPanel extends HTMLElement {
     const edit = this._edit;
     const chores = d.all_chores.length
       ? `<ul class="rows">${d.all_chores
-          .map((c) => `<li><span class="grow">${c.emoji ? `${esc(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
+          .map((c) => `<li><span class="grow">${c.emoji ? `${emo(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
               <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""}${c.from_date ? ` · ${esc(monthDayText(c.from_date))} to ${esc(monthDayText(c.until_date))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>`)
@@ -2844,7 +2953,7 @@ class FamilyPanel extends HTMLElement {
         return `<tr class="group"><th colspan="${people.length + 1}">${title} <small>${help}</small></th></tr>${rows
           .map((c) => {
             const when = c.list ? `To-do list · +${pts(c.points)} each` : `+${pts(c.points)} · ${repeatText(c)}${whenShown(c) ? ` · ${whenShown(c)}` : ""}`;
-            return `<tr><th class="chore">${c.emoji ? `${esc(c.emoji)} ` : ""}${esc(c.name)}<small>${esc(when)}</small></th>${people.map((m) => `<td>${mark[key](c, m)}</td>`).join("")}</tr>`;
+            return `<tr><th class="chore">${c.emoji ? `${emo(c.emoji)} ` : ""}${esc(c.name)}<small>${esc(when)}</small></th>${people.map((m) => `<td>${mark[key](c, m)}</td>`).join("")}</tr>`;
           })
           .join("")}`;
       })
@@ -2866,7 +2975,7 @@ class FamilyPanel extends HTMLElement {
     return `<form class="edit" data-form="chores" data-id="${esc(c.id || "")}">
       <div class="inline">
         <label class="field"><span>Chore</span><input type="text" name="name" value="${esc(c.name)}" required placeholder="Make your bed"></label>
-        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(c.emoji || "")}" size="3" placeholder="🛏️"></label>
+        ${this._picField(c.emoji, "🛏️")}
         <label class="field"><span>Points</span><input type="number" name="points" min="0" max="10000" value="${esc(c.points)}"></label>
         <label class="field"><span>Penalty if it didn't happen</span><input type="number" name="penalty" min="0" max="10000" value="${esc(c.penalty ?? "")}" placeholder="Family's (${esc(this._data.settings?.penalty ?? 0)})"></label>
         <label class="field"><span>Comes back</span><select name="repeat" data-repeat>${REPEATS.map((r) => `<option value="${r.id}" ${r.id === c.repeat ? "selected" : ""}>${r.label}</option>`).join("")}</select></label>
@@ -2961,7 +3070,7 @@ class FamilyPanel extends HTMLElement {
 
   _itemPoints(list) {
     const items = list.items || [];
-    const row = (i) => `<li class="${i.skip ? "skipped" : ""}"><input type="text" class="item-emoji" maxlength="8" aria-label="Emoji for ${esc(i.name)}" data-item-emoji="${esc(i.name)}" value="${esc(i.emoji || "")}" placeholder="+"><span class="item-name">${esc(i.name)}</span>
+    const row = (i) => `<li class="${i.skip ? "skipped" : ""}">${this._pic(`data-item-emoji="${esc(i.name)}"`, i.emoji, "+", `Picture for ${i.name}`)}<span class="item-name">${esc(i.name)}</span>
             <span class="item-who">${this._data.members
               .map((m) => `<label class="chip"><input type="checkbox" data-item-member="${esc(i.name)}" value="${esc(m.id)}" ${(i.members || []).includes(m.id) ? "checked" : ""}>${esc(m.name)}</label>`)
               .join("")}<label class="chip leave-out"><input type="checkbox" data-item-skip="${esc(i.name)}" ${i.skip ? "checked" : ""}>Leave out</label></span>
@@ -2981,13 +3090,13 @@ class FamilyPanel extends HTMLElement {
     const g = this._data.family_goal;
     const editing = this._edit?.collection === "family_goal";
     const status = g
-      ? `<div class="rows goal-status"><span class="grow">${esc(g.emoji || "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
+      ? `<div class="rows goal-status"><span class="grow">${emo(g.emoji, "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
           <small>${g.reached ? "Reached! Hand it out, then start a new one." : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span></div>`
       : `<p class="empty">No family goal right now.</p>`;
     const form = editing
       ? `<form class="edit" data-goal-form>
           <div class="inline">
-            <label class="field"><span>Emoji</span><input name="emoji" maxlength="8" value="${esc(g?.emoji || "")}" placeholder="🍕" style="width:70px"></label>
+            ${this._picField(g?.emoji, "🍕")}
             <label class="field grow"><span>What it's for</span><input name="name" maxlength="60" required value="${esc(g?.name || "")}" placeholder="Pizza night"></label>
             <label class="field"><span>Points together</span><input type="number" name="target" min="1" max="10000" required value="${esc(g?.target || "")}" placeholder="200" style="width:110px"></label>
           </div>
@@ -3004,7 +3113,7 @@ class FamilyPanel extends HTMLElement {
     const edit = this._edit;
     const rows = d.rewards.length
       ? `<ul class="rows">${d.rewards
-          .map((r) => `<li><span class="grow">${r.emoji ? `${esc(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
+          .map((r) => `<li><span class="grow">${r.emoji ? `${emo(r.emoji)} ` : ""}<b>${esc(r.name)}</b>
               <small>${this._rewardLine(r)}</small></span>
               <button class="btn" data-edit="rewards" data-id="${esc(r.id)}">Edit</button>
               <button class="btn bad" data-delete="rewards" data-id="${esc(r.id)}">Delete</button></li>`)
@@ -3054,7 +3163,7 @@ class FamilyPanel extends HTMLElement {
     return `<form class="edit" data-form="rewards" data-id="${esc(r.id || "")}">
       <div class="inline">
         <label class="field"><span>Reward</span><input type="text" name="name" value="${esc(r.name)}" required placeholder="30 minutes of TV"></label>
-        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(r.emoji || "")}" size="3" placeholder="📺"></label>
+        ${this._picField(r.emoji, "📺")}
         <label class="field"><span>Costs</span><input type="number" name="points" min="0" max="10000" value="${esc(r.points)}"></label>
         <label class="field"><span>How often</span><select name="limit">${LIMITS.map((l) => `<option value="${l.id}" ${(r.limit || "") === l.id ? "selected" : ""}>${l.label}</option>`).join("")}</select></label>
         <label class="field"><span>What it is</span><select name="kind" data-reward-kind>
@@ -3076,7 +3185,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.controls
           .map((c, i) => {
             const domain = c.entity_id.split(".")[0];
-            const icon = c.emoji ? `${esc(c.emoji)} ` : `<ha-icon icon="${esc(DOMAIN_ICONS[domain] || "mdi:eye")}"></ha-icon> `;
+            const icon = c.emoji ? `${emo(c.emoji)} ` : `<ha-icon icon="${esc(DOMAIN_ICONS[domain] || "mdi:eye")}"></ha-icon> `;
             const asks = c.confirm && c.kind !== "view" ? " · asks first" : "";
             return `<li><span class="grow">${icon}<b>${esc(c.label)}</b>
               <small>${esc(KIND_TEXT[c.kind] || "")} · ${esc(c.members?.length ? `Shown to ${this._whoText(c.members)}` : "Shown to everyone")}${asks}</small></span>
@@ -3118,7 +3227,7 @@ class FamilyPanel extends HTMLElement {
         <select name="entity_id" size="8" required>${this._entityOptions("", c.entity_id)}</select></label>
       <div class="inline">
         <label class="field"><span>Name</span><input type="text" name="name" value="${esc(c.name || "")}" placeholder="Its own name"></label>
-        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(c.emoji || "")}" size="3" placeholder="🎬"></label>
+        ${this._picField(c.emoji, "🎬")}
       </div>
       <div class="field"><span>Who sees it</span>${this._whoChecks(c.members).replace("anyone can do it", "everyone sees it")}</div>
       <label class="check"><input type="checkbox" name="confirm" ${c.confirm ? "checked" : ""}> Ask "Are you sure?" first (good for locks and doors)</label>
@@ -3208,7 +3317,7 @@ class FamilyPanel extends HTMLElement {
   _linkRow(l) {
     const people = this._data.members.map((m) => `<option value="${esc(m.id)}" ${l.member === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("");
     return `<div class="inline link-row" data-link-row="${esc(l.id || "")}">
-      <label class="field"><span>Emoji</span><input name="emoji" maxlength="8" value="${esc(l.emoji || "")}" placeholder="🍎" style="width:70px"></label>
+      ${this._picField(l.emoji, "🍎")}
       <label class="field"><span>Name</span><input name="name" maxlength="40" value="${esc(l.name || "")}" placeholder="School lunch"></label>
       <label class="field grow"><span>Address</span><input name="url" type="url" value="${esc(l.url || "")}" placeholder="https://"></label>
       <label class="field"><span>Whose page</span><select name="member"><option value="">Everyone's</option>${people}</select></label>
@@ -3450,7 +3559,7 @@ class FamilyPanel extends HTMLElement {
     return `<form class="edit" data-form="members" data-id="${esc(m.id || "")}">
       <div class="inline">
         <label class="field"><span>Name</span><input type="text" name="name" value="${esc(m.name)}" required></label>
-        <label class="field"><span>Emoji</span><input type="text" name="emoji" value="${esc(m.emoji || "")}" size="3" placeholder="🦖"></label>
+        ${this._picField(m.emoji, "🦖")}
         <label class="field"><span>Color</span><input type="color" name="color" value="${esc(m.color || "#3F51B5")}"></label>
         <label class="field"><span>Allowance (points a week)</span><input type="number" name="allowance" min="0" max="10000" value="${esc(m.allowance || 0)}" style="width:100px"></label>
         <div class="field"><span>Birthday (no year needed)</span><div class="inline">${this._monthDay("birthday", m.birthday, "Birthday")}</div></div>
@@ -3468,6 +3577,48 @@ class FamilyPanel extends HTMLElement {
     // The parent pass goes with Family's own commands only.
     if (this._pass && msg.type.startsWith(`${DOMAIN}/`)) msg = { ...msg, pass: this._pass };
     return this._hass.callWS(msg);
+  }
+
+  // Put the picked emoji or icon into the field the picker was opened from.
+  _setPic(value) {
+    const t = this._picTarget;
+    let field = t?.el;
+    if (field && !field.isConnected) field = this.shadowRoot.querySelector(`.pic-field[data-pic-key="${CSS.escape(t.key || "")}"]`);
+    this._sheet = null;
+    this._picTarget = null;
+    this._renderOverlay();
+    if (!field) return;
+    const input = field.querySelector("input");
+    input.value = value;
+    field.querySelector(".pic-btn").innerHTML = value ? emo(value) : `<span class="pic-empty">+</span>`;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Show only the icons whose words match the search; a full icon name
+  // (mdi:…) can be used even when it isn't in the list.
+  _filterPics(query) {
+    const q = query.trim().toLowerCase();
+    const sheet = this.shadowRoot.querySelector(".pic-sheet");
+    if (!sheet) return;
+    let shown = 0;
+    for (const tile of sheet.querySelectorAll(".pic-grid:not(.emojis) [data-pic-words]")) {
+      const hit = !q || q.split(/\s+/).every((w) => tile.dataset.picWords.includes(w) || tile.dataset.picChoose.includes(w));
+      tile.hidden = !hit;
+      if (hit) shown += 1;
+    }
+    sheet.querySelector(".pic-grid.emojis").hidden = !!q;
+    sheet.querySelector(".pic-emoji-head").hidden = !!q;
+    const own = sheet.querySelector(".pic-own");
+    const name = q.startsWith("mdi:") ? q : `mdi:${q.replace(/\s+/g, "-")}`;
+    const ownOk = q && isIcon(name) && !PICK_ICONS.some(([v]) => v === name);
+    own.hidden = !ownOk;
+    if (ownOk) {
+      const btn = own.querySelector("button");
+      btn.dataset.picChoose = name;
+      btn.innerHTML = emo(name);
+    }
+    sheet.querySelector(".pic-none").hidden = shown > 0 || ownOk || !q;
   }
 
   _onClick(ev) {
@@ -3496,6 +3647,18 @@ class FamilyPanel extends HTMLElement {
       if (el.classList.contains("sheet-bg") && ev.target !== el) return;
       this._sheet = null;
       this._renderOverlay();
+      return;
+    }
+    if ("picPick" in ds) {
+      const field = el.closest(".pic-field");
+      this._picTarget = { el: field, key: field?.dataset.picKey, form: field?.closest("form")?.className || "" };
+      this._sheet = { type: "pic" };
+      this._renderOverlay();
+      this.shadowRoot.querySelector("[data-pic-search]")?.focus();
+      return;
+    }
+    if ("picChoose" in ds && this._sheet?.type === "pic") {
+      this._setPic(ds.picChoose);
       return;
     }
     if ("toParents" in ds) {
@@ -3698,7 +3861,7 @@ class FamilyPanel extends HTMLElement {
       const m = this._memberById(ds.memberId);
       if (!button || !m || this._busy) return;
       const sign = button.points > 0 ? "+" : "−";
-      this._call({ type: `${DOMAIN}/adjust`, member_id: m.id, points: button.points, reason: `${button.emoji ? `${button.emoji} ` : ""}${button.label}` }, `${m.name}: ${sign}${pts(Math.abs(button.points))} for ${button.label}`);
+      this._call({ type: `${DOMAIN}/adjust`, member_id: m.id, points: button.points, reason: `${emoText(button.emoji) ? `${button.emoji} ` : ""}${button.label}` }, `${m.name}: ${sign}${pts(Math.abs(button.points))} for ${button.label}`);
     } else if (ds.new) {
       this._edit = { collection: ds.new, item: null };
       this._rewardKind = null;
@@ -3861,6 +4024,10 @@ class FamilyPanel extends HTMLElement {
   }
 
   _onInput(ev) {
+    if (ev.target?.dataset?.picSearch !== undefined) {
+      this._filterPics(ev.target.value);
+      return;
+    }
     if (ev.target?.dataset?.cashoutPoints !== undefined && this._sheet?.type === "cashout") {
       this._sheet.points = ev.target.value;
       const preview = this.shadowRoot.querySelector(".cash-preview");
@@ -3970,6 +4137,11 @@ class FamilyPanel extends HTMLElement {
     if (form.dataset.meals) {
       const v = this._formValues(form);
       return this._call({ type: `${DOMAIN}/meals`, date: form.dataset.meals, breakfast: v.breakfast || "", lunch: v.lunch || "", dinner: v.dinner || "", ingredients: v.ingredients || "" }, "Meals saved.");
+    }
+    if (form.matches("[data-pic-form]")) {
+      const v = form.querySelector("[name=pic]").value.trim();
+      if (v) this._setPic(v);
+      return;
     }
     if (form.matches("[data-didnt-all-form]")) {
       const s = this._sheet;

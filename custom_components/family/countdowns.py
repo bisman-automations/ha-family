@@ -56,7 +56,7 @@ class Countdowns:
         countdown = {
             "id": raw.get("id") or uuid4().hex[:12],
             "name": model.clean_name(raw.get("name"), "What it counts down to"),
-            "emoji": (raw.get("emoji") or "").strip()[:4] or None,
+            "emoji": model.clean_emoji(raw.get("emoji"), 4),
             "date": day,
             "member": member,
         }

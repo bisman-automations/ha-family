@@ -563,3 +563,25 @@ def test_running_balances() -> None:
         "d": (0, 4),
         "e": (8, 9),
     }
+
+
+def test_pictures_are_emojis_or_icons() -> None:
+    assert model.clean_emoji("🧹") == "🧹"
+    assert model.clean_emoji("  ") is None
+    assert model.clean_emoji(None) is None
+    # Home Assistant icons are kept whole.
+    assert model.clean_emoji("mdi:robot-vacuum", 4) == "mdi:robot-vacuum"
+    assert model.clean_emoji("MDI:Vacuum") == "mdi:vacuum"
+    # Anything else is cut short, as emojis always were.
+    assert model.clean_emoji("mdi:not an icon", 4) == "mdi:"
+    assert model.clean_emoji("abcdefghij") == "abcdefgh"
+    assert (
+        model.quick_points([{"label": "Help", "points": 2, "emoji": "mdi:hand-heart"}])[
+            0
+        ]["emoji"]
+        == "mdi:hand-heart"
+    )
+    assert (
+        model.clean_goal({"name": "Pizza", "target": 5, "emoji": "mdi:pizza"})["emoji"]
+        == "mdi:pizza"
+    )

@@ -185,6 +185,8 @@ Every card in the parent controls folds away: tap its title. A folded card stays
   - **right away**, every time it's done, for something that can be done again and again;
   - **once a parent checks it**: it stays done while it's on **To check**.
 
+  **Picture** is an emoji or an icon. Tap it to pick one: search the icons (vacuum, dishes, laundry, dog, lawn…), tap an emoji, or type any emoji. Any of Home Assistant's icons works too: type its full name, such as `mdi:washing-machine`. Rewards, routines, family members, quick points, the family goal, countdowns, links and to-do items pick their picture the same way.
+
   **Which days** shows a chore only on those days, such as Tuesday for the trash, and **Shown from** / **Until** only between those times, such as 6:00 AM to 9:00 AM for a morning chore (times can cross midnight). The Family dashboard changes on its own when a chore's time starts or ends.
 
   **They take turns** makes the people ticked under **Who can do it** take turns: it's only for whoever's turn it is, and the turn moves on each time it's done, each day or each week. Pick **Whose turn is it now?** to start or change it. If it didn't happen, it stays their turn.

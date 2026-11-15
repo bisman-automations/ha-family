@@ -1691,3 +1691,36 @@ async def test_check_every_chore_at_once(
     kiosk = Client(await hass_ws_client(hass, hass_read_only_access_token))
     res = await kiosk("review_all", entry_ids=again, approved=False)
     assert res["error"]["code"] == "unauthorized"
+
+
+async def test_chores_and_rewards_can_use_icons(hass: HomeAssistant, client):
+    alex, _sam = await _family(client)
+    chore = (
+        await client.ok(
+            "save",
+            collection="chores",
+            item={"name": "Vacuum upstairs", "points": 3, "emoji": "mdi:vacuum"},
+        )
+    )["item"]
+    assert chore["emoji"] == "mdi:vacuum"
+    reward = (
+        await client.ok(
+            "save",
+            collection="rewards",
+            item={"name": "Movie night", "points": 20, "emoji": "mdi:movie-open"},
+        )
+    )["item"]
+    assert reward["emoji"] == "mdi:movie-open"
+    state = await client.ok("state")
+    assert next(c for c in state["chores"] if c["id"] == chore["id"])["emoji"] == (
+        "mdi:vacuum"
+    )
+    # An emoji still works, and is still kept short.
+    member = (
+        await client.ok(
+            "save",
+            collection="members",
+            item={"id": alex, "name": "Alex", "emoji": "🦖🦖🦖🦖🦖"},
+        )
+    )["item"]
+    assert member["emoji"] == "🦖🦖🦖🦖"

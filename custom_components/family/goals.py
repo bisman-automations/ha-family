@@ -10,6 +10,7 @@ fires ``family_goal_reached`` once, with the goal's id.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -133,9 +134,7 @@ class FamilyGoals:
         for goal in self.items:
             if goal.get("reached_at"):
                 continue
-            progress = model.goal_progress(
-                self.manager.entries, goal.get("since"), self.who(goal)
-            )
+            progress = self.progress(goal)
             done = goal.setdefault("milestones", [])
             for percent in MILESTONES:
                 if percent not in done and progress * 100 >= goal["target"] * percent:
@@ -163,10 +162,16 @@ class FamilyGoals:
                 },
             )
 
+    def progress(self, goal: dict[str, Any]) -> int:
+        """Points toward it: only entries since it began are read."""
+        since = goal.get("since")
+        if not since:
+            return 0
+        recent = self.manager.ledger.since(datetime.fromisoformat(since))
+        return model.goal_progress(recent, since, self.who(goal))
+
     def _view(self, goal: dict[str, Any]) -> dict[str, Any]:
-        progress = model.goal_progress(
-            self.manager.entries, goal.get("since"), self.who(goal)
-        )
+        progress = self.progress(goal)
         return {
             "id": goal["id"],
             "name": goal["name"],

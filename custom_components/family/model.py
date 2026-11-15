@@ -142,6 +142,20 @@ def period_start(now: datetime, repeat: str) -> datetime | None:
     return None
 
 
+def done_since(chore: dict[str, Any], now: datetime) -> datetime | None:
+    """The earliest completion that can still count for ``done_by``: the
+    period's start, or None when any can (once, after a check)."""
+    repeat = chore.get("repeat", REPEAT_DAILY)
+    if repeat == REPEAT_AFTER_DAYS:
+        days = max(1, int(chore.get("repeat_days") or 1))
+        # Done on Monday with 3 days: back on Thursday.
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight - timedelta(days=days - 1)
+    if repeat in (REPEAT_AFTER_CHECK, REPEAT_ALWAYS):
+        return None
+    return period_start(now, repeat)
+
+
 def done_by(
     chore: dict[str, Any], entries: Iterable[dict[str, Any]], now: datetime
 ) -> set[str]:
@@ -157,14 +171,7 @@ def done_by(
     repeat = chore.get("repeat", REPEAT_DAILY)
     if repeat == REPEAT_ALWAYS:
         return set()
-    start = None
-    if repeat == REPEAT_AFTER_DAYS:
-        days = max(1, int(chore.get("repeat_days") or 1))
-        # Done on Monday with 3 days: back on Thursday.
-        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = midnight - timedelta(days=days - 1)
-    elif repeat != REPEAT_AFTER_CHECK:
-        start = period_start(now, repeat)
+    start = done_since(chore, now)
     done: set[str] = set()
     for entry in entries:
         if (

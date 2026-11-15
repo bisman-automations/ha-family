@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 from custom_components.family import extras, model
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from .test_family import Client, _setup
@@ -160,7 +160,8 @@ async def test_payouts_command(hass: HomeAssistant, client) -> None:
 async def test_goal_milestones(hass: HomeAssistant, client) -> None:
     (alex,) = await _members(client, "Alex")
     seen = []
-    hass.bus.async_listen("family_goal_milestone", seen.append)
+    # A callback listener runs in order (a plain function runs in a thread).
+    hass.bus.async_listen("family_goal_milestone", callback(lambda e: seen.append(e)))
     await client.ok("family_goal/save", name="Pizza", target=20)
     chore = (
         await client.ok(

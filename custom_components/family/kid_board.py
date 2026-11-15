@@ -221,7 +221,7 @@ class KidBoard:
         today = today or dt_util.now().date()
         people = [m["id"] for m in manager.members]
         return model.family_streak(
-            {m: model.all_done_days(manager.entries, m) for m in people},
+            {m: model.all_done_days(manager.ledger.member(m), m) for m in people},
             {m: manager.has_own(m) for m in people},
             today,
         )

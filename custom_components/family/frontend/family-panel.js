@@ -1022,6 +1022,10 @@ class FamilyPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._idleTimer);
+    if (this._onVisible) {
+      document.removeEventListener("visibilitychange", this._onVisible);
+      this._onVisible = null;
+    }
     this._idleTimer = null;
     if (this._unsub) {
       this._unsub.then((unsub) => unsub()).catch(() => {});
@@ -1096,11 +1100,49 @@ class FamilyPanel extends HTMLElement {
     if (this._unsub || !this._hass?.connection) return;
     this._unsub = this._hass.connection.subscribeMessage(() => {
       clearTimeout(this._reload);
+      // A load already on its way may have missed this change: once more after.
+      if (this._loading) {
+        this._loadAgain = true;
+        return;
+      }
       this._reload = setTimeout(() => this._load(), 300);
     }, { type: `${DOMAIN}/subscribe` });
   }
 
   async _load() {
+    // Changes told before this load starts are in it: no second load for them
+    // (a tap here loads straight away and the change it made is also told).
+    clearTimeout(this._reload);
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      // A wall screen that's switched off doesn't need to keep up: load
+      // once when it's seen again instead of after every change.
+      this._stale = true;
+      if (!this._onVisible) {
+        this._onVisible = () => {
+          if (document.visibilityState === "visible" && this._stale) this._load();
+        };
+        document.addEventListener("visibilitychange", this._onVisible);
+      }
+      return;
+    }
+    this._stale = false;
+    if (this._loading) {
+      this._loadAgain = true;
+      return this._loading;
+    }
+    this._loading = this._loadNow();
+    try {
+      await this._loading;
+    } finally {
+      this._loading = null;
+    }
+    if (this._loadAgain) {
+      this._loadAgain = false;
+      await this._load();
+    }
+  }
+
+  async _loadNow() {
     try {
       this._data = await this._ws({ type: `${DOMAIN}/state` });
       // The pass ran out (or this login isn't a parent): back to Family.

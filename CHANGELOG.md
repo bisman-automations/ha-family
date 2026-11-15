@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.1] - 2026-11-15
+
+### Changed
+
+- **A faster dashboard for a busy family.** The Family dashboard now finds a chore's, a person's or a day's history in one look instead of reading the whole year's history for every chore, person and goal. With a year of history, each refresh went from about 150 ms to about 16 ms on a test machine. Points, streaks, badges and goals add up exactly as before.
+- **Only this week's chores read.** Whether a chore is done today or this week is worked out from completions since the day or week began, not from all of them.
+- **One update at a time.** Checking several chores at once, or a chore with its bonuses, tells the dashboards and sensors once instead of once per change.
+- **Badges checked when something changed.** Badges are looked for again only when history, reviews, people or the day changed.
+- **Goals read from their start.** A family goal only reads history since the goal began.
+- **Own chores worked out once.** Each person's own chores today (total, left and missed) are worked out once per refresh instead of three times.
+- **Quiet when nobody's looking.** A Family dashboard in a hidden tab or on a switched-off wall screen waits and loads once when it's seen again, and a change that comes in while it's loading leads to one more load, not several.
+
 ## [2.15.0] - 2026-11-15
 
 ### Added
@@ -472,6 +484,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.15.1]: https://github.com/bisman-automations/ha-family/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/bisman-automations/ha-family/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/bisman-automations/ha-family/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/bisman-automations/ha-family/compare/v2.12.0...v2.13.0

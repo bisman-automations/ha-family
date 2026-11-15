@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
+import heapq
 import logging
 from typing import Any
 from uuid import uuid4
@@ -60,6 +61,7 @@ from .give import MAX_GIVE_PERCENT, Give, clean_goal as clean_give_goal
 from .goals import FamilyGoals
 from .kid_board import KidBoard
 from .leave import clean_leave_times, leave_at
+from .ledger import Ledger
 from .live_activity import ChoreActivity
 from .moods import Moods
 from .parent_pass import ParentPasses
@@ -220,6 +222,12 @@ class FamilyManager:
         # Family-wide settings from the Parents dashboard.
         self.settings: dict[str, Any] = {}
         self.entries: list[dict[str, Any]] = []
+        # The ledger grouped by chore, member, day and kind (``ledger``).
+        self._ledger = Ledger()
+        # What the last badge check saw, so an unchanged ledger isn't rechecked.
+        self._badges_seen: tuple[Any, ...] | None = None
+        # One "changed" for everything done in the same moment.
+        self._notify_pending = False
         # Points from entries older than KEEP_HISTORY_DAYS, per member.
         self.carried: dict[str, int] = {}
         # Open items of each chore to-do list: entity id -> items.
@@ -359,13 +367,32 @@ class FamilyManager:
         self.goals.check()
         self._check_badges()
         self._store.async_delay_save(self._data, SAVE_DELAY)
-        async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+        self._notify()
         # A chore done, back, renamed or removed: its to-do item follows.
         self.todo_sync.schedule()
         self.live.schedule()
         if members:
             for listener in list(self._member_listeners):
                 listener()
+
+    @property
+    def ledger(self) -> Ledger:
+        """The ledger grouped by chore, member, day and kind (see ledger.py)."""
+        return self._ledger.current(self.entries)
+
+    @callback
+    def _notify(self) -> None:
+        """Tell the dashboards and sensors once, however many changes the
+        same moment made (checking them all, a bonus with its chore)."""
+        if self._notify_pending:
+            return
+        self._notify_pending = True
+        self.hass.loop.call_soon(self._send_changed)
+
+    @callback
+    def _send_changed(self) -> None:
+        self._notify_pending = False
+        async_dispatcher_send(self.hass, SIGNAL_CHANGED)
 
     @callback
     def changed(self) -> None:
@@ -443,10 +470,23 @@ class FamilyManager:
         """Badges just earned: kept on the member, with an event, and told
         to the dashboard in ``new_badges`` (for the screen that earned them)."""
         today = dt_util.now().date().isoformat()
+        ledger = self.ledger
+        # Badges come from the ledger and the streak; with the same ledger,
+        # reviews, people and day there's nothing new to find.
+        seen = (
+            ledger.version,
+            today,
+            tuple(m["id"] for m in self.members),
+            sum(1 for e in self.entries if e.get("review") == model.REVIEW_REJECTED),
+            self.settings.get("streak_rule_from"),
+        )
+        if seen == self._badges_seen:
+            return
+        self._badges_seen = seen
         for member in self.members:
             stored = member.setdefault("badges", {})
             earned = model.badges_earned(
-                self.entries, member["id"], self.streak(member["id"])
+                ledger.member(member["id"]), member["id"], self.streak(member["id"])
             )
             for key in [k for k, *_rest in model.BADGES if k in earned - set(stored)]:
                 stored[key] = today
@@ -602,7 +642,7 @@ class FamilyManager:
             if points <= 0:
                 continue
             share = allowance_rule.last_week_share(
-                model.all_done_days(self.entries, member["id"]),
+                model.all_done_days(self.ledger.member(member["id"]), member["id"]),
                 self._has_own(member["id"]),
                 now.date(),
             )
@@ -693,7 +733,9 @@ class FamilyManager:
         raise FamilyError("That family member isn't set up")
 
     def points(self, member_id: str) -> int:
-        return self.carried.get(member_id, 0) + model.balance(self.entries, member_id)
+        return self.carried.get(member_id, 0) + model.balance(
+            self.ledger.member(member_id), member_id
+        )
 
     def member_for_user(self, user_id: str | None) -> str | None:
         """The member a Home Assistant login belongs to, through their person."""
@@ -851,7 +893,9 @@ class FamilyManager:
         alone decides; a recurring reminder that comes back can be done again."""
         if chore.get("source") == "todo":
             return set()
-        return model.done_by(chore, self.entries, now)
+        # Only completions since the period began can count: read just those.
+        recent = self.ledger.chore_since(chore["id"], model.done_since(chore, now))
+        return model.done_by(chore, recent, now)
 
     async def async_complete(
         self,
@@ -1272,7 +1316,9 @@ class FamilyManager:
         or always there)."""
         did = {
             e["chore_id"]
-            for e in model.chores_done_on(self.entries, now.date(), member_id)
+            for e in model.chores_done_on(
+                self.ledger.day(now.date()), now.date(), member_id
+            )
             if e.get("review") != model.REVIEW_REJECTED
         }
         return [
@@ -1282,6 +1328,20 @@ class FamilyManager:
             and c["id"] not in did
             and model.can_do(member_id, c, self._done(c, now))
         ]
+
+    def _own_status(
+        self, member_id: str, chores: list[dict[str, Any]], now: datetime
+    ) -> tuple[int, int, int]:
+        """Their own chores today: how many, how many are left and how many of
+        those are missed (hours over), from one look (``chores``: all_chores)."""
+        today = now.date()
+        if self.away.on(today):
+            return 0, 0, 0
+        own = [
+            c for c in chores if model.is_own(c, member_id) and model.on_day(c, today)
+        ]
+        left = self._own_left(member_id, own, now)
+        return len(own), len(left), sum(1 for c in left if model.hours_over(c, now))
 
     def _own_missed(self, member_id: str) -> int:
         """Their own chores left today whose hours are over: missed."""
@@ -1321,7 +1381,7 @@ class FamilyManager:
         """Days this member froze their streak on (spent points for a sick day)."""
         return {
             date.fromisoformat(e["day"])
-            for e in self.entries
+            for e in self.ledger.kind(KIND_FREEZE)
             if e.get("kind") == KIND_FREEZE
             and e["member"] == member_id
             and e.get("day")
@@ -1340,7 +1400,7 @@ class FamilyManager:
         if any(today - day < timedelta(days=FREEZE_EVERY_DAYS) for day in frozen):
             return []
         has_own = self._has_own(member_id)
-        done = model.all_done_days(self.entries, member_id)
+        done = model.all_done_days(self.ledger.member(member_id), member_id)
         return [
             day.isoformat()
             for day in (today - timedelta(days=1), today)
@@ -1468,7 +1528,7 @@ class FamilyManager:
         """Days in a row this member did all of their own chores."""
         since = self.settings.get("streak_rule_from")
         return model.streak(
-            self.entries,
+            self.ledger.member(member_id),
             member_id,
             dt_util.now().date(),
             self._has_own(member_id),
@@ -2965,7 +3025,13 @@ class FamilyManager:
     def snapshot(
         self, user_id: str | None, is_admin: bool, parent: bool | None = None
     ) -> dict[str, Any]:
-        today = dt_util.now().date()
+        now = dt_util.now()
+        today = now.date()
+        ledger = self.ledger
+        chores_now = self.all_chores()
+        own = {
+            m["id"]: self._own_status(m["id"], chores_now, now) for m in self.members
+        }
         members = [
             {
                 **m,
@@ -2973,15 +3039,18 @@ class FamilyManager:
                 "streak": self.streak(m["id"]),
                 # Their own chores today (not ones up for grabs): how many,
                 # how many are left, and whether they finished them all.
-                "own_today": dict(
-                    zip(("total", "left"), self._own_today(m["id"]), strict=True),
-                    done=model.bonus_given(
-                        self.entries, m["id"], model.BONUS_ALL_DONE, today
+                "own_today": {
+                    "total": own[m["id"]][0],
+                    "left": own[m["id"]][1],
+                    "done": model.bonus_given(
+                        ledger.member(m["id"]), m["id"], model.BONUS_ALL_DONE, today
                     ),
                     # Left, but their hours are over for today.
-                    missed=self._own_missed(m["id"]),
+                    "missed": own[m["id"]][2],
+                },
+                "done_today": len(
+                    model.chores_done_on(ledger.day(today), today, m["id"])
                 ),
-                "done_today": len(model.chores_done_on(self.entries, today, m["id"])),
                 "picture": self.picture(m),
                 "mood_today": self.moods.today(m["id"]),
                 "freeze_offers": self.freeze_offers(m["id"]),
@@ -2995,24 +3064,26 @@ class FamilyManager:
                 ),
                 "to_check": sum(
                     1
-                    for e in self.entries
+                    for e in ledger.member(m["id"])
                     if e["member"] == m["id"]
                     and e.get("review") == model.REVIEW_PENDING
                 ),
             }
             for m in self.members
         ]
-        now = dt_util.now()
         rewards = [
             {
                 **r,
                 "tv_name": self._tv_name(r.get("tv")),
                 "speaker_name": self._tv_name(r.get("speaker")),
-                "used_by": sorted(model.reward_used_by(r, self.entries, now)),
+                "used_by": sorted(
+                    model.reward_used_by(r, ledger.kind(model.KIND_REWARD), now)
+                ),
             }
             for r in self.rewards
         ]
-        recent = sorted(self.entries, key=lambda e: e["at"], reverse=True)[:30]
+        # The same as sorting them all, newest first, and keeping 30.
+        recent = heapq.nlargest(30, self.entries, key=lambda e: e["at"])
         controls = [
             {
                 **c,
@@ -3028,7 +3099,7 @@ class FamilyManager:
             "rewards": rewards,
             "controls": controls,
             "done_today": sorted(
-                model.chores_done_on(self.entries, today),
+                model.chores_done_on(ledger.day(today), today),
                 key=lambda e: e["at"],
                 reverse=True,
             ),
@@ -3096,13 +3167,13 @@ class FamilyManager:
             "bank": self.bank.snapshot(),
             "reading": reading.public_rule(self.settings.get("reading")),
             "reading_today": {
-                m["id"]: reading.minutes_today(self.entries, m["id"], today)
+                m["id"]: reading.minutes_today(ledger.day(today), m["id"], today)
                 for m in self.members
             },
             "homework": reading.public_rule(self.settings.get("homework")),
             "homework_today": {
                 m["id"]: reading.minutes_today(
-                    self.entries, m["id"], today, reading.HOMEWORK_CHORE
+                    ledger.day(today), m["id"], today, reading.HOMEWORK_CHORE
                 )
                 for m in self.members
             },

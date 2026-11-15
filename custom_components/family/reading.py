@@ -10,6 +10,7 @@ as one of their own chores for the day. Pure helpers plus ``log``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -64,7 +65,7 @@ def reading_points(minutes: int, rule: dict[str, int]) -> int:
 
 
 def minutes_today(
-    entries: list[dict[str, Any]], member_id: str, day, kind: str = READING_CHORE
+    entries: Iterable[dict[str, Any]], member_id: str, day, kind: str = READING_CHORE
 ) -> int:
     return sum(
         int(e.get("minutes") or 0)
@@ -98,7 +99,7 @@ def log(
     now = dt_util.now()
     if manager.away.on(now.date()):
         raise _error("Chores are off while the family is away")
-    before = minutes_today(manager.entries, member_id, now.date(), kind)
+    before = minutes_today(manager.ledger.day(now.date()), member_id, now.date(), kind)
     most = int(rule.get("max_minutes") or 0)
     if most:
         read = min(read, most - before)

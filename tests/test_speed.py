@@ -232,3 +232,46 @@ def test_chore_since_reads_only_the_period() -> None:
         recent = view.chore_since("x", model.done_since(chore, now))
         assert model.done_by(chore, recent, now) == model.done_by(chore, entries, now)
     assert view.chore_since("nothing", now) == ()
+
+
+async def test_history_numbers_follow_every_change(hass: HomeAssistant, client) -> None:
+    """2.15.2: the parents' history numbers are kept between refreshes, and
+    worked out again when an entry is added, marked as didn't happen, or
+    gets its points filled in (a team chore)."""
+    alex = (await client.ok("save", collection="members", item={"name": "Alex"}))[
+        "item"
+    ]["id"]
+    manager = _manager(hass)
+    now = dt_util.now()
+    entry = {
+        "id": "one",
+        "at": now.isoformat(),
+        "kind": "chore",
+        "member": alex,
+        "title": "Dishes",
+        "points": 4,
+        "chore_id": "dishes",
+        "review": "pending",
+    }
+    manager.entries.append(entry)
+    first = manager.history()[0][0]
+    assert first["after"] == 4
+    built: list[int] = []
+    real = model.running_balances
+
+    def counted(*args, **kwargs):
+        built.append(1)
+        return real(*args, **kwargs)
+
+    model.running_balances = counted
+    try:
+        manager.history()
+        assert built == []  # nothing changed: the same numbers
+        entry["review"] = model.REVIEW_REJECTED  # didn't happen (in place)
+        assert manager.history()[0][0]["after"] == 0
+        entry["review"] = "approved"
+        entry["points"] = 7  # a team chore's points filled in (in place)
+        assert manager.history()[0][0]["after"] == 7
+        assert len(built) == 2
+    finally:
+        model.running_balances = real

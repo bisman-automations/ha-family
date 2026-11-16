@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.2] - 2026-11-15
+
+### Changed
+
+- **Parents' history numbers kept between refreshes.** Week by week, Points over time and each entry's points before and after are worked out once and kept until the history changes (a chore done, one marked as didn't happen, points changed), instead of again for every open screen after every change. A parents' refresh with a year of history went from about 15 ms to under 10 ms on a test machine.
+- **Lately without sorting.** The newest entries come straight from the history's time order instead of sorting the whole year each time.
+
 ## [2.15.1] - 2026-11-15
 
 ### Changed
@@ -484,6 +491,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.15.2]: https://github.com/bisman-automations/ha-family/compare/v2.15.1...v2.15.2
 [2.15.1]: https://github.com/bisman-automations/ha-family/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/bisman-automations/ha-family/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/bisman-automations/ha-family/compare/v2.13.0...v2.14.0

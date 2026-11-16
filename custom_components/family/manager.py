@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-import heapq
 import logging
 from typing import Any
 from uuid import uuid4
@@ -228,6 +227,9 @@ class FamilyManager:
         self._badges_seen: tuple[Any, ...] | None = None
         # One "changed" for everything done in the same moment.
         self._notify_pending = False
+        # The parents' history numbers, kept until the history changes
+        # (_cached): every open screen asks for them after every change.
+        self._memo: dict[str, tuple[tuple[Any, ...], Any]] = {}
         # Points from entries older than KEEP_HISTORY_DAYS, per member.
         self.carried: dict[str, int] = {}
         # Open items of each chore to-do list: entity id -> items.
@@ -374,6 +376,37 @@ class FamilyManager:
         if members:
             for listener in list(self._member_listeners):
                 listener()
+
+    def _history_key(self) -> tuple[Any, ...]:
+        """Everything the history numbers depend on: the ledger's entries,
+        which were marked as didn't happen, every entry's points (a team
+        chore fills its points in when everyone's done), the day, the people
+        and the points carried from old history."""
+        rejected = 0
+        points = 0
+        for entry in self.entries:
+            points += int(entry.get("points", 0) or 0)
+            if entry.get("review") == model.REVIEW_REJECTED:
+                rejected += 1
+        return (
+            self.ledger.version,
+            rejected,
+            points,
+            dt_util.now().date(),
+            tuple(m["id"] for m in self.members),
+            tuple(sorted(self.carried.items())),
+        )
+
+    def _cached(self, name: str, build: Callable[[], Any]) -> Any:
+        """``build()``, or what it gave last time if the history is the same.
+        Callers must not change what comes back (it's shared)."""
+        key = self._history_key()
+        hit = self._memo.get(name)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        value = build()
+        self._memo[name] = (key, value)
+        return value
 
     @property
     def ledger(self) -> Ledger:
@@ -3082,8 +3115,8 @@ class FamilyManager:
             }
             for r in self.rewards
         ]
-        # The same as sorting them all, newest first, and keeping 30.
-        recent = heapq.nlargest(30, self.entries, key=lambda e: e["at"])
+        # The 30 newest, from the ledger's time order (no sorting).
+        recent = ledger.newest(30)
         controls = [
             {
                 **c,
@@ -3239,8 +3272,11 @@ class FamilyManager:
             result["most_wanted"] = self.most_wanted()
             if self.settings.get("mood_check"):
                 result["moods"] = self.moods.recent(today)
-            result["weeks"] = model.weekly_stats(
-                self.entries, [m["id"] for m in self.members], today
+            result["weeks"] = self._cached(
+                "weeks",
+                lambda: model.weekly_stats(
+                    self.entries, [m["id"] for m in self.members], today
+                ),
             )
             result["all_chores"] = self.chores
             result["all_routines"] = self.routines.items
@@ -3290,12 +3326,15 @@ class FamilyManager:
                 approve.values(), key=lambda r: r["at"], reverse=True
             )
             result["history"], result["history_more"] = self.history()
-            result["balance_days"] = model.daily_balances(
-                self.entries,
-                self.carried,
-                [m["id"] for m in self.members],
-                dt_util.now().date(),
-                BALANCE_DAYS,
+            result["balance_days"] = self._cached(
+                "balance_days",
+                lambda: model.daily_balances(
+                    self.entries,
+                    self.carried,
+                    [m["id"] for m in self.members],
+                    dt_util.now().date(),
+                    BALANCE_DAYS,
+                ),
             )
         return result
 
@@ -3304,8 +3343,12 @@ class FamilyManager:
     ) -> tuple[list[dict[str, Any]], bool]:
         """Newest first, older than ``before`` (an entry's time), with each
         entry's points before and after it. Also whether there's more."""
-        balances = model.running_balances(self.entries, self.carried)
-        newest = sorted(self.entries, key=lambda e: e["at"], reverse=True)
+        balances = self._cached(
+            "running", lambda: model.running_balances(self.entries, self.carried)
+        )
+        newest = self._cached(
+            "newest", lambda: sorted(self.entries, key=lambda e: e["at"], reverse=True)
+        )
         if before:
             newest = [e for e in newest if e["at"] < before]
         page = [

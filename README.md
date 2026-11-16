@@ -80,6 +80,12 @@ In the parent controls:
 
 ## The Family dashboard
 
+![The Family dashboard: who's here, their points and chores left, and the goals the family is going for](docs/images/family-dashboard.png)
+
+![Chores up for grabs, notes, today's calendar and meals on the Family dashboard](docs/images/family-chores.png)
+
+<img src="docs/images/family-phone.png" alt="A kid's own page on a phone: points, a high five, badges and what they're going for" width="300"> <img src="docs/images/family-dark.png" alt="The Family dashboard in the dark theme" width="520">
+
 - **Who's here?** Everyone's picture and points, and how many of their own chores are left today (or **All done**). A chore whose hours are over for the day shows as **missed**. Tap yours to see your page.
 - **Going for** (on your own page). How many of today's own chores are done and the bonus for finishing them, your streak (🔥 days in a row) and the next streak bonus, and the reward you're saving for.
 - **Coming up.** Countdowns a parent added ("Beach trip · 12 days", then **Tomorrow** and **Today!**), and birthdays from a month before. On someone's page, theirs and everyone's.
@@ -233,6 +239,14 @@ Links to the old **Parents** page (`/family-parents`), including the ones in the
 
 ## The parent controls
 
+![To check: chores the kids marked done, with Done right and Didn't happen, and rewards to hand out](docs/images/parents-to-check.png)
+
+![Who does what: each chore by kind against each person](docs/images/parents-chores.png)
+
+![Family goals, most wanted rewards and gift ideas on the Rewards tab](docs/images/parents-rewards.png)
+
+![History: week by week for each person, then every entry with the points before and after it](docs/images/parents-history.png)
+
 Every card in the parent controls folds away: tap its title. A folded card stays folded until you tap it again, and each device remembers which cards are folded.
 
 - **Hold rewards** (on **Family**, next to each person). Puts their rewards on hold for the rest of today, 1, 2 or 3 days, a week, or through a day you pick, with an optional reason they'll see. While it lasts they can't get a reward (alone or together) or cash out; chores still earn points, and rewards they can't afford yet can still be saved for. Their Rewards section says until when. **Lift the hold** ends it early.
@@ -368,7 +382,9 @@ and runs hassfest and the HACS checks. Releases are drafted automatically from
 
 To look at the dashboards without Home Assistant, serve the repo root over HTTP
 and open `scripts/panel-preview/index.html?mode=family` or `?mode=parents`
-(add `&theme=dark` for the dark theme).
+(add `&theme=dark` for the dark theme). `python scripts/panel-preview/shoot.py
+--mdi <folder with npm install @mdi/js>` retakes the README screenshots in
+`docs/images` from it (Playwright with Chromium).
 
 ## License
 

@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.3] - 2026-11-15
+
+### Changed
+
+- **Screenshots in the README.** The README now shows the Family dashboard (on a big screen, a phone and in the dark theme) and the Parents tabs: To check, Who does what, Rewards and History.
+
 ## [2.15.2] - 2026-11-15
 
 ### Changed
@@ -491,6 +497,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.15.3]: https://github.com/bisman-automations/ha-family/compare/v2.15.2...v2.15.3
 [2.15.2]: https://github.com/bisman-automations/ha-family/compare/v2.15.1...v2.15.2
 [2.15.1]: https://github.com/bisman-automations/ha-family/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/bisman-automations/ha-family/compare/v2.14.0...v2.15.0

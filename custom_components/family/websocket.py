@@ -248,8 +248,14 @@ def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
 
     @callback
     def changed() -> None:
+        # The revision this change brought (the snapshot has it too), so a
+        # screen that already loaded it can skip loading it again.
+        manager = manager_of(hass)
         connection.send_message(
-            websocket_api.event_message(msg["id"], {"changed": True})
+            websocket_api.event_message(
+                msg["id"],
+                {"changed": True, "revision": manager.revision if manager else None},
+            )
         )
 
     connection.subscriptions[msg["id"]] = async_dispatcher_connect(

@@ -490,9 +490,13 @@ async def test_dashboards_registered(hass: HomeAssistant):
         assert panels["family-parents"]["sidebar_title"] is None
         assert panels["family-parents"]["require_admin"] is False
         assert panels["family-parents"]["config"] == {"mode": "parents"}
-        # The Family card, for a dashboard a login can have as its default.
+        # The Family card, for a dashboard a login can have as its default:
+        # only its small loader is on every page (2.16.0), with the version.
         card_url = add_card.call_args.args[1]
-        assert card_url.startswith("/family_static/family-panel.js?v=")
+        assert card_url.startswith("/family_static/family-card.js?v=")
+        assert panels["family"]["module_url"].startswith(
+            "/family_static/family-panel.js?v="
+        )
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert remove_card.call_args.args[1] == card_url
         assert {c.args[1] for c in remove.call_args_list} == {
@@ -1131,8 +1135,11 @@ async def test_chores_on_set_days_and_hours(hass: HomeAssistant, client, freezer
     await hass.async_block_till_done()
     event = await client.ws.receive_json()
     assert event["id"] == sub["id"]
-    assert event["event"] == {"changed": True}
-    assert (await client.ok("state"))["chores"] == []
+    # The push says which change it is (2.16.0); the next state carries it.
+    assert event["event"]["changed"] is True
+    state = await client.ok("state")
+    assert state["chores"] == []
+    assert state["revision"] == event["event"]["revision"]
 
     # Wednesday: the trash.
     freezer.move_to(tuesday + timedelta(days=1, hours=5))

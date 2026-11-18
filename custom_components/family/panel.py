@@ -20,6 +20,9 @@ from .const import DOMAIN
 STATIC_URL = f"/{DOMAIN}_static"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 COMPONENT = "family-panel"
+# The Family card's loader: small, on every dashboard page. It loads the
+# panel script (where the card lives) only when a dashboard shows the card.
+CARD_SCRIPT = "family-card.js"
 FAMILY_PATH = "family"
 PARENTS_PATH = "family-parents"
 DATA_PANELS = f"{DOMAIN}_panels"
@@ -36,13 +39,17 @@ async def async_register_panels(hass: HomeAssistant) -> None:
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
 
     if not hass.data.get(DATA_STATIC):
+        # Every URL to these scripts carries the version (below, and the card
+        # loader passes its own on to the panel script), so browsers may keep
+        # them (cache headers) and still get the new ones after an update.
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
+            [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=True)]
         )
         hass.data[DATA_STATIC] = True
     version = (await async_get_integration(hass, DOMAIN)).version
     # The version in the URL makes browsers fetch the new script after an update.
     module_url = f"{STATIC_URL}/family-panel.js?v={version}"
+    card_url = f"{STATIC_URL}/{CARD_SCRIPT}?v={version}"
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=FAMILY_PATH,
@@ -66,11 +73,12 @@ async def async_register_panels(hass: HomeAssistant) -> None:
         config={"mode": "parents"},
     )
     # The Family card on any dashboard: a dashboard can be a login's default
-    # (a shared screen's), and a sidebar page can't.
+    # (a shared screen's), and a sidebar page can't. Only the small loader is
+    # on every page; it brings in the panel script when a card is shown.
     from homeassistant.components import frontend  # noqa: PLC0415
 
-    frontend.add_extra_js_url(hass, module_url)
-    hass.data[DATA_CARD] = module_url
+    frontend.add_extra_js_url(hass, card_url)
+    hass.data[DATA_CARD] = card_url
     hass.data[DATA_PANELS] = True
 
 

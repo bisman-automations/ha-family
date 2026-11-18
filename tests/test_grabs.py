@@ -93,6 +93,7 @@ async def test_a_streak_needs_all_own_chores(hass: HomeAssistant, client):
     manager.settings["streak_rule_from"] = (
         dt_util.now().date() - timedelta(days=1)
     ).isoformat()
+    manager.changed()  # as saving a setting does: the dashboards are told
     assert _member(await client.ok("state"), alex)["streak"] == 0
 
 

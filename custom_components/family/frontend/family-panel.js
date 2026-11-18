@@ -11,7 +11,9 @@
  * parent PIN otherwise (family/unlock gives a pass, sent with every family/
  * command until Back to Family or the screen goes idle). panel.config.mode
  * "parents" (the old /family-parents page) starts in the parent view.
- * Data comes from family/state; family/subscribe says when to load it again.
+ * Data comes from family/state; family/subscribe says when to load it again
+ * (with the change's revision, so a screen that has it already doesn't).
+ * The `family-card` card is in family-card.js, which loads this script.
  */
 
 const DOMAIN = "family";
@@ -1098,7 +1100,10 @@ class FamilyPanel extends HTMLElement {
 
   _subscribe() {
     if (this._unsub || !this._hass?.connection) return;
-    this._unsub = this._hass.connection.subscribeMessage(() => {
+    this._unsub = this._hass.connection.subscribeMessage((news) => {
+      // This screen already has that change (its own tap loaded it): the
+      // answer it got carries the same revision, so no second load.
+      if (news && news.revision != null && this._data && this._data.revision === news.revision && !this._loading) return;
       clearTimeout(this._reload);
       // A load already on its way may have missed this change: once more after.
       if (this._loading) {
@@ -5963,6 +5968,9 @@ if (!customElements.get("family-panel")) customElements.define("family-panel", F
 
 // The Family dashboard as a card, for a normal dashboard: those can be a
 // login's default dashboard (a shared screen's), and sidebar pages can't.
+// Dashboards use `family-card` from family-card.js, a small loader that's on
+// every page; it imports this script when a card is shown and puts this
+// element (`family-card-view`) inside itself (2.16.0).
 class FamilyCard extends FamilyPanel {
   constructor() {
     super();
@@ -5991,12 +5999,4 @@ class FamilyCard extends FamilyPanel {
   }
 }
 
-if (!customElements.get("family-card")) {
-  customElements.define("family-card", FamilyCard);
-  window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: "family-card",
-    name: "Family",
-    description: "Chores, rewards and home controls for a shared screen, for everyone or one family member.",
-  });
-}
+if (!customElements.get("family-card-view")) customElements.define("family-card-view", FamilyCard);

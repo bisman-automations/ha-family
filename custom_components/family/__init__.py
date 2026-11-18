@@ -65,10 +65,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     manager = FamilyManager(hass, entry)
     await manager.async_load()
     entry.runtime_data = manager
-    # Chores nobody checked count as done after a day or a week (a setting).
-    entry.async_on_unload(
-        async_track_time_interval(hass, manager.async_auto_check, timedelta(hours=1))
-    )
 
     # Chores kept on a to-do list: their items open again when the chores come
     # back (just after midnight, and hourly in case a list was offline).
@@ -76,6 +72,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     def _sync_todo(_now: Any = None) -> None:
         manager.todo_sync.schedule()
 
+    # Once an hour, one timer for the hourly jobs, in the order they ran when
+    # each had its own timer: chores nobody checked count as done after a day
+    # or a week (a setting), to-do items catch up, and the weekly allowance
+    # (with old notes, meals and history cleared) is checked.
+    @callback
+    def _hourly(now: Any = None) -> None:
+        manager.async_auto_check(now)
+        _sync_todo(now)
+        manager.async_allowance(now)
+
+    entry.async_on_unload(async_track_time_interval(hass, _hourly, timedelta(hours=1)))
     entry.async_on_unload(
         async_track_time_change(hass, _sync_todo, hour=0, minute=0, second=5)
     )
@@ -88,14 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FamilyConfigEntry) -> bo
     entry.async_on_unload(
         async_track_time_change(hass, _new_day, hour=0, minute=0, second=10)
     )
-    entry.async_on_unload(
-        async_track_time_interval(hass, _sync_todo, timedelta(hours=1))
-    )
     _sync_todo()
-    # The weekly allowance (and old notes and meals cleared), checked hourly.
-    entry.async_on_unload(
-        async_track_time_interval(hass, manager.async_allowance, timedelta(hours=1))
-    )
     # Today's calendar: every 15 minutes and just after midnight.
     entry.async_on_unload(
         async_track_time_interval(

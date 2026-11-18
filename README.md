@@ -373,6 +373,7 @@ python3.14 -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
 ruff check . && ruff format --check .
 pytest
+node --test tests/*.mjs
 ```
 
 CI also tests the oldest supported Home Assistant (`requirements_test_min.txt`)

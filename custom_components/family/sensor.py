@@ -73,12 +73,26 @@ class MemberPointsSensor(SensorEntity):
             entry_type=DeviceEntryType.SERVICE,
         )
 
+    _last_written: tuple[Any, ...] | None = None
+
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, SIGNAL_CHANGED, self.async_write_ha_state
-            )
+            async_dispatcher_connect(self.hass, SIGNAL_CHANGED, self._on_changed)
         )
+
+    @callback
+    def _on_changed(self) -> None:
+        """Write the state only when what this sensor shows changed.
+
+        Every change in the family (anyone's chore, a setting, the calendar)
+        is told to every points sensor; most don't change this person's
+        points, rewards or chores to check.
+        """
+        shown = (self.available, self.native_value, self.extra_state_attributes)
+        if shown == self._last_written:
+            return
+        self._last_written = shown
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -106,9 +120,10 @@ class MemberPointsSensor(SensorEntity):
         ]
         return {
             "member": member["name"],
+            # Only this person's entries (the ledger's group), not everyone's.
             "chores_to_check": sum(
                 1
-                for e in self.manager.entries
+                for e in self.manager.ledger.member(self.member_id)
                 if e["member"] == self.member_id and e.get("review") == "pending"
             ),
             "rewards": rewards,

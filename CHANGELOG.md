@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-11-18
+
+### Changed
+
+- **Dashboard pages load faster.** Every Home Assistant page used to load the whole Family dashboard script (about 390 KB) just so the Family card was known, even for people who never open Family. Now only a small loader is on every page, and it brings in the Family script the first time a page shows the Family card. Browsers also keep the Family scripts between visits until the next update.
+- **A chore done is quicker to take in.** A new chore, bonus or reward is added to the history's quick lookups instead of sorting the whole year again. With a year of history, a chore tick went from about 6 ms to about 2 ms on a test machine.
+- **Streaks worked out once.** Each person's streak is worked out once after a change and kept for the badge check and every open screen, instead of again for each of them.
+- **Screens on the same login share one answer.** Two wall screens or tablets on the same login that reload after the same change get the same answer instead of each working it out. A screen also skips loading a change it already has (the one it just made itself).
+- **Points sensors only update when their numbers change.** A chore someone else did, or a setting, no longer rewrites everyone's points sensor.
+- **To-do lists read once.** Ticking a to-do item off from Family reads the list once instead of twice, and a list that changed without its open items changing doesn't make every screen reload.
+- **Starting up doesn't wait for other integrations.** Family reads to-do lists and calendars and sets up its Assist sentences once Home Assistant has started, so a slow calendar no longer holds up setup. All calendars are read at the same time.
+- **Fewer writes to the disk.** Changes are saved 10 seconds after the last one instead of 2, so a burst of changes is one write (Home Assistant still saves anything waiting when it stops).
+- **History older than 400 days is folded into the points every hour,** not only when Home Assistant starts, so the history doesn't keep growing on a system that runs for months. Points stay the same.
+- The hourly jobs (auto-check, to-do lists, the weekly allowance) share one timer.
+
+### Fixed
+
+- **A calendar change during a calendar refresh is no longer missed.** The refresh runs once more afterwards.
+- **Cleaning up old chore photos no longer stops on a photo that was removed meanwhile** (an undo at the same moment).
+
 ## [2.15.3] - 2026-11-15
 
 ### Changed
@@ -497,6 +517,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.16.0]: https://github.com/bisman-automations/ha-family/compare/v2.15.3...v2.16.0
 [2.15.3]: https://github.com/bisman-automations/ha-family/compare/v2.15.2...v2.15.3
 [2.15.2]: https://github.com/bisman-automations/ha-family/compare/v2.15.1...v2.15.2
 [2.15.1]: https://github.com/bisman-automations/ha-family/compare/v2.15.0...v2.15.1

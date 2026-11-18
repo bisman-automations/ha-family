@@ -16,12 +16,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from . import model
-from .const import SIGNAL_CHANGED
 
 if TYPE_CHECKING:
     from .manager import FamilyManager
@@ -61,6 +59,9 @@ class CalendarToday:
         self.events: list[dict[str, Any]] = []
         self._unsub: Callable[[], None] | None = None
         self._refreshing = False
+        # Asked to refresh while a refresh was running: once more after it,
+        # so a calendar change in the middle isn't missed.
+        self._again = False
 
     @property
     def calendars(self) -> list[dict[str, Any]]:
@@ -93,23 +94,41 @@ class CalendarToday:
         )
 
     async def async_refresh(self) -> None:
+        """Read the picked calendars (all at once) and tell the dashboards
+        when today's or the coming days' events changed.
+
+        A refresh asked for while one runs is done once more afterwards
+        instead of being dropped.
+        """
         if self._refreshing:
+            self._again = True
             return
         self._refreshing = True
         try:
-            now = dt_util.now()
-            start = dt_util.start_of_local_day(now)
-            end = start + timedelta(days=DAYS)
-            events: list[dict[str, Any]] = []
-            for row in self.calendars:
-                events.extend(await self._read(row, start, end, now.date()))
+            while True:
+                self._again = False
+                await self._refresh_once()
+                if not self._again:
+                    break
         finally:
             self._refreshing = False
+
+    async def _refresh_once(self) -> None:
+        now = dt_util.now()
+        start = dt_util.start_of_local_day(now)
+        end = start + timedelta(days=DAYS)
+        # Every calendar at the same time: one slow calendar (each has
+        # TIMEOUT_SECONDS) no longer holds up the others.
+        results = await asyncio.gather(
+            *(self._read(row, start, end, now.date()) for row in self.calendars)
+        )
+        events: list[dict[str, Any]] = [event for found in results for event in found]
         events.sort(key=lambda e: (not e["all_day"], e["start"], e["title"].casefold()))
         events = events[:MAX_EVENTS]
         if events != self.events:
             self.events = events
-            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+            # One update for the moment, with everything else that changed.
+            self.m.changed_view()
 
     async def async_add(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Add an event to one of the picked calendars (Parents dashboard).

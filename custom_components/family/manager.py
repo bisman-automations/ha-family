@@ -23,6 +23,7 @@ from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callb
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -78,7 +79,14 @@ from .trades import Trades
 from .voice import Voice
 
 _LOGGER = logging.getLogger(__name__)
-SAVE_DELAY = 2
+# Seconds to wait before writing the Store, so a burst of changes (checking
+# several chores, a chore with its bonuses) is one write. The whole family,
+# history included, is one file; Home Assistant writes anything still waiting
+# when it stops (2.16.0: 10 instead of 2, fewer writes on SD cards).
+SAVE_DELAY = 10
+# Seconds one family/state answer is shared by the screens that ask for the
+# same thing (same login, admin and parent view) after the same change.
+SNAPSHOT_SHARE_SECONDS = 1.0
 TODO_PREFIX = "todo:"
 HISTORY_PAGE = 200  # history entries sent at a time
 BALANCE_DAYS = 28  # days in the points-over-time chart
@@ -273,6 +281,22 @@ class FamilyManager:
         self.voice = Voice(self)
         self._seen_chores: tuple | None = None
         self._member_listeners: list[Callable[[], None]] = []
+        # Goes up with every change told to the dashboards (``_notify``). The
+        # snapshot carries it and so does the "changed" push, so a screen
+        # that already has this revision doesn't load it again.
+        self.revision = 0
+        # Goes up whenever the family's data changes (``_changed``, ``save``):
+        # with the ledger's version, the key of the per-member caches below.
+        self._data_version = 0
+        # Each member's streak: (member, done_today) -> (key, days).
+        self._streaks: dict[tuple[str, bool], tuple[tuple[Any, ...], int]] = {}
+        # family/state answers shared for a moment: (who, view) -> (key, at, answer).
+        self._snapshots: dict[tuple[Any, ...], tuple[tuple[Any, ...], float, Any]] = {}
+        # To-do lists Family is ticking or unticking an item on right now. The
+        # state change that causes is skipped: Family reads the list once
+        # its update is done (``_async_set_todo``), which also picks up
+        # anything else that changed on it meanwhile.
+        self._todo_writing: dict[str, int] = {}
 
     # ---- storage --------------------------------------------------------------
 
@@ -328,12 +352,20 @@ class FamilyManager:
         self._check_badges(quiet=True)
         self.async_auto_check()
         self._watch_todo_lists()
-        await self.async_refresh_todo()
         self.calendar.watch()
         self.done_when.watch()
-        await self.calendar.async_refresh()
         self.async_allowance()
+        # To-do lists, calendars and Assist talk to other integrations, which
+        # may still be starting: read them once Home Assistant has started
+        # (straight away when it already has), so they don't hold up setup.
+        self.entry.async_on_unload(async_at_started(self.hass, self._async_after_start))
+
+    async def _async_after_start(self, _hass: HomeAssistant | None = None) -> None:
+        """The reads that need other integrations, after Home Assistant started."""
+        await self.async_refresh_todo()
+        await self.calendar.async_refresh()
         await self.voice.async_start()
+        self._notify()
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -366,6 +398,7 @@ class FamilyManager:
 
     @callback
     def _changed(self, members: bool = False) -> None:
+        self._data_version += 1
         self.goals.check()
         self._check_badges()
         self._store.async_delay_save(self._data, SAVE_DELAY)
@@ -397,10 +430,18 @@ class FamilyManager:
             tuple(sorted(self.carried.items())),
         )
 
-    def _cached(self, name: str, build: Callable[[], Any]) -> Any:
+    def _cached(
+        self,
+        name: str,
+        build: Callable[[], Any],
+        key: tuple[Any, ...] | None = None,
+    ) -> Any:
         """``build()``, or what it gave last time if the history is the same.
-        Callers must not change what comes back (it's shared)."""
-        key = self._history_key()
+        Callers must not change what comes back (it's shared). ``key``: the
+        ``_history_key()`` already worked out by the caller (the snapshot
+        asks for several numbers and works it out once)."""
+        if key is None:
+            key = self._history_key()
         hit = self._memo.get(name)
         if hit is not None and hit[0] == key:
             return hit[1]
@@ -416,7 +457,14 @@ class FamilyManager:
     @callback
     def _notify(self) -> None:
         """Tell the dashboards and sensors once, however many changes the
-        same moment made (checking them all, a bonus with its chore)."""
+        same moment made (checking them all, a bonus with its chore).
+
+        The revision goes up straight away, so a snapshot read after this
+        change (the tap's own reload) already carries the revision the push
+        will say, and that screen doesn't load it a second time.
+        """
+        self.revision += 1
+        self._snapshots.clear()
         if self._notify_pending:
             return
         self._notify_pending = True
@@ -432,6 +480,13 @@ class FamilyManager:
         """Save and tell the dashboards (for the family tools in other modules)."""
         self._changed()
 
+    @callback
+    def changed_view(self) -> None:
+        """Tell the dashboards and sensors that something they show changed
+        (today's calendar, for example) without saving anything. Folded into
+        one update with anything else that changed in the same moment."""
+        self._notify()
+
     def known_members(self, raw: Any) -> list[str]:
         return self._known_members(raw)
 
@@ -446,7 +501,7 @@ class FamilyManager:
         found = {m["id"] for m in self.members if await self._is_parent(m)}
         if found != self.parent_ids:
             self.parent_ids = found
-            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+            self._notify()
 
     def kid_ids(self) -> list[str]:
         """Everyone in the family who isn't a parent."""
@@ -455,6 +510,7 @@ class FamilyManager:
     @callback
     def save(self) -> None:
         """Save without telling the dashboards (nothing they show changed)."""
+        self._data_version += 1
         self._store.async_delay_save(self._data, SAVE_DELAY)
 
     def chore_open(self, chore: dict[str, Any]) -> bool:
@@ -576,7 +632,7 @@ class FamilyManager:
         )
         if seen != self._seen_chores:
             self._seen_chores = seen
-            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+            self._notify()
             self.todo_sync.schedule()
             self.live.schedule()
 
@@ -603,19 +659,31 @@ class FamilyManager:
             self._unsub_todo = None
         await self._store.async_save(self._data())
 
-    def _prune(self) -> None:
-        """Fold entries older than KEEP_HISTORY_DAYS into the balances."""
+    def _prune(self) -> bool:
+        """Fold entries older than KEEP_HISTORY_DAYS into the balances.
+
+        Done when loading and every hour (``async_allowance``), so history
+        doesn't keep growing while Home Assistant runs for months. The list
+        is replaced (and the ledger regrouped) only when some go. True when
+        some were folded in.
+        """
         cutoff = dt_util.now() - timedelta(days=KEEP_HISTORY_DAYS)
-        keep = []
-        for entry in self.entries:
-            if dt_util.parse_datetime(entry["at"]) >= cutoff:
-                keep.append(entry)
-            elif entry.get("review") != model.REVIEW_REJECTED:
+        old = [
+            entry
+            for entry in self.entries
+            if (at := dt_util.parse_datetime(entry["at"])) is not None and at < cutoff
+        ]
+        if not old:
+            return False
+        gone = {id(entry) for entry in old}
+        for entry in old:
+            if entry.get("review") != model.REVIEW_REJECTED:
                 member = entry["member"]
                 self.carried[member] = self.carried.get(member, 0) + int(
                     entry.get("points", 0)
                 )
-        self.entries = keep
+        self.entries = [entry for entry in self.entries if id(entry) not in gone]
+        return True
 
     def _prune_board(self) -> bool:
         """Drop notes past their last day, and meals older than a week."""
@@ -647,6 +715,9 @@ class FamilyManager:
             self.photos.async_prune(), "family photo prune"
         )
         changed = self._prune_board()
+        # History older than a year and a bit goes into the balances.
+        if self._prune():
+            changed = True
         self.hass.async_create_background_task(
             self.async_refresh_parents(), "family parents"
         )
@@ -1558,16 +1629,30 @@ class FamilyManager:
         return result
 
     def streak(self, member_id: str, done_today: bool = False) -> int:
-        """Days in a row this member did all of their own chores."""
+        """Days in a row this member did all of their own chores.
+
+        Worked out once and kept until something it depends on changes: the
+        ledger (``version``), the family's data (chores, people, days away:
+        ``_data_version``), the day or the streak rule. The badge check and
+        every open screen ask for it after each change.
+        """
         since = self.settings.get("streak_rule_from")
-        return model.streak(
-            self.ledger.member(member_id),
+        today = dt_util.now().date()
+        ledger = self.ledger
+        key = (ledger.version, self._data_version, today, since)
+        hit = self._streaks.get((member_id, done_today))
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        days = model.streak(
+            ledger.member(member_id),
             member_id,
-            dt_util.now().date(),
+            today,
             self._has_own(member_id),
             date.fromisoformat(since) if since else None,
             done_today,
         )
+        self._streaks[(member_id, done_today)] = (key, days)
+        return days
 
     async def async_review(
         self,
@@ -2990,8 +3075,15 @@ class FamilyManager:
             return
 
         async def _on_change(event: Event) -> None:
-            await self.async_refresh_todo(event.data["entity_id"])
-            async_dispatcher_send(self.hass, SIGNAL_CHANGED)
+            entity_id = event.data["entity_id"]
+            # Family's own tick or untick: it reads the list itself after.
+            if self._todo_writing.get(entity_id):
+                return
+            before = self.todo_items.get(entity_id)
+            await self.async_refresh_todo(entity_id)
+            # Only tell the dashboards when the open items really changed.
+            if self.todo_items.get(entity_id) != before:
+                self._notify()
 
         self._unsub_todo = async_track_state_change_event(
             self.hass, entity_ids, _on_change
@@ -3022,20 +3114,36 @@ class FamilyManager:
             self.todo_items[entity_id] = [i for i in items if i.get("uid")]
 
     async def _async_set_todo(self, entity_id: str, uid: str, done: bool) -> None:
+        """Tick an item off a chore list (or put it back), then read the list.
+
+        The list's own state change for this is skipped (``_todo_writing``,
+        see _watch_todo_lists): the read here is the one read, and it tells
+        the dashboards when the open items changed.
+        """
+        before = self.todo_items.get(entity_id)
+        self._todo_writing[entity_id] = self._todo_writing.get(entity_id, 0) + 1
         try:
-            await self.hass.services.async_call(
-                "todo",
-                "update_item",
-                {
-                    "entity_id": entity_id,
-                    "item": uid,
-                    "status": "completed" if done else "needs_action",
-                },
-                blocking=True,
-            )
-        except HomeAssistantError as err:
-            _LOGGER.warning("Family: couldn't update %s: %s", entity_id, err)
-        await self.async_refresh_todo(entity_id)
+            try:
+                await self.hass.services.async_call(
+                    "todo",
+                    "update_item",
+                    {
+                        "entity_id": entity_id,
+                        "item": uid,
+                        "status": "completed" if done else "needs_action",
+                    },
+                    blocking=True,
+                )
+            except HomeAssistantError as err:
+                _LOGGER.warning("Family: couldn't update %s: %s", entity_id, err)
+            await self.async_refresh_todo(entity_id)
+        finally:
+            if (left := self._todo_writing.get(entity_id, 1) - 1) > 0:
+                self._todo_writing[entity_id] = left
+            else:
+                self._todo_writing.pop(entity_id, None)
+        if self.todo_items.get(entity_id) != before:
+            self._notify()
 
     # ---- automations --------------------------------------------------------------
 
@@ -3058,7 +3166,46 @@ class FamilyManager:
     def snapshot(
         self, user_id: str | None, is_admin: bool, parent: bool | None = None
     ) -> dict[str, Any]:
+        """Everything a Family dashboard shows, for this login and view.
+
+        Every open screen asks again after each change. Screens that ask for
+        the same thing (the same login, admin or not, parent view or not)
+        within ``SNAPSHOT_SHARE_SECONDS`` of each other, in the same minute
+        and with nothing changed in between (see the key below), get the same
+        answer instead of each working it out. Callers must not change it.
+        """
         now = dt_util.now()
+        loop_now = self.hass.loop.time()
+        who = (user_id, is_admin, parent)
+        # Any change told to the dashboards (revision), any data saved
+        # without telling them (_data_version: a setting, a to-do link) and
+        # any new history (the ledger's version) means a new answer.
+        key = (
+            self.revision,
+            self._data_version,
+            self.ledger.version,
+            now.date(),
+            now.hour,
+            now.minute,
+        )
+        hit = self._snapshots.get(who)
+        if (
+            hit is not None
+            and hit[0] == key
+            and loop_now - hit[1] < SNAPSHOT_SHARE_SECONDS
+        ):
+            return hit[2]
+        result = self._snapshot(now, user_id, is_admin, parent)
+        self._snapshots[who] = (key, loop_now, result)
+        return result
+
+    def _snapshot(
+        self,
+        now: datetime,
+        user_id: str | None,
+        is_admin: bool,
+        parent: bool | None,
+    ) -> dict[str, Any]:
         today = now.date()
         ledger = self.ledger
         chores_now = self.all_chores()
@@ -3126,6 +3273,8 @@ class FamilyManager:
             for c in self.controls
         ]
         result: dict[str, Any] = {
+            # The change this answer includes (see ``_notify``).
+            "revision": self.revision,
             "members": members,
             "chores": self.chores_for(None),
             "routines": self.routines.today(),
@@ -3272,11 +3421,14 @@ class FamilyManager:
             result["most_wanted"] = self.most_wanted()
             if self.settings.get("mood_check"):
                 result["moods"] = self.moods.recent(today)
+            # The history numbers' key, worked out once for all of them.
+            history_key = self._history_key()
             result["weeks"] = self._cached(
                 "weeks",
                 lambda: model.weekly_stats(
                     self.entries, [m["id"] for m in self.members], today
                 ),
+                history_key,
             )
             result["all_chores"] = self.chores
             result["all_routines"] = self.routines.items
@@ -3325,7 +3477,7 @@ class FamilyManager:
             result["to_approve"] = sorted(
                 approve.values(), key=lambda r: r["at"], reverse=True
             )
-            result["history"], result["history_more"] = self.history()
+            result["history"], result["history_more"] = self.history(key=history_key)
             result["balance_days"] = self._cached(
                 "balance_days",
                 lambda: model.daily_balances(
@@ -3335,19 +3487,30 @@ class FamilyManager:
                     dt_util.now().date(),
                     BALANCE_DAYS,
                 ),
+                history_key,
             )
         return result
 
     def history(
-        self, before: str | None = None, limit: int = HISTORY_PAGE
+        self,
+        before: str | None = None,
+        limit: int = HISTORY_PAGE,
+        key: tuple[Any, ...] | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Newest first, older than ``before`` (an entry's time), with each
-        entry's points before and after it. Also whether there's more."""
+        entry's points before and after it. Also whether there's more.
+        ``key``: the ``_history_key()`` when the caller already has it."""
+        if key is None:
+            key = self._history_key()
         balances = self._cached(
-            "running", lambda: model.running_balances(self.entries, self.carried)
+            "running",
+            lambda: model.running_balances(self.entries, self.carried),
+            key,
         )
         newest = self._cached(
-            "newest", lambda: sorted(self.entries, key=lambda e: e["at"], reverse=True)
+            "newest",
+            lambda: sorted(self.entries, key=lambda e: e["at"], reverse=True),
+            key,
         )
         if before:
             newest = [e for e in newest if e["at"] < before]

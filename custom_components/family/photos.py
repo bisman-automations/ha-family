@@ -89,7 +89,11 @@ class Photos:
             for path in folder.glob("*.jpg"):
                 if path.name.endswith(".keep.jpg"):
                     continue
-                if path.stat().st_mtime < oldest:
+                try:
+                    old = path.stat().st_mtime < oldest
+                except FileNotFoundError:
+                    continue  # removed meanwhile (an undo, another prune)
+                if old:
                     path.unlink(missing_ok=True)
 
         await self.manager.hass.async_add_executor_job(_prune)

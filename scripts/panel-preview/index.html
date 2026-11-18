@@ -537,7 +537,11 @@ window.hass = {
 };
 </script>
 <script type="module">
-  await import("../../custom_components/family/frontend/family-panel.js?v=" + Date.now());
+  const v = "?v=" + Date.now();
+  await import("../../custom_components/family/frontend/family-panel.js" + v);
+  // The card's loader (as on every dashboard page); it imports the panel
+  // script itself, the same one already loaded above.
+  await import("../../custom_components/family/frontend/family-card.js" + v);
   // ?mode=card: the Family card, as on a dashboard.
   const card = params.get("mode") === "card";
   const el = document.createElement(card ? "family-card" : "family-panel");

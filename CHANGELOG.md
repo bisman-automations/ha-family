@@ -533,6 +533,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.16.1]: https://github.com/bisman-automations/ha-family/compare/v2.16.0...v2.16.1
 [2.16.0]: https://github.com/bisman-automations/ha-family/compare/v2.15.3...v2.16.0
 [2.15.3]: https://github.com/bisman-automations/ha-family/compare/v2.15.2...v2.15.3
 [2.15.2]: https://github.com/bisman-automations/ha-family/compare/v2.15.1...v2.15.2

@@ -17,9 +17,24 @@
  */
 
 const DOMAIN = "family";
+// Which Family dashboard sections are open, on this screen (localStorage).
 const SECTIONS_KEY = "family-sections";
-// On a shared screen, back to everyone after this long without a tap.
-const IDLE_MS = 2 * 60 * 1000; // which Family dashboard sections are open, on this screen
+// On a shared screen, after this long with nobody using it (a tap, a scroll,
+// a key): the parent pass ends and quiet hours can start.
+const IDLE_MS = 2 * 60 * 1000;
+// After this long with nobody using it, the Family dashboard goes back to
+// everyone (or the card's or login's own person) and folds its sections
+// again. Longer than IDLE_MS: someone reading their page without touching it
+// shouldn't lose it (2.16.1).
+const PAGE_IDLE_MS = 5 * 60 * 1000;
+// Who this screen is on (and the Parents tab), kept for the browser tab's
+// session (sessionStorage), so a card that Home Assistant makes again (it
+// builds the dashboard again after a reconnect or an edit) comes back on the
+// same person instead of everyone (2.16.1). One key per page or card.
+const SCREEN_KEY = "family-screen";
+// What counts as someone using the screen, anywhere on the page: user input
+// only, so a redraw (which can move the page) never keeps a screen awake.
+const ACTIVITY_EVENTS = ["pointerdown", "wheel", "touchmove", "keydown"];
 // The dashboard the Parents dashboard makes for a shared screen's default.
 const DASHBOARD_PATH = "family-dashboard";
 const DASHBOARD_TITLE = "Family dashboard";
@@ -903,6 +918,18 @@ const STYLES = `
   .badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--fam-bad); color: #fff; font-size: 12px; line-height: 20px; text-align: center; margin-left: 6px; }
 `;
 
+// A CSS selector for what an element is (tag, classes, data attributes), to
+// find the same scroller again after a redraw (FamilyPanel._keepScroll).
+function scrollSelector(el) {
+  const cssEsc = (v) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, "\\$&"));
+  let selector = el.localName;
+  for (const name of el.classList) selector += `.${cssEsc(name)}`;
+  for (const attr of el.attributes) {
+    if (attr.name.startsWith("data-")) selector += `[${attr.name}="${cssEsc(attr.value)}"]`;
+  }
+  return selector;
+}
+
 class FamilyPanel extends HTMLElement {
   constructor() {
     super();
@@ -910,6 +937,10 @@ class FamilyPanel extends HTMLElement {
     this._data = null;
     this._error = "";
     this._member = null; // who's using the shared screen
+    // The first load picks whose page to start on (the restored one, else the
+    // card's or login's own); after that only a tap, the idle reset, a view
+    // switch or that person being removed changes it (2.16.1).
+    this._memberPicked = false;
     this._sheet = null; // {type: "chore"|"reward", item, member?}
     this._tab = "review";
     this._edit = null; // {collection, item}
@@ -974,7 +1005,7 @@ class FamilyPanel extends HTMLElement {
     this._view = view;
     this._sheet = null;
     this._lastTouch = Date.now();
-    if (view === "family") this._member = this._homeMember();
+    if (view === "family") this._setMember(this._homeMember());
     this._load();
   }
 
@@ -997,7 +1028,9 @@ class FamilyPanel extends HTMLElement {
       this._load();
       this._subscribe();
     } else if (this._mode === "family" && this._data?.controls?.length) {
-      // Home controls follow their entities live.
+      // Home controls follow their entities live. Home Assistant hands over a
+      // new `hass` for every state change in the house: only redraw the
+      // Home tiles when one of the controls' own entities changed.
       const seen = this._seenStates || {};
       if (this._data.controls.some((c) => hass.states[c.entity_id] !== seen[c.entity_id])) this._refreshControls();
     }
@@ -1024,6 +1057,7 @@ class FamilyPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._idleTimer);
+    this._unwatchActivity();
     if (this._onVisible) {
       document.removeEventListener("visibilitychange", this._onVisible);
       this._onVisible = null;
@@ -1038,6 +1072,63 @@ class FamilyPanel extends HTMLElement {
   connectedCallback() {
     if (this._hass && !this._unsub) this._subscribe();
     this._watchIdle();
+    this._watchActivity();
+  }
+
+  // Someone is using the screen: a tap, a scroll (wheel, trackpad, a finger
+  // on the page) or a key, anywhere on the page, not only on Family's own
+  // tiles: the dashboard around a card scrolls outside it. Before 2.16.1 only
+  // a tap on Family counted, so reading or scrolling someone's page sent the
+  // screen back to everyone mid-read.
+  _watchActivity() {
+    if (this._onActivity || typeof window === "undefined") return;
+    this._onActivity = () => {
+      this._lastTouch = Date.now();
+    };
+    for (const type of ACTIVITY_EVENTS) window.addEventListener(type, this._onActivity, { capture: true, passive: true });
+  }
+
+  _unwatchActivity() {
+    if (!this._onActivity) return;
+    for (const type of ACTIVITY_EVENTS) window.removeEventListener(type, this._onActivity, { capture: true });
+    this._onActivity = null;
+  }
+
+  // ---- who this screen is on, kept for the tab's session
+
+  // One key per page or card: the Family page, the old Parents page, and
+  // each card (a card for one person has its own).
+  _screenKey() {
+    const where = this._card ? `card:${this._pinned || ""}` : `panel:${this._panel?.config?.mode || "family"}`;
+    return `${SCREEN_KEY}:${where}`;
+  }
+
+  // Change whose page this is (null: everyone's) and remember it.
+  _setMember(id) {
+    this._member = id ?? null;
+    this._memberPicked = true;
+    this._saveScreen();
+  }
+
+  _saveScreen() {
+    try {
+      sessionStorage.setItem(this._screenKey(), JSON.stringify({ member: this._member, tab: this._tab, touch: this._lastTouch || Date.now() }));
+    } catch (_err) {
+      // private browsing or storage full: kept for now only
+    }
+  }
+
+  // What this screen was on before Home Assistant made the card (or page)
+  // again, if someone used it within PAGE_IDLE_MS; else null, and the idle
+  // reset's choice (the home person) applies.
+  _savedScreen() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(this._screenKey()) || "null");
+      if (!saved || typeof saved !== "object" || !(Date.now() - Number(saved.touch) < PAGE_IDLE_MS)) return null;
+      return saved;
+    } catch (_err) {
+      return null;
+    }
   }
 
   // The next person to walk up to the shared screen shouldn't land on the
@@ -1084,11 +1175,19 @@ class FamilyPanel extends HTMLElement {
       }
     }
     if (this._mode !== "family" || !this._data || this._sheet || this._busy) return;
-    if (Date.now() - this._lastTouch < IDLE_MS) return;
+    if (Date.now() - this._lastTouch < PAGE_IDLE_MS) {
+      // Keep the saved last use current, so a card made again soon after
+      // still counts from the real last tap (not from when it was saved).
+      if (this._lastTouch !== this._savedTouch) {
+        this._savedTouch = this._lastTouch;
+        this._saveScreen();
+      }
+      return;
+    }
     const home = this._homeMember();
     const opened = Object.values(this._sections).includes("all");
     if (this._member === home && !opened) return;
-    this._member = home;
+    this._setMember(home);
     for (const [key, mode] of Object.entries(this._sections)) if (mode === "all") this._sections[key] = "first";
     try {
       localStorage.setItem(SECTIONS_KEY, JSON.stringify(this._sections));
@@ -1110,11 +1209,16 @@ class FamilyPanel extends HTMLElement {
         this._loadAgain = true;
         return;
       }
-      this._reload = setTimeout(() => this._load(), 300);
+      this._reload = setTimeout(() => this._load({ push: true }), 300);
     }, { type: `${DOMAIN}/subscribe` });
   }
 
-  async _load() {
+  // `push`: a load because something changed somewhere (family/subscribe, or
+  // the screen being seen again). It draws the page only when the answer is
+  // different from the one on screen. Every other load (after a tap here, a
+  // view switch) also draws it, as the tap may have changed what's shown.
+  async _load({ push = false } = {}) {
+    if (!push) this._drawNext = true;
     // Changes told before this load starts are in it: no second load for them
     // (a tap here loads straight away and the change it made is also told).
     clearTimeout(this._reload);
@@ -1124,7 +1228,7 @@ class FamilyPanel extends HTMLElement {
       this._stale = true;
       if (!this._onVisible) {
         this._onVisible = () => {
-          if (document.visibilityState === "visible" && this._stale) this._load();
+          if (document.visibilityState === "visible" && this._stale) this._load({ push: true });
         };
         document.addEventListener("visibilitychange", this._onVisible);
       }
@@ -1143,13 +1247,28 @@ class FamilyPanel extends HTMLElement {
     }
     if (this._loadAgain) {
       this._loadAgain = false;
-      await this._load();
+      await this._load({ push: true });
     }
   }
 
   async _loadNow() {
+    const before = { mode: this._mode, member: this._member, error: this._error, choices: this._choices };
+    let same = false;
     try {
-      this._data = await this._ws({ type: `${DOMAIN}/state` });
+      const data = await this._ws({ type: `${DOMAIN}/state` });
+      // The same answer as the one on screen (a change that doesn't touch
+      // this screen, or one it already drew): no redraw, so nothing moves
+      // under someone's finger or eyes. A redraw replaces the page's
+      // elements, which also restarts any animation and drops focus.
+      let text = null;
+      try {
+        text = JSON.stringify(data);
+      } catch (_err) {
+        text = null;
+      }
+      same = text !== null && text === this._dataText;
+      this._dataText = text;
+      this._data = data;
       // The pass ran out (or this login isn't a parent): back to Family.
       if (this._mode === "parents" && !this._data.parent) {
         this._pass = null;
@@ -1158,9 +1277,22 @@ class FamilyPanel extends HTMLElement {
         if (wanted && this._data.pin_set) this._sheet = { type: "pin", pin: "", error: "" };
       }
       this._error = "";
-      // Someone logged in as a family member sees their own page.
-      if (this._member === null && this._mode === "family") this._member = this._homeMember();
-      if (this._member && !this._data.members.some((m) => m.id === this._member)) this._member = this._homeMember();
+      if (!this._memberPicked && this._mode === "family") {
+        // First load: back on the person this screen was on before Home
+        // Assistant made it again (same tab, used within PAGE_IDLE_MS), else
+        // someone logged in as a family member sees their own page.
+        const saved = this._pinnedMember() ? null : this._savedScreen();
+        const savedMember = saved && (saved.member === null || this._data.members.some((m) => m.id === saved.member)) ? saved.member : undefined;
+        if (saved) {
+          // The idle reset counts from the last real use, not from when the
+          // card was made again.
+          this._lastTouch = Number(saved.touch) || this._lastTouch;
+          if (typeof saved.tab === "string") this._tab = saved.tab;
+        }
+        this._setMember(savedMember !== undefined ? savedMember : this._member ?? this._homeMember());
+      }
+      // Their person was removed: back to the home page.
+      if (this._member && !this._data.members.some((m) => m.id === this._member)) this._setMember(this._homeMember());
       if (this._mode === "parents" && this._data.is_admin && this._hasDashboard === undefined) {
         this._hasDashboard = null;
         this._ws({ type: "lovelace/dashboards/list" })
@@ -1178,6 +1310,9 @@ class FamilyPanel extends HTMLElement {
     } catch (err) {
       this._error = err?.message || String(err);
     }
+    const unchanged = same && before.mode === this._mode && before.member === this._member && before.error === this._error && before.choices === this._choices;
+    if (unchanged && !this._drawNext) return;
+    this._drawNext = false;
     this._render();
   }
 
@@ -1201,7 +1336,8 @@ class FamilyPanel extends HTMLElement {
         this._toggleFold(head.dataset.fold);
       }
     });
-    this.shadowRoot.addEventListener("pointerdown", () => (this._lastTouch = Date.now()), true);
+    // Taps, scrolls and keys anywhere on the page count as someone using it:
+    // _watchActivity, on window while this is on the page (connectedCallback).
     this._watchIdle();
     // How many tiles fit in a row changes with the screen's width.
     if (window.ResizeObserver) {
@@ -2237,10 +2373,39 @@ class FamilyPanel extends HTMLElement {
     main.classList.toggle("wall-main", wall);
     const quiet = !wall && this._isQuiet();
     this._wasQuiet = quiet;
-    main.innerHTML = quiet ? this._renderQuiet() : (slot || wall ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : wall ? this._renderWall() : this._renderFamily());
-    if (this._mode === "parents") this._foldCards();
-    this._fit();
+    const html = quiet ? this._renderQuiet() : (slot || wall ? "" : this._switchBar()) + error + (this._mode === "parents" ? this._renderParents() : wall ? this._renderWall() : this._renderFamily());
+    // A redraw puts back where the people row, the tabs and any list inside
+    // Family were scrolled to, so a change elsewhere doesn't jump them.
+    this._keepScroll(main, () => {
+      main.innerHTML = html;
+      if (this._mode === "parents") this._foldCards();
+      this._fit();
+    });
     this._renderOverlay();
+  }
+
+  // Draw with `draw()`, then scroll everything inside `scope` that was
+  // scrolled back to where it was. A scroller is found again by what it is
+  // (tag, classes, data attributes) and which one of those it is, so the same
+  // list in the redrawn page gets the same position (clamped by the browser
+  // if it got shorter).
+  _keepScroll(scope, draw) {
+    const kept = [];
+    if (scope) {
+      for (const el of scope.querySelectorAll("*")) {
+        if (!el.scrollTop && !el.scrollLeft) continue;
+        const selector = scrollSelector(el);
+        const index = [...scope.querySelectorAll(selector)].indexOf(el);
+        if (index >= 0) kept.push({ selector, index, top: el.scrollTop, left: el.scrollLeft });
+      }
+    }
+    draw();
+    for (const k of kept) {
+      const el = scope.querySelectorAll(k.selector)[k.index];
+      if (!el) continue;
+      el.scrollTop = k.top;
+      el.scrollLeft = k.left;
+    }
   }
 
   _renderOverlay() {
@@ -2255,7 +2420,12 @@ class FamilyPanel extends HTMLElement {
       if (toast) overlay.insertAdjacentHTML("beforeend", toast);
       return;
     }
-    overlay.innerHTML = (this._sheet ? this._renderSheet() : "") + toast;
+    const html = (this._sheet ? this._renderSheet() : "") + toast;
+    // An open sheet that's drawn again (a change while it's open) keeps its
+    // scroll position: a long list in it doesn't jump back to the top.
+    this._keepScroll(overlay, () => {
+      overlay.innerHTML = html;
+    });
   }
 
   // Family ---------------------------------------------------------------------
@@ -3104,10 +3274,11 @@ class FamilyPanel extends HTMLElement {
   }
 
   // Hide what doesn't fit in the first row, and say how many there are.
-  _fit() {
+  // `only`: one section's box (with data-fit) instead of every section.
+  _fit(only = null) {
     const root = this.shadowRoot;
     if (!root || this._mode !== "family") return;
-    for (const box of root.querySelectorAll("[data-fit]")) {
+    for (const box of only ? [only] : root.querySelectorAll("[data-fit]")) {
       const key = box.dataset.fit;
       const tiles = box.classList.contains("tiles");
       const items = tiles ? [...box.children] : [...box.querySelectorAll(".feed > li")];
@@ -3189,16 +3360,25 @@ class FamilyPanel extends HTMLElement {
           <span class="do">${esc(v.verb)}</span></button>`;
       })
       .join("");
+    // Every control's entity, not only the ones shown: on someone's page
+    // some controls are hidden, and before 2.16.1 those never counted as
+    // seen, so every state change in the house redrew the Home tiles (and
+    // measured the whole page again) while a person was picked.
+    for (const c of this._data?.controls || []) if (!(c.entity_id in seen)) seen[c.entity_id] = this._hass?.states?.[c.entity_id];
     this._seenStates = seen;
     return tiles;
   }
 
   _refreshControls() {
     const box = this.shadowRoot?.querySelector("main .tiles.home");
-    if (box) {
+    const states = this._hass?.states || {};
+    const seen = this._seenStates || {};
+    // Only a control that's shown changed: anything else just counts as seen.
+    const shown = this._visibleControls().some((c) => states[c.entity_id] !== seen[c.entity_id]);
+    if (box && shown) {
       box.innerHTML = this._controlTiles();
-      this._fit();
-    } else this._seenStates = Object.fromEntries((this._data?.controls || []).map((c) => [c.entity_id, this._hass.states[c.entity_id]]));
+      this._fit(box); // just this section's row, not the whole page
+    } else this._seenStates = Object.fromEntries((this._data?.controls || []).map((c) => [c.entity_id, states[c.entity_id]]));
   }
 
   async _useControl(id) {
@@ -5126,7 +5306,7 @@ class FamilyPanel extends HTMLElement {
     }
     if (ds.member) {
       if (this._pinnedMember()) return;
-      this._member = this._member === ds.member ? null : ds.member;
+      this._setMember(this._member === ds.member ? null : ds.member);
       this._render();
     } else if (ds.sectionToggle) {
       const key = ds.sectionToggle;
@@ -5219,6 +5399,7 @@ class FamilyPanel extends HTMLElement {
       this._confirm();
     } else if (ds.tab) {
       this._tab = ds.tab;
+      this._saveScreen();
       this._edit = null;
       this._render();
     } else if (ds.goalRemove) {
@@ -5980,10 +6161,22 @@ class FamilyCard extends FamilyPanel {
 
   // `member`: a family member's id, to show only their page. `wall`: the
   // big wall view, for a TV or a tablet on the wall.
+  //
+  // Home Assistant can hand the same card its config again (a dashboard
+  // edit, or a section passing it on). That keeps whoever is picked: only a
+  // different `member` (another person's card) starts again on that person.
+  // Before 2.16.1 every call went back to everyone.
   setConfig(config) {
+    const first = this._config === undefined;
     this._config = config || {};
-    this._pinned = this._config.member || null;
-    this._member = this._pinned;
+    const pinned = this._config.member || null;
+    if (first || pinned !== this._pinned) {
+      this._pinned = pinned;
+      this._member = pinned;
+      this._memberPicked = false;
+    }
+    // `wall` or `phone` may have changed: draw it again.
+    if (!first && this._built && this._data) this._render();
   }
 
   getCardSize() {

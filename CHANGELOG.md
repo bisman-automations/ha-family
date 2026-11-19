@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.1] - 2026-11-19
+
+### Fixed
+
+- **The person you picked stays picked.** Picking someone on the Family dashboard no longer drops back to nobody while you scroll or read their page:
+  - Scrolling (a mouse wheel, a trackpad or a finger) and keys now count as using the screen, not only taps, and the page goes back to everyone after **5 minutes** with nobody using it instead of 2. The parent controls still close after 2 minutes.
+  - When Home Assistant builds the dashboard again (after it reconnects, or when the dashboard is saved), the card comes back on the same person in that browser tab instead of everyone.
+  - A card given its settings again keeps who's picked.
+- **No more constant redrawing while someone is picked.** With a person picked, every state change anywhere in the house redrew the Home tiles and measured the whole page again, because home controls that aren't that person's never counted as seen. Now the tiles only redraw when one of the shown controls changes.
+- **A change that doesn't change the page doesn't redraw it.** When something changes somewhere else and this screen's answer is the same, the page isn't drawn again, so nothing moves under your finger.
+- **Scroll positions are kept when the page is drawn again.** The row of people, the Parents tabs and long lists in an open window stay where you scrolled them.
+
+### Changed
+
+- Ruff 0.17.6 for the lint checks.
+
 ## [2.16.0] - 2026-11-18
 
 ### Changed

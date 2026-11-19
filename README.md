@@ -199,7 +199,7 @@ With Home Assistant's Assist (a voice speaker, or typing to Assist in the app), 
 
 ### Going back to everyone
 
-After 2 minutes without a tap, the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page. A screen that shows one person's page (their tab, or a card with their member id) stays on that page.
+After 5 minutes with nobody using the screen (no tap, scroll or key), the dashboard goes back to **Who's here?**, so the next person doesn't land on someone else's page. Scrolling or reading someone's page doesn't send it back, and neither does a change made somewhere else (a chore done on another screen, a light turned on). The person picked stays picked if Home Assistant reloads the dashboard (after a reconnect, for example) in the same browser tab. A screen that shows one person's page (their tab, or a card with their member id) stays on that page.
 
 Each section shows its first row: as many tiles as fit across the screen. Tap **Show all** for the rest, or tap a section's name to fold it away. Each screen remembers which sections are open. A parent can change the order of the sections for every screen in the parent controls, under **Family** → **Family dashboard sections**. Tick **Hide sections with nothing in them** there to leave out a section that's empty, such as **Up for grabs** when nothing is up for grabs (**Notes** always shows, so a note can be added).
 
@@ -230,7 +230,7 @@ member: <member id>
   - **Your own PIN**: each administrator can set their own. **Back to Family** then shows who opened the parent controls. Only you can change yours, from your own login, and it stops working if your login stops being an administrator.
 
   Use either or both. PINs are 4 to 8 digits, no two can be the same, and Home Assistant only keeps a scrambled copy of each, never the PIN itself.
-- The PIN opens the parent controls on that screen until **Back to Family**, or until nobody has tapped it for two minutes. Restarting Home Assistant closes them too.
+- The PIN opens the parent controls on that screen until **Back to Family**, or until nobody has used it (a tap, a scroll or a key) for two minutes. Restarting Home Assistant closes them too.
 - After five wrong PINs in a row, the pad locks for five minutes and the phones picked under **Parents' phones** get a notification.
 - With no PIN set, only an administrator's login can open the parent controls.
 - Making or updating the **Family dashboard** (under **Family**) needs an administrator's login, since it changes Home Assistant's dashboards. Everything else works with the PIN.

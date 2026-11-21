@@ -8,8 +8,10 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.family import model
+from custom_components.family.const import SIGNAL_CHANGED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from .test_family import Client, _family, _setup
@@ -325,3 +327,49 @@ async def test_picture_mode_is_kept(hass: HomeAssistant, client: Client) -> None
     )
     state = await client.ok("state")
     assert next(m for m in state["members"] if m["id"] == alex)["picture_mode"] is True
+
+
+async def test_weather_change_updates_the_screens(
+    hass: HomeAssistant, client: Client
+) -> None:
+    """What to wear follows the weather, not only the next other change."""
+    await _family(client)
+    hass.states.async_set(
+        "weather.home", "rainy", {"temperature": 40, "temperature_unit": "°F"}
+    )
+    await client.ok("settings", weather_entity="weather.home")
+    await hass.async_block_till_done()
+    manager = hass.config_entries.async_entries("family")[0].runtime_data
+    told = []
+    stop = async_dispatcher_connect(hass, SIGNAL_CHANGED, lambda: told.append(1))
+    revision = manager.revision
+
+    # Something the tile doesn't show: nobody is told.
+    hass.states.async_set(
+        "weather.home",
+        "rainy",
+        {"temperature": 40, "temperature_unit": "°F", "humidity": 90},
+    )
+    await hass.async_block_till_done()
+    assert manager.revision == revision and not told
+
+    # Warmer and sunny: the screens load the new tile.
+    hass.states.async_set(
+        "weather.home", "sunny", {"temperature": 80, "temperature_unit": "°F"}
+    )
+    await hass.async_block_till_done()
+    assert manager.revision > revision and told
+    weather = (await client.ok("state"))["weather"]
+    assert weather["condition"] == "sunny" and weather["temperature"] == 80
+
+    # Weather turned off: its changes no longer tell anyone.
+    await client.ok("settings", weather_entity=None)
+    await hass.async_block_till_done()
+    told.clear()
+    revision = manager.revision
+    hass.states.async_set(
+        "weather.home", "snowy", {"temperature": 20, "temperature_unit": "°F"}
+    )
+    await hass.async_block_till_done()
+    assert manager.revision == revision and not told
+    stop()

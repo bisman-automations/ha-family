@@ -305,3 +305,36 @@ async def test_beat_the_clock(hass: HomeAssistant, client) -> None:
     )
     assert result["entry"]["bonuses"][0]["points"] == 3
     assert _points(await client.ok("state"), alex) == 5
+
+
+async def test_screen_time_bank_quiet_without_banks(
+    hass: HomeAssistant, client
+) -> None:
+    """The nightly bank check with nobody banking (or nothing left to save)
+    doesn't reload every screen."""
+    (alex,) = await _members(client, "Alex")
+    manager = _manager(hass)
+    await hass.async_block_till_done()
+    revision = manager.revision
+    night = dt_util.now().replace(hour=23, minute=56)
+    manager.bank.tick(night)
+    await hass.async_block_till_done()
+    assert manager.revision == revision
+    assert manager.bank.day == night.date().isoformat()
+
+    # A bank, but the TV has no time left: the day is kept, nobody is told.
+    await client.ok(
+        "save",
+        collection="members",
+        item={"id": alex, "name": "Alex", "bank_tv": "tv_entry"},
+    )
+    er.async_get(hass).async_get_or_create(
+        "sensor", "tv_mgmt", "tv_entry_time_remaining_today", suggested_object_id="left"
+    )
+    hass.states.async_set("sensor.left", "0")
+    await hass.async_block_till_done()
+    revision = manager.revision
+    manager.bank.tick(night + timedelta(days=1))
+    await hass.async_block_till_done()
+    assert manager.revision == revision
+    assert manager.bank.day == (night + timedelta(days=1)).date().isoformat()

@@ -354,6 +354,7 @@ class FamilyManager:
         self._watch_todo_lists()
         self.calendar.watch()
         self.done_when.watch()
+        self.kids.watch_weather()
         self.async_allowance()
         # To-do lists, calendars and Assist talk to other integrations, which
         # may still be starting: read them once Home Assistant has started
@@ -652,6 +653,7 @@ class FamilyManager:
     async def async_unload(self) -> None:
         self.voice.stop()
         self.calendar.stop()
+        self.kids.stop_weather()
         self.live.stop()
         self.done_when.stop()
         if self._unsub_todo:
@@ -1984,6 +1986,8 @@ class FamilyManager:
             )
             self.calendar.watch()
             self.calendar.schedule()
+        if "weather_entity" in raw:
+            self.kids.watch_weather()
         self._changed()
         self.async_auto_check()
         if "allowance_day" in raw or "allowance_hour" in raw:

@@ -14,11 +14,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from homeassistant.core import Event, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from . import model
@@ -45,6 +48,8 @@ class KidBoard:
 
     def __init__(self, manager: FamilyManager) -> None:
         self.manager = manager
+        self._weather_unsub: Callable[[], None] | None = None
+        self._weather_shown: dict[str, Any] | None = None
 
     # ---- tomorrow -----------------------------------------------------------------
 
@@ -150,6 +155,35 @@ class KidBoard:
             "condition": state.state,
             **wear,
         }
+
+    @callback
+    def watch_weather(self) -> None:
+        """Follow the picked weather (call again when the setting changes), so
+        What to wear changes on the screens when the weather does, not only
+        when something else makes them load."""
+        self.stop_weather()
+        entity_id = self.manager.settings.get("weather_entity")
+        if not entity_id:
+            return
+        self._weather_shown = self.weather()
+        self._weather_unsub = async_track_state_change_event(
+            self.manager.hass, [entity_id], self._weather_changed
+        )
+
+    @callback
+    def stop_weather(self) -> None:
+        if self._weather_unsub:
+            self._weather_unsub()
+            self._weather_unsub = None
+
+    @callback
+    def _weather_changed(self, _event: Event) -> None:
+        # Only when the tile changes: a forecast update with the same
+        # temperature and sky tells nobody.
+        shown = self.weather()
+        if shown != self._weather_shown:
+            self._weather_shown = shown
+            self.manager.changed_view()
 
     # ---- high fives ------------------------------------------------------------------
 

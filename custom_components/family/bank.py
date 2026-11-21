@@ -76,20 +76,25 @@ class ScreenBank:
         if self.day == today or now.time() < DEPOSIT_AT:
             return
         self.day = today
-        if self.manager.away.on(now.date()):
+        banked = [m for m in self.manager.members if m.get("bank_tv")]
+        if not banked:
+            return  # nobody has a bank: nothing to save or show
+        saved = False
+        if not self.manager.away.on(now.date()):
+            for member in banked:
+                cap = int(member.get("bank_max") or DEFAULT_MAX)
+                balance = self.minutes.get(member["id"], 0)
+                added = deposit(balance, self._left(member["bank_tv"]), cap)
+                if added:
+                    self.minutes[member["id"]] = balance + added
+                    self._note(member["id"], added, "Saved from today")
+                    saved = True
+        if saved:
             self.manager.changed()
-            return
-        for member in self.manager.members:
-            tv = member.get("bank_tv")
-            if not tv:
-                continue
-            cap = int(member.get("bank_max") or DEFAULT_MAX)
-            balance = self.minutes.get(member["id"], 0)
-            added = deposit(balance, self._left(tv), cap)
-            if added:
-                self.minutes[member["id"]] = balance + added
-                self._note(member["id"], added, "Saved from today")
-        self.manager.changed()
+        else:
+            # Only the day: kept so a restart doesn't look again, but no
+            # screen or sensor has anything new to show.
+            self.manager.save()
 
     def _note(self, member_id: str, minutes: int, what: str) -> None:
         self.log.append(

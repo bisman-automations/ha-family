@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Check chores with a tap on iPhone.** The Home Assistant app on iPhone, iPad and Mac can now show a notification's buttons when you tap it (its **Show actions when tapped** setting), but only when tapping doesn't already open a page. Family's notifications opened the parent controls, so the setting did nothing for them. On those phones, notifications with buttons (**Done right** / **Didn't happen**, **Handed out**, **Yes** / **No**) now leave the tap to the app and have an **Open** button for the parent controls. Android phones are unchanged.
 
+### Changed
+
+- **Quieter Live Activities.** The chores Live Activity no longer makes a sound each time a chore is ticked off: updates go to iPhones as quiet updates (which iOS is also less likely to hold back) and buzz only once on Android. **All done** still makes a sound.
+
 ## [2.16.2] - 2026-11-21
 
 ### Fixed

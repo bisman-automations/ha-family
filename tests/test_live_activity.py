@@ -156,3 +156,27 @@ async def test_show_from(hass: HomeAssistant, client, freezer):
     manager.async_tick()
     await hass.async_block_till_done()
     assert _live(sent)[-1]["message"] == "Alex 0/1"
+
+
+async def test_progress_updates_are_quiet_and_all_done_is_not(
+    hass: HomeAssistant, client
+):
+    """Progress makes no sound (silent on iPhone, alert_once on Android);
+    finishing everything does."""
+    sent = async_mock_service(hass, "notify", "mobile_app_dads_phone")
+    alex, _sam = await _family(client)
+    bed = await _chore(client, name="Make your bed", members=[alex])
+    await client.ok(
+        "settings", notify_targets=["mobile_app_dads_phone"], live_activity=True
+    )
+    await hass.async_block_till_done()
+    [first] = _live(sent)
+    assert first["data"]["silent"] is True
+    assert first["data"]["alert_once"] is True
+
+    await client.ok("complete", member_id=alex, chore_id=bed["id"])
+    await hass.async_block_till_done()
+    done = _live(sent)[-1]
+    assert done["title"] == "All done today! 🎉"
+    assert "silent" not in done["data"]
+    assert "alert_once" not in done["data"]

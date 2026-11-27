@@ -38,6 +38,13 @@ FAMILY_PATH = "/family"
 DONE_SECONDS = 120
 
 
+def _quiet(quiet: bool) -> dict[str, bool]:
+    """Progress updates make no sound: ``silent`` on iPhone (lower priority,
+    so iOS is less likely to hold updates back), ``alert_once`` on Android.
+    "All done" is the one worth hearing."""
+    return {"silent": True, "alert_once": True} if quiet else {}
+
+
 class ChoreActivity:
     """Keeps the parents' Live Activities in step with today's chores."""
 
@@ -141,6 +148,7 @@ class ChoreActivity:
                 "notification_icon": "mdi:broom",
                 "url": PARENTS_PATH,
                 "clickAction": PARENTS_PATH,
+                **_quiet(not everyone),
             },
         }
 
@@ -163,6 +171,7 @@ class ChoreActivity:
                 "notification_icon": "mdi:check-circle" if not left else "mdi:broom",
                 "url": FAMILY_PATH,
                 "clickAction": FAMILY_PATH,
+                **_quiet(bool(left)),
             },
         }
 

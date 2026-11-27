@@ -33,6 +33,7 @@ let allChores = [
   { id: "bed", name: "Make your bed", emoji: "🛏️", how: "Pillow at the top.\nBlanket pulled up and straight.\nPajamas under the pillow.", example: true, points: 5, repeat: "daily", members: ["a", "b", "c"], enabled: true, timer_minutes: 5, timer_bonus: 2 },
   { id: "dishes", name: "Empty the dishwasher", emoji: "🍽️", points: 10, repeat: "daily", members: ["a", "b"], enabled: true, turns: true, turn_every: "day", turn_first: "a" },
   { id: "teeth", name: "Brush your teeth", emoji: "🪥", points: 1, repeat: "daily", members: [], enabled: true, from_time: "06:00", until_time: "23:59" },
+  { id: "car", name: "Wash the car", emoji: "🚗", points: 15, repeat: "on_demand", members: [], enabled: true },
   { id: "trash", name: "Take out the trash", emoji: "🗑️", points: 4, repeat: "weekly", members: ["c"], enabled: true, days: [1] },
   { id: "room", name: "Tidy your room", emoji: "🧸", points: 15, repeat: "weekly", members: ["c"], enabled: true },
   { id: "plants", name: "Water the plants", emoji: "🪴", points: 3, repeat: "after_days", repeat_days: 3, todo_list: "todo.chores", members: [], enabled: true },
@@ -258,7 +259,8 @@ const pinSet = () => !!familyPin || Object.keys(ownPins).length > 0;
 let parentPass = null;
 let wrongPins = 0;
 const isParent = (msg) => IS_ADMIN || (!!parentPass && msg.pass === parentPass);
-const PARENT_ONLY = ["statement", "quest/save", "quest/delete", "quest/undo", "pet/save", "pet/delete", "idea/decide", "request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "review_all", "unpick", "paid_all", "photo", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
+const demandShowing = new Set();
+const PARENT_ONLY = ["statement", "quest/save", "quest/delete", "quest/undo", "pet/save", "pet/delete", "idea/decide", "request/decide", "vote/start", "vote/close", "vote/cancel", "countdown/save", "countdown/delete", "away", "boost/start", "boost/stop", "shopping", "calendar/add", "report", "hold", "trade/decide", "cash_out/cancel", "review", "review_all", "unpick", "chore/offer", "paid_all", "photo", "given", "approve", "adjust", "save", "delete", "move", "settings", "meals", "choices"];
 // Trades for today (like trades.py): offered, taken, approved.
 let trades = [{ id: "t1", chore_id: "bed", chore: "Make your bed", emoji: "🛏️", points: 5, from: "b", from_name: "Sam", to: null, day: "today", status: "offered", at: new Date().toISOString() }];
 const weeks = () => Array.from({ length: 8 }, (_v, i) => ({ week: dayIso(-7 * (7 - i) - ((new Date().getDay() + 6) % 7)), members: Object.fromEntries(members.map((m, j) => [m.id, { earned: 10 + ((i * 7 + j * 5) % 30), spent: (i * 11 + j * 3) % 25, chores: 3 + ((i + j) % 6) }])) }));
@@ -290,7 +292,7 @@ const state = () => ({
   most_wanted: [{ reward_id: "toy", members: ["a", "b"] }],
   chore_ideas: choreIdeas, challenges, challenge_points: settings.challenge_points, mood_check: !!settings.mood_check, moods: settings.mood_check ? sampleMoods() : undefined,
   members: members.map((m) => ({ ...m, gift_ideas: giftIdeas[m.id] || [], bank_tv: m.id === "a" ? "tv1" : null, own_today: ownToday(m.id), mood_today: moodsToday[m.id] || null, wishes: wishes[m.id] || [], freeze_offers: m.id === "a" && settings.freeze_cost ? [dayIso(-1)] : [] })), done_today: entries.filter((e) => e.kind === "chore" && e.review !== "rejected" && isToday(e.at)).reverse(), bonus, chores: chores(), rewards: rewards.map((r) => ({ ...r, used_by: [...new Set(entries.filter((e) => e.kind === "reward" && e.reward_id === r.id && r.limit).map((e) => e.member))] })), settings, family_goal: familyGoal(), family_goals: familyGoals(), auctions: auctionView(), reading: readingRule, reading_today: { ...readingToday }, homework: { block_minutes: 20, points: 3, max_minutes: 90 }, homework_today: { ...homeworkToday }, theme: settings.theme_week === null ? null : { ...(settings.theme_week || themeWeek), kept: [...themeKept] }, grade_points: settings.grade_points || { A: 10, B: 6, C: 2 }, saving_next: settings.saving_percent ? { weekday: settings.allowance_day ?? 6, percent: settings.saving_percent, points: Object.fromEntries(members.map((m) => [m.id, Math.floor(m.points * settings.saving_percent / 100)])) } : null, bank: { ...bankMinutes }, beat_clock: settings.beat_clock_points || 0, routines: routinesToday(), all_routines: routines, section_order: sectionList(settings.section_order), hide_empty_sections: !!settings.hide_empty_sections, undo_seconds: 60, controls: controlList(), recent: [...entries].reverse(), me: location.hash === "#me" ? "a" : null, goal_match: settings.goal_match || 0, is_admin: IS_ADMIN, parent: false, pin_set: pinSet(), pins: IS_ADMIN ? { family: !!familyPin, mine: !!ownPins.parent, parents: Object.values(ownPins).map((o) => o.name).sort() } : null, trades: trades.map((t) => ({ ...t })), weeks: weeks(),
-  all_chores: allChores, todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
+  all_chores: allChores, demand_showing: [...demandShowing], todo_lists: [{ id: "todo.chores", entity_id: "todo.chores", name: "Chores", points: 3, members: [], item_points: {}, items: [
     { name: "Feed the dog", points: 3, rated: false, unrated: 3 },
     { name: "Take out the trash", points: 8, rated: true, unrated: 3 },
     { name: "Water the plants", points: 5, rated: false, unrated: 5 },
@@ -499,6 +501,15 @@ window.hass = {
     if (t === "paid_all") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; let n = 0; for (const e of entries) if (e.kind === "cashout" && e.member === msg.member_id && e.given === "to_give") { e.given = "given"; n += 1; } return { paid: n }; }
     if (t === "photo") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; const e = entries.find((x) => x.id === msg.entry_id); return { url: e?.photo ? SAMPLE_PHOTO : null }; }
     if (t === "chore/example") return { url: msg.chore_id === "bed" ? SAMPLE_PHOTO : null };
+    if (t === "chore/offer") {
+      if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" };
+      const chore = allChores.find((c) => c.id === msg.chore_id);
+      if (!chore) throw { code: "family_error", message: "That chore isn't on the list any more" };
+      if (chore.repeat !== "on_demand") throw { code: "family_error", message: `${chore.name} comes back by itself` };
+      if (msg.offer === false) demandShowing.delete(chore.id); else demandShowing.add(chore.id);
+      chore.offered = msg.offer === false ? null : new Date().toISOString();
+      return { chore };
+    }
     if (t === "chore/set_example") { if (!isParent(msg)) throw { code: "unauthorized", message: "Unauthorized" }; return {}; }
     if (t === "given") { entries.find((x) => x.id === msg.entry_id).given = "given"; return {}; }
     if (t === "save" && msg.collection === "routines" && !(msg.item.steps || []).length) throw { message: "Give the routine at least one step" };

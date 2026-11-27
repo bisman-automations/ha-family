@@ -258,6 +258,7 @@ Every card in the parent controls folds away: tap its title. A folded card stays
   - **some days after it's done**, for example 3 days after the plants were last watered;
   - **right away**, every time it's done, for something that can be done again and again;
   - **once a parent checks it**: it stays done while it's on **To check**.
+  - **only when a parent adds it**: it stays in the list but isn't on the Family dashboard until you tap **Add now** next to it. Then it can be done once (by whoever's first for a chore up for grabs, or once by each person ticked) and goes away the next day. **Take back** removes it before it's done. Handy for jobs that come up now and then, like washing the car.
 
   **Picture** is an emoji or an icon. Tap it to pick one: search the icons (vacuum, dishes, laundry, dog, lawn…), tap an emoji, or type any emoji. Any of Home Assistant's icons works too: type its full name, such as `mdi:washing-machine`. Rewards, routines, family members, quick points, the family goal, countdowns, links and to-do items pick their picture the same way.
 

@@ -19,6 +19,8 @@ REPEAT_WEEKLY = "weekly"
 REPEAT_AFTER_DAYS = "after_days"  # some days after it was last done (repeat_days)
 REPEAT_ALWAYS = "always"  # right away: always there
 REPEAT_AFTER_CHECK = "after_check"  # once a parent has checked it
+# Only when a parent puts it out (Add now), once each time.
+REPEAT_ON_DEMAND = "on_demand"
 REPEATS = (
     REPEAT_DAILY,
     REPEAT_WEEKLY,
@@ -26,6 +28,7 @@ REPEATS = (
     REPEAT_AFTER_DAYS,
     REPEAT_ALWAYS,
     REPEAT_AFTER_CHECK,
+    REPEAT_ON_DEMAND,
 )
 
 # Ledger entry kinds
@@ -153,6 +156,10 @@ def done_since(chore: dict[str, Any], now: datetime) -> datetime | None:
         return midnight - timedelta(days=days - 1)
     if repeat in (REPEAT_AFTER_CHECK, REPEAT_ALWAYS):
         return None
+    if repeat == REPEAT_ON_DEMAND:
+        # Only what was done since a parent last put it out counts.
+        offered = chore.get("offered")
+        return datetime.fromisoformat(offered) if offered else None
     return period_start(now, repeat)
 
 
@@ -189,6 +196,40 @@ def done_by(
     if done and (is_grab(chore) or chore.get("turns")):
         done.add("*")
     return done
+
+
+def demand_showing(
+    chore: dict[str, Any], entries: Iterable[dict[str, Any]], now: datetime
+) -> bool:
+    """Whether a chore a parent puts out is out now.
+
+    Out from when a parent added it (``offered``) until it's been done: by
+    anyone for a chore up for grabs, by each of its people otherwise. It
+    stays on the day it was finished (shown as done) and is gone after that,
+    until a parent adds it again.
+    """
+    offered = chore.get("offered")
+    if not offered:
+        return False
+    since = datetime.fromisoformat(offered)
+    finished_on: date | None = None
+    who: set[str] = set()
+    for entry in entries:
+        if (
+            entry.get("kind") != KIND_CHORE
+            or entry.get("chore_id") != chore["id"]
+            or entry.get("review") == REVIEW_REJECTED
+        ):
+            continue
+        at = datetime.fromisoformat(entry["at"])
+        if at < since:
+            continue
+        who.add(entry["member"])
+        day = at.date()
+        finished_on = day if finished_on is None or day > finished_on else finished_on
+    members = set(chore.get("members") or [])
+    finished = bool(who) if is_grab(chore) or chore.get("turns") else members <= who
+    return not finished or finished_on == now.date()
 
 
 def is_grab(chore: dict[str, Any]) -> bool:
@@ -289,7 +330,10 @@ def in_season(item: dict[str, Any], day: date) -> bool:
 
 def on_day(chore: dict[str, Any], day: date) -> bool:
     """Whether the chore is on this day: in its season, on one of its days
-    (no days picked: every day)."""
+    (no days picked: every day). A chore a parent puts out (``on_demand``)
+    is only on while it's out (``showing``, see ``demand_showing``)."""
+    if chore.get("repeat") == REPEAT_ON_DEMAND and not chore.get("showing"):
+        return False
     days = chore.get("days") or []
     return in_season(chore, day) and (not days or day.weekday() in days)
 

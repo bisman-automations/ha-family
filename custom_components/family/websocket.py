@@ -61,6 +61,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_paid_all,
         ws_chore_example,
         ws_set_example,
+        ws_offer_chore,
         ws_meals,
         ws_given,
         ws_high_five,
@@ -1506,6 +1507,22 @@ async def ws_chore_example(hass, connection, msg, manager) -> dict[str, Any]:
 async def ws_set_example(hass, connection, msg, manager) -> dict[str, Any]:
     await manager.async_set_example(msg["chore_id"], msg["photo"])
     return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/chore/offer",
+        vol.Optional(PASS): str,
+        vol.Required("chore_id"): str,
+        vol.Optional("offer", default=True): bool,
+    }
+)
+@_require_parent
+@websocket_api.async_response
+@_handler
+async def ws_offer_chore(hass, connection, msg, manager) -> dict[str, Any]:
+    """A parent puts out a chore that only comes when added, or takes it back."""
+    return {"chore": manager.offer_chore(msg["chore_id"], msg["offer"])}
 
 
 @websocket_api.websocket_command(

@@ -953,7 +953,18 @@ class FamilyManager:
         # In the pick-your-chores pool: whoever picked it this week does it.
         chore = self.picks.apply(chore)
         # Traded today, with a parent's yes: whoever took it does it.
-        return chore if chore["grab"] else self.trades.apply(chore)
+        chore = chore if chore["grab"] else self.trades.apply(chore)
+        if chore.get("repeat") == model.REPEAT_ON_DEMAND:
+            # Out only while a parent has put it out and it isn't done.
+            since = model.done_since(chore, now)
+            chore = dict(
+                chore,
+                showing=since is not None
+                and model.demand_showing(
+                    chore, self.ledger.chore_since(chore["id"], since), now
+                ),
+            )
+        return chore
 
     def chore(self, chore_id: str) -> dict[str, Any]:
         for chore in self.all_chores():
@@ -1222,6 +1233,30 @@ class FamilyManager:
                 )
 
         self.hass.async_create_background_task(_run(), f"family on done {entity_id}")
+
+    @callback
+    def offer_chore(self, chore_id: str, offer: bool = True) -> dict[str, Any]:
+        """A parent puts a chore that only comes when added out now (Add
+        now), or takes it back. Each time it's put out it can be done once:
+        by anyone for a chore up for grabs, by each of its people otherwise."""
+        chore = next((c for c in self.chores if c["id"] == chore_id), None)
+        if chore is None:
+            raise FamilyError("That chore isn't on the list any more")
+        if chore.get("repeat") != model.REPEAT_ON_DEMAND:
+            raise FamilyError(f"{chore['name']} comes back by itself")
+        chore["offered"] = _now_iso() if offer else None
+        self._changed()
+        return chore
+
+    def demand_showing_ids(self) -> list[str]:
+        """Chores a parent puts out that are out now (for the Parents list)."""
+        now = dt_util.now()
+        return [
+            c["id"]
+            for c in self.chores
+            if c.get("repeat") == model.REPEAT_ON_DEMAND
+            and self._effective(c, now).get("showing")
+        ]
 
     async def async_set_example(self, chore_id: str, photo: str | None) -> None:
         """A parent's photo of what a chore looks like done (None removes it)."""
@@ -2770,6 +2805,15 @@ class FamilyManager:
             if raw.get("difficulty") in model.DIFFICULTIES
             else "",
         }
+        # Put out by a parent (Add now): kept through an edit.
+        chore["offered"] = (
+            next(
+                (c.get("offered") for c in self.chores if c["id"] == chore["id"]),
+                None,
+            )
+            if repeat == model.REPEAT_ON_DEMAND
+            else None
+        )
         if chore["pool"] and chore["turns"]:
             raise FamilyError(
                 "A chore is either picked from the pool or taken in turns"
@@ -3435,6 +3479,7 @@ class FamilyManager:
                 history_key,
             )
             result["all_chores"] = self.chores
+            result["demand_showing"] = self.demand_showing_ids()
             result["all_routines"] = self.routines.items
             result["todo_lists"] = [
                 {

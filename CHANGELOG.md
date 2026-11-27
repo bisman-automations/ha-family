@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0] - 2026-11-27
+
+### Added
+
+- **Chores you add when they're needed.** A chore can now come back **Only when a parent adds it**. It stays in the Parents chores list, and **Add now** puts it on the Family dashboard: once for whoever's first, or once for each person ticked. When it's done it goes away the next day, until you add it again. **Take back** removes it before anyone does it. Good for jobs that come up now and then, like washing the car or raking leaves.
+
 ## [2.17.1] - 2026-11-27
 
 ### Changed
@@ -555,6 +561,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.18.0]: https://github.com/bisman-automations/ha-family/compare/v2.17.1...v2.18.0
 [2.17.1]: https://github.com/bisman-automations/ha-family/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/bisman-automations/ha-family/compare/v2.16.2...v2.17.0
 [2.16.2]: https://github.com/bisman-automations/ha-family/compare/v2.16.1...v2.16.2

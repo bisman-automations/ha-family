@@ -60,6 +60,7 @@ const REPEATS = [
   { id: "after_days", label: "Some days after it's done" },
   { id: "always", label: "Right away, every time it's done" },
   { id: "after_check", label: "Once a parent checks it" },
+  { id: "on_demand", label: "Only when a parent adds it" },
 ];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TURN_EVERY = [
@@ -4035,6 +4036,16 @@ class FamilyPanel extends HTMLElement {
     return `<li class="edit-row">${this[form](edit.item)}</li>`;
   }
 
+  // A chore that only comes when a parent adds it: Add now puts it out (once
+  // for anyone up for grabs, or once for each of its people); Take back
+  // removes it before it's done.
+  _demandStatus(c) {
+    if (c.repeat !== "on_demand") return "";
+    return (this._data.demand_showing || []).includes(c.id)
+      ? `<span class="pill">Out now</span><button class="btn" data-offer="${esc(c.id)}" data-offer-off>Take back</button>`
+      : `<button class="btn primary" data-offer="${esc(c.id)}">Add now</button>`;
+  }
+
   // A pool chore's pick this week, and Put back for a parent.
   _poolStatus(c) {
     if (!c.pool) return "";
@@ -4076,7 +4087,7 @@ class FamilyPanel extends HTMLElement {
       ? `<ul class="rows">${d.all_chores
           .map((c) => `<li><span class="grow">${c.emoji ? `${emo(c.emoji)} ` : ""}<b>${esc(c.name)}</b>${c.enabled ? "" : " (off)"}
               <small>+${pts(c.points)} · ${esc(repeatText(c))}${whenShown(c) ? ` · ${esc(whenShown(c))}` : ""}${c.from_date ? ` · ${esc(monthDayText(c.from_date))} to ${esc(monthDayText(c.until_date))}` : ""} · ${esc(c.turns ? `Turns: ${this._whoText(c.members)}` : c.grab || !c.members?.length ? `Up for grabs: ${this._whoText(c.members)}` : `Their own: ${this._whoText(c.members)}`)}${c.todo_list ? ` · on ${esc(this._listName(c.todo_list))}` : ""}</small></span>
-              ${this._poolStatus(c)}
+              ${this._poolStatus(c)}${this._demandStatus(c)}
               <button class="btn" data-edit="chores" data-id="${esc(c.id)}">Edit</button>
               <button class="btn bad" data-delete="chores" data-id="${esc(c.id)}">Delete</button></li>${this._inline("chores", c.id)}`)
           .join("")}</ul>`
@@ -4979,6 +4990,11 @@ class FamilyPanel extends HTMLElement {
     }
     if ("meeting" in ds) {
       this._openReport(0, true);
+      return;
+    }
+    if (ds.offer) {
+      const off = "offerOff" in ds;
+      this._call({ type: `${DOMAIN}/chore/offer`, chore_id: ds.offer, offer: !off }, off ? "Taken back." : "Added. It's on the Family dashboard now.");
       return;
     }
     if (ds.unpick) {

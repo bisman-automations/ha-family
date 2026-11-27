@@ -5,15 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.1] - 2026-11-27
+
+### Changed
+
+- **Quieter Live Activities.** The chores Live Activity no longer makes a sound each time a chore is ticked off: updates go to iPhones as quiet updates (which iOS is also less likely to hold back) and buzz only once on Android. **All done** still makes a sound.
+
 ## [2.17.0] - 2026-11-27
 
 ### Added
 
 - **Check chores with a tap on iPhone.** The Home Assistant app on iPhone, iPad and Mac can now show a notification's buttons when you tap it (its **Show actions when tapped** setting), but only when tapping doesn't already open a page. Family's notifications opened the parent controls, so the setting did nothing for them. On those phones, notifications with buttons (**Done right** / **Didn't happen**, **Handed out**, **Yes** / **No**) now leave the tap to the app and have an **Open** button for the parent controls. Android phones are unchanged.
-
-### Changed
-
-- **Quieter Live Activities.** The chores Live Activity no longer makes a sound each time a chore is ticked off: updates go to iPhones as quiet updates (which iOS is also less likely to hold back) and buzz only once on Android. **All done** still makes a sound.
 
 ## [2.16.2] - 2026-11-21
 
@@ -553,6 +555,7 @@ One Family page for everyone: the Parents sidebar page is now part of it. Nothin
   - **Home controls.** Parents put scenes, scripts, lights, switches, blinds, locks, speakers and more on the Family dashboard, where a tap uses them. Sensors, thermostats and the weather can be shown too. Each can be shown to everyone or to chosen people, and can ask "Are you sure?" first.
   - A **points** sensor for each family member, the `family.add_points` action, and events for chores and rewards.
 
+[2.17.1]: https://github.com/bisman-automations/ha-family/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/bisman-automations/ha-family/compare/v2.16.2...v2.17.0
 [2.16.2]: https://github.com/bisman-automations/ha-family/compare/v2.16.1...v2.16.2
 [2.16.1]: https://github.com/bisman-automations/ha-family/compare/v2.16.0...v2.16.1

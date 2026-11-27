@@ -1,11 +1,17 @@
 """More than one family goal at a time.
 
 ``settings.family_goals`` is a list of {id, name, emoji, target, since,
-reached_at}. Every goal counts the chore and bonus points everyone earned
+reached_at, reward}. Every goal counts the chore and bonus points everyone earned
 since it began (``model.goal_progress``); nobody spends any, so the same
 points count toward each goal. Before 2.13.0 there was one goal in
 ``settings.family_goal``; it becomes the first one on load. Reaching a goal
 fires ``family_goal_reached`` once, with the goal's id.
+
+A goal's ``reward`` (a reward id, or None) is unlocked when it's reached:
+one person it's for uses it once, for no points
+(``FamilyManager.async_claim_goal_reward``). That use is a reward entry with
+``goal_id`` and ``goal_since``, so starting the goal again unlocks it again
+and an undo puts it back.
 """
 
 from __future__ import annotations
@@ -78,6 +84,10 @@ class FamilyGoals:
         goal["members"] = picked if len(picked) >= 2 else None
         if raw.get("members") and not goal["kids"] and goal["members"] is None:
             raise _error("A goal for some of the family needs two or more people")
+        reward_id = raw.get("reward") or None
+        if reward_id and not any(r["id"] == reward_id for r in self.manager.rewards):
+            raise _error("That reward isn't on the list any more")
+        goal["reward"] = reward_id
         now = dt_util.now().isoformat()
         if goal_id:
             old = self._get(goal_id)
@@ -109,6 +119,44 @@ class FamilyGoals:
         if goal.get("kids"):
             return self.manager.kid_ids()
         return goal.get("members")
+
+    def _reward(self, goal: dict[str, Any]) -> dict[str, Any] | None:
+        """The reward reaching it unlocks, while it's still on the list."""
+        reward_id = goal.get("reward")
+        if not reward_id:
+            return None
+        return next((r for r in self.manager.rewards if r["id"] == reward_id), None)
+
+    def claim(self, goal: dict[str, Any]) -> dict[str, Any] | None:
+        """The entry that used this round's reward, if anyone has."""
+        since = goal.get("since")
+        for entry in self.manager.ledger.kind(model.KIND_REWARD):
+            if entry.get("goal_id") == goal["id"] and entry.get("goal_since") == since:
+                return entry
+        return None
+
+    def claimable(
+        self, goal_id: str, member_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The goal and its reward, when this member may use it now."""
+        goal = self._get(goal_id)
+        reward = self._reward(goal)
+        if reward is None:
+            raise _error("This goal has no reward to use")
+        if not goal.get("reached_at") and self.progress(goal) < goal["target"]:
+            raise _error(f"{goal['name']} isn't reached yet")
+        who = self.who(goal)
+        if who is not None and member_id not in who:
+            raise _error(f"{reward['name']} is for the people working on this goal")
+        if self.claim(goal) is not None:
+            raise _error(f"{reward['name']} has been used already")
+        return goal, reward
+
+    def forget_reward(self, reward_id: str) -> None:
+        """A deleted reward: goals that unlocked it unlock nothing now."""
+        for goal in self.items:
+            if goal.get("reward") == reward_id:
+                goal["reward"] = None
 
     def forget_member(self, member_id: str) -> None:
         for goal in self.items:
@@ -159,6 +207,7 @@ class FamilyGoals:
                     "target": goal["target"],
                     "members": goal.get("members"),
                     "kids": bool(goal.get("kids")),
+                    "reward": (self._reward(goal) or {}).get("name"),
                 },
             )
 
@@ -172,6 +221,8 @@ class FamilyGoals:
 
     def _view(self, goal: dict[str, Any]) -> dict[str, Any]:
         progress = self.progress(goal)
+        reward = self._reward(goal)
+        claim = self.claim(goal) if reward else None
         return {
             "id": goal["id"],
             "name": goal["name"],
@@ -185,6 +236,16 @@ class FamilyGoals:
             "milestone": max(goal.get("milestones") or [0]),
             # Whose points count and whose pages show it (None: everyone's).
             "who": self.who(goal),
+            # What reaching it unlocks, and who used it this time round.
+            "reward": {
+                "id": reward["id"],
+                "name": reward["name"],
+                "emoji": reward.get("emoji"),
+            }
+            if reward
+            else None,
+            "reward_used_by": claim["member"] if claim else None,
+            "reward_given": claim.get("given") if claim else None,
         }
 
     def snapshot(self) -> list[dict[str, Any]]:

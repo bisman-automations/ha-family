@@ -2220,23 +2220,7 @@ class FamilyManager:
         if member_id in model.reward_used_by(reward, self.entries, dt_util.now()):
             when = "today" if reward.get("limit") == model.REPEAT_DAILY else "this week"
             raise FamilyError(f"{member['name']} already had {reward['name']} {when}")
-        tv: dict[str, Any] = {}
-        kind = reward.get("kind")
-        if kind == model.REWARD_TV_TIME:
-            await self._async_give_tv_time(reward, member)
-            tv = {
-                "tv": reward["tv"],
-                "minutes": int(reward.get("minutes", 0)),
-                "whole_home": bool(reward.get("whole_home", False)),
-            }
-        elif kind == model.REWARD_MUSIC_TIME:
-            await self._async_give_music_time(reward, member)
-            tv = {
-                "speaker": reward["speaker"],
-                "minutes": int(reward.get("minutes", 0)),
-                "whole_home": bool(reward.get("whole_home", False)),
-            }
-        given_now = kind in (model.REWARD_TV_TIME, model.REWARD_MUSIC_TIME)
+        tv, given_now = await self._async_give_now(reward, member)
         entry = {
             "id": _id(),
             "at": _now_iso(),
@@ -2274,6 +2258,72 @@ class FamilyManager:
             self._redeemed_event(
                 member["name"], member_id, reward, cost, self.points(member_id)
             ),
+        )
+        return entry
+
+    async def _async_give_now(
+        self, reward: dict[str, Any], member: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool]:
+        """Give TV or music time straight away; other rewards wait for a parent.
+
+        Returns what the entry keeps so an undo can take the time back, and
+        whether it's already given.
+        """
+        kind = reward.get("kind")
+        if kind == model.REWARD_TV_TIME:
+            await self._async_give_tv_time(reward, member)
+            return {
+                "tv": reward["tv"],
+                "minutes": int(reward.get("minutes", 0)),
+                "whole_home": bool(reward.get("whole_home", False)),
+            }, True
+        if kind == model.REWARD_MUSIC_TIME:
+            await self._async_give_music_time(reward, member)
+            return {
+                "speaker": reward["speaker"],
+                "minutes": int(reward.get("minutes", 0)),
+                "whole_home": bool(reward.get("whole_home", False)),
+            }, True
+        return {}, False
+
+    async def async_claim_goal_reward(
+        self, goal_id: str, member_id: str
+    ) -> dict[str, Any]:
+        """Use the reward a reached family goal unlocked: once, for no points.
+
+        It's handed out like any reward (TV and music time straight away,
+        anything else by a parent), and an undo puts it back.
+        """
+        member = self.member(member_id)
+        goal, reward = self.goals.claimable(goal_id, member_id)
+        tv, given_now = await self._async_give_now(reward, member)
+        entry = {
+            "id": _id(),
+            "at": _now_iso(),
+            "kind": model.KIND_REWARD,
+            "member": member_id,
+            "title": f"{reward['name']} ({goal['name']})",
+            "points": 0,
+            "reward_id": reward["id"],
+            "goal_id": goal["id"],
+            "goal_since": goal.get("since"),
+            "given": model.GIVEN_DONE if given_now else model.GIVEN_PENDING,
+            **tv,
+        }
+        self.entries.append(entry)
+        self._changed()
+        if not given_now:
+            self.notices.reward_to_give(entry, member)
+            self._shop_for(reward, member["name"])
+        self.hass.bus.async_fire(
+            EVENT_REWARD_REDEEMED,
+            {
+                **self._redeemed_event(
+                    member["name"], member_id, reward, 0, self.points(member_id)
+                ),
+                "goal": goal["name"],
+                "goal_id": goal["id"],
+            },
         )
         return entry
 
@@ -3092,6 +3142,7 @@ class FamilyManager:
             for member in self.members:
                 if member.get("goal") == item_id:
                     member["goal"] = None
+            self.goals.forget_reward(item_id)
         if collection == "todo_lists":
             self._watch_todo_lists()
             self.todo_items.pop(item_id, None)

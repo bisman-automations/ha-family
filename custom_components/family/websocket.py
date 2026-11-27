@@ -117,6 +117,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_pet_care,
         ws_goal_save,
         ws_goal_delete,
+        ws_goal_claim,
         ws_auction_start,
         ws_auction_bid,
         ws_auction_close,
@@ -1690,6 +1691,7 @@ async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("restart"): bool,
         vol.Optional("members"): vol.Any(None, [str]),
         vol.Optional("kids"): bool,
+        vol.Optional("reward"): vol.Any(None, str),
     }
 )
 @_require_parent
@@ -1704,6 +1706,7 @@ async def ws_goal_save(hass, connection, msg, manager) -> dict[str, Any]:
             "target": msg["target"],
             "members": msg.get("members"),
             "kids": bool(msg.get("kids")),
+            "reward": msg.get("reward"),
         },
         msg.get("item_id"),
         bool(msg.get("restart")),
@@ -1726,6 +1729,22 @@ async def ws_goal_delete(hass, connection, msg, manager) -> dict[str, Any]:
     manager.goals.delete(msg["item_id"])
     manager.changed()
     return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/family_goal/claim",
+        vol.Optional(PASS): str,
+        vol.Required("goal_id"): str,
+        vol.Required("member_id"): str,
+    }
+)
+@websocket_api.async_response
+@_handler
+async def ws_goal_claim(hass, connection, msg, manager) -> dict[str, Any]:
+    """Use the reward a reached goal unlocked (everyone, like redeeming)."""
+    entry = await manager.async_claim_goal_reward(msg["goal_id"], msg["member_id"])
+    return {"entry": entry}
 
 
 @websocket_api.websocket_command(

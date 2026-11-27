@@ -498,6 +498,7 @@ const STYLES = `
   @keyframes cheer { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .celebrate .confetti { display: none; } .celebrate .cheer { animation: none; } }
   .going-tile { gap: 6px; }
+  .going-tile .goal-claim { margin-top: 6px; width: 100%; }
   .going-tile.won { justify-content: center; }
   .goal-mini { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 14px; }
   .goal-card {
@@ -2960,8 +2961,22 @@ class FamilyPanel extends HTMLElement {
       <span class="label">${g.reached ? `We did it: ${esc(g.name)}!` : esc(g.name)}</span>
       ${this._bar(g.progress, g.target)}
       ${!g.reached && g.milestone ? `<span class="sub milestone">${{ 25: "A quarter of the way! 🎈", 50: "Halfway there! 🎉", 75: "Three quarters done! 🚀" }[g.milestone] || ""}</span>` : ""}
-      <span class="sub">${g.reached ? (g.kids ? "The kids' chores got us there." : "Everyone's chores got us there.") : `${g.kids ? "Just the kids" : g.who ? esc(namesText(g.who.map((id) => this._memberById(id)?.name).filter(Boolean))) : "Together"}: ${g.progress} of ${g.target} points · ${left} to go`}</span></div>`;
+      <span class="sub">${g.reached ? (g.kids ? "The kids' chores got us there." : "Everyone's chores got us there.") : `${g.kids ? "Just the kids" : g.who ? esc(namesText(g.who.map((id) => this._memberById(id)?.name).filter(Boolean))) : "Together"}: ${g.progress} of ${g.target} points · ${left} to go`}</span>${this._goalReward(g, member)}</div>`;
     });
+  }
+
+  // What a goal unlocks: a reward to use once it's reached, then who used it.
+  _goalReward(g, member) {
+    const r = g.reward;
+    if (!r) return "";
+    const name = `${emoText(r.emoji)} ${r.name}`.trim();
+    if (!g.reached) return `<span class="sub goal-unlock">🔒 Unlocks ${esc(name)}</span>`;
+    if (g.reward_used_by) {
+      const who = this._memberById(g.reward_used_by)?.name || "Someone";
+      return `<span class="sub goal-unlock">🎁 ${esc(who)} used ${esc(name)}${g.reward_given === "given" ? "" : " · a parent will hand it out"}</span>`;
+    }
+    const mayUse = !member || !g.who || g.who.includes(member.id);
+    return mayUse ? `<button class="btn primary goal-claim" data-goal-claim="${esc(g.id)}" ${this._busy ? "disabled" : ""}>🎁 Use it: ${esc(name)}</button>` : "";
   }
 
   // The saving bonus they'd get by keeping their points until it's given.
@@ -3521,11 +3536,12 @@ class FamilyPanel extends HTMLElement {
       const quest = s.what === "quest" ? (d.quests || []).find((q) => q.id === s.id) : null;
       const pet = s.what === "pet" ? (d.pets || []).find((p) => p.id === s.id) : null;
       const trade = s.what === "trade" ? (d.trades || []).find((t) => t.id === s.id) : null;
-      const allowed = (quest || pet)?.members;
+      const goal = s.what === "goal" ? (d.family_goals || []).find((g) => g.id === s.id) : null;
+      const allowed = goal ? goal.who : (quest || pet)?.members;
       const people = d.members.filter((m) => (!allowed || allowed.includes(m.id)) && (!trade || m.id !== trade.from));
-      const what = trade ? `${trade.chore} from ${trade.from_name}` : quest ? `${quest.steps[quest.next]?.name || ""} (${quest.name})` : pet ? `${pet.task} ${pet.name}` : "";
+      const what = goal ? `${goal.reward?.name || ""} (${goal.name})` : trade ? `${trade.chore} from ${trade.from_name}` : quest ? `${quest.steps[quest.next]?.name || ""} (${quest.name})` : pet ? `${pet.task} ${pet.name}` : "";
       return `<div class="sheet-bg" data-close><div class="sheet" role="dialog" aria-modal="true" aria-label="Who did it">
-        <h3>${trade ? "Who's taking it?" : "Who did it?"}</h3><p class="muted">${esc(what)}</p>
+        <h3>${goal ? "Who's using it?" : trade ? "Who's taking it?" : "Who did it?"}</h3><p class="muted">${esc(what)}</p>
         <div class="people small-people">${people.map((m) => `<button class="person pick" style="--c:${esc(m.color)}" data-who-did="${esc(m.id)}">${this._avatar(m, true)}<span class="name">${esc(m.name)}</span></button>`).join("")}</div>
         <div class="actions"><button class="big" data-close>Cancel</button></div></div></div>`;
     }
@@ -4327,7 +4343,7 @@ class FamilyPanel extends HTMLElement {
     const goals = this._data.family_goals || [];
     const editing = this._goalEdit;
     const rows = goals.map((g) => `<li class="goal-status"><span class="grow">${emo(g.emoji, "🏆")} <b>${esc(g.name)}</b>${this._bar(g.progress, g.target)}
-        <small>${g.kids ? "Just the kids · " : g.members ? `${esc(namesText(g.members.map((id) => this._memberById(id)?.name).filter(Boolean)))} · ` : ""}${g.reached ? "Reached! Hand it out, then start it again or remove it." : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span>
+        <small>${g.kids ? "Just the kids · " : g.members ? `${esc(namesText(g.members.map((id) => this._memberById(id)?.name).filter(Boolean)))} · ` : ""}${g.reward ? `Unlocks ${esc(g.reward.name)} · ` : ""}${g.reached ? (g.reward ? (g.reward_used_by ? `Reached, and ${esc(this._memberById(g.reward_used_by)?.name || "someone")} used the reward. Start it again or remove it.` : "Reached! The reward is waiting on the Family dashboard.") : "Reached! Hand it out, then start it again or remove it.") : `${g.progress} of ${g.target} points together since ${esc(whenText(g.since))}`}</small></span>
         <button class="btn" data-goal-edit="${esc(g.id)}">${g.reached ? "Start again" : "Change"}</button><button class="btn bad" data-goal-remove="${esc(g.id)}">Remove</button></li>`).join("");
     const g = editing === "new" ? {} : goals.find((x) => x.id === editing);
     const form = g
@@ -4344,6 +4360,10 @@ class FamilyPanel extends HTMLElement {
             <option value="some" ${g.members ? "selected" : ""}>Some of us</option></select>
             <small>Just the kids: only their points count, and it doesn't show on the parents' own pages.</small></label>
           <div class="field goal-people" ${g.members ? "" : "hidden"}><span>Who</span>${this._whoChecks(g.members || []).replace("None ticked: anyone can do it.", "Tick two or more.")}</div>
+          <label class="field"><span>Reward when it's reached</span><select name="reward">
+            <option value="">None</option>
+            ${(this._data.rewards || []).map((r) => `<option value="${esc(r.id)}" ${g.reward?.id === r.id ? "selected" : ""}>${esc(`${emoText(r.emoji)} ${r.name}`.trim())}</option>`).join("")}</select>
+            <small>Reaching the goal unlocks it: one of the people it's for uses it once, for no points, and it's handed out like any reward. Starting again unlocks it again.</small></label>
           ${g.id ? `<label class="check"><input type="checkbox" name="restart" ${g.reached ? "checked" : ""}> Start counting again from now</label>` : ""}
           <div class="form-actions"><button class="btn primary" type="submit">Save goal</button><button class="btn" type="button" data-goal-edit="">Cancel</button></div></form>`
       : goals.length < 6 ? `<div class="form-actions"><button class="btn primary" data-goal-edit="new">${goals.length ? "Add another goal" : "Set a family goal"}</button></div>` : "";
@@ -5094,6 +5114,16 @@ class FamilyPanel extends HTMLElement {
       this._call({ type: `${DOMAIN}/wish`, member_id: member.id, reward_id: ds.wish, on }, on ? "♥ On your wishlist." : "Off your wishlist.");
       return;
     }
+    if (ds.goalClaim) {
+      const goal = (this._data.family_goals || []).find((g) => g.id === ds.goalClaim);
+      if (this._member) this._claimGoal(ds.goalClaim, this._member);
+      else if (goal?.who?.length === 1) this._claimGoal(ds.goalClaim, goal.who[0]);
+      else {
+        this._sheet = { type: "who", what: "goal", id: ds.goalClaim };
+        this._renderOverlay();
+      }
+      return;
+    }
     if (ds.quest) {
       if (this._member) this._call({ type: `${DOMAIN}/quest/step`, quest_id: ds.quest, member_id: this._member }, "Step done! 🗺️");
       else {
@@ -5114,7 +5144,8 @@ class FamilyPanel extends HTMLElement {
       const s = this._sheet;
       this._sheet = null;
       this._renderOverlay();
-      if (s.what === "trade") this._call({ type: `${DOMAIN}/trade/take`, trade_id: s.id, member_id: ds.whoDid }, "Taken. A parent will say yes or no.");
+      if (s.what === "goal") this._claimGoal(s.id, ds.whoDid);
+      else if (s.what === "trade") this._call({ type: `${DOMAIN}/trade/take`, trade_id: s.id, member_id: ds.whoDid }, "Taken. A parent will say yes or no.");
       else if (s.what === "theme") this._call({ type: `${DOMAIN}/theme/keep`, member_id: ds.whoDid }, "Well done! 🌟");
       else if (s.what === "quest") this._call({ type: `${DOMAIN}/quest/step`, quest_id: s.id, member_id: ds.whoDid }, "Step done! 🗺️");
       else this._call({ type: `${DOMAIN}/pet/care`, pet_id: s.id, slot: s.slot, member_id: ds.whoDid }, "Thank you! 🐾");
@@ -5715,7 +5746,7 @@ class FamilyPanel extends HTMLElement {
     }
     if (form.dataset.goalForm !== undefined) {
       const v = this._formValues(form);
-      const ok = await this._call({ type: `${DOMAIN}/family_goal/save`, item_id: v.id || null, name: v.name, emoji: v.emoji || null, target: Math.round(Number(v.target) || 0), restart: !!v.restart, kids: v.who === "kids", members: v.who === "some" ? v.members || [] : null }, "Saved.");
+      const ok = await this._call({ type: `${DOMAIN}/family_goal/save`, item_id: v.id || null, name: v.name, emoji: v.emoji || null, target: Math.round(Number(v.target) || 0), restart: !!v.restart, kids: v.who === "kids", members: v.who === "some" ? v.members || [] : null, reward: v.reward || null }, "Saved.");
       if (ok) {
         this._goalEdit = null;
         this._render();
@@ -6082,6 +6113,22 @@ class FamilyPanel extends HTMLElement {
     } finally {
       this._busy = false;
       this._renderOverlay();
+    }
+  }
+
+  // Use the reward a reached goal unlocked; the toast can undo it.
+  async _claimGoal(goalId, memberId) {
+    if (this._busy) return;
+    this._busy = true;
+    try {
+      const reply = await this._ws({ type: `${DOMAIN}/family_goal/claim`, goal_id: goalId, member_id: memberId });
+      const entry = reply?.entry;
+      this._toast(entry?.given === "given" ? "Enjoy! 🎉" : "Enjoy! A parent will hand it out. 🎉", false, entry?.id || null);
+      await this._load();
+    } catch (err) {
+      this._toast(err?.message || String(err), true);
+    } finally {
+      this._busy = false;
     }
   }
 

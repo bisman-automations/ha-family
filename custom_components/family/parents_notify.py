@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from . import model
 from .const import ACTION_PREFIX, SUMMARY_HOUR, SUMMARY_WEEKDAY
@@ -41,6 +41,32 @@ ACTION_NO = f"{ACTION_PREFIX}NO_"
 
 def tag_for(entry_id: str) -> str:
     return f"family-{entry_id}"
+
+
+# Apple's Companion app: a tap that opens a page never shows the buttons,
+# even with its "Show actions when tapped" setting on. It counts url, uri
+# and clickAction as the tap's own job (home-assistant/iOS#5873).
+APPLE_SYSTEMS = frozenset({"ios", "ipados", "macos", "watchos", "visionos"})
+OPEN_TITLE = "Open"
+
+
+def for_apple(data: dict[str, Any]) -> dict[str, Any]:
+    """The payload for an Apple device: buttons show when it's tapped.
+
+    A notification with buttons and a page to open drops the page from the
+    tap and gets an **Open** button for it instead. Anything else (no
+    buttons, no page, a Live Activity) is sent as it is.
+    """
+    inner = data.get("data") or {}
+    url = inner.get("url") or inner.get("clickAction")
+    if not inner.get("actions") or not url or inner.get("live_update"):
+        return data
+    changed = {k: v for k, v in inner.items() if k not in ("url", "clickAction", "uri")}
+    changed["actions"] = [
+        *inner["actions"],
+        {"action": "URI", "title": OPEN_TITLE, "uri": url},
+    ]
+    return {**data, "data": changed}
 
 
 def target_name(service: str) -> str:
@@ -72,11 +98,24 @@ class ParentNotices:
         # Never slow down a tap on the shared screen.
         self.manager.entry.async_create_background_task(self.hass, coro, name)
 
+    def _apple_targets(self) -> set[str]:
+        """Notify actions of the Companion app on an iPhone, iPad or Mac."""
+        found: set[str] = set()
+        for entry in self.hass.config_entries.async_entries("mobile_app"):
+            name = entry.data.get("device_name")
+            system = str(entry.data.get("os_name") or "").lower()
+            if name and system in APPLE_SYSTEMS:
+                found.add(f"mobile_app_{slugify(name)}")
+        return found
+
     async def _send(self, data: dict[str, Any]) -> None:
-        for target in self.targets():
+        targets = self.targets()
+        apple = self._apple_targets() if targets else set()
+        for target in targets:
+            payload = for_apple(data) if target in apple else data
             try:
                 await self.hass.services.async_call(
-                    "notify", target, data, blocking=True
+                    "notify", target, payload, blocking=True
                 )
             except HomeAssistantError as err:
                 _LOGGER.warning("Family: couldn't notify %s: %s", target, err)

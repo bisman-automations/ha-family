@@ -1731,3 +1731,56 @@ async def test_chores_and_rewards_can_use_icons(hass: HomeAssistant, client):
         )
     )["item"]
     assert member["emoji"] == "🦖🦖🦖🦖"
+
+
+async def test_iphones_show_the_buttons_when_tapped(
+    hass: HomeAssistant, client, hass_admin_user
+):
+    """On Apple's Companion app a tap that opens a page never shows the
+    buttons, so an iPhone gets an Open button instead; Android is unchanged."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry  # noqa: PLC0415
+
+    from custom_components.family.parents_notify import for_apple  # noqa: PLC0415
+
+    for name, system in (("Dads phone", "iOS"), ("Moms phone", "Android")):
+        MockConfigEntry(
+            domain="mobile_app",
+            data={"device_name": name, "os_name": system},
+        ).add_to_hass(hass)
+    iphone = async_mock_service(hass, "notify", "mobile_app_dads_phone")
+    android = async_mock_service(hass, "notify", "mobile_app_moms_phone")
+    alex, _sam = await _family(client)
+    chore = (
+        await client.ok("save", collection="chores", item={"name": "Bed", "points": 5})
+    )["item"]
+    await client.ok(
+        "settings",
+        notify_targets=["mobile_app_dads_phone", "mobile_app_moms_phone"],
+        notify_done=True,
+    )
+    done = await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    entry_id = done["entry"]["id"]
+    await hass.async_block_till_done()
+
+    [apple] = iphone
+    assert "url" not in apple.data["data"]
+    assert "clickAction" not in apple.data["data"]
+    assert apple.data["data"]["actions"] == [
+        {"action": f"FAMILY_RIGHT_{entry_id}", "title": "Done right"},
+        {
+            "action": f"FAMILY_DIDNT_{entry_id}",
+            "title": "Didn't happen",
+            "destructive": True,
+        },
+        {"action": "URI", "title": "Open", "uri": "/family-parents"},
+    ]
+    [other] = android
+    assert other.data["data"]["clickAction"] == "/family-parents"
+    assert other.data["data"]["url"] == "/family-parents"
+    assert len(other.data["data"]["actions"]) == 2
+
+    # No buttons, or a Live Activity: sent as it is.
+    plain = {"message": "x", "data": {"url": "/family-parents"}}
+    assert for_apple(plain) is plain
+    live = {"message": "x", "data": {"live_update": True, "url": "/a", "actions": [{}]}}
+    assert for_apple(live) is live

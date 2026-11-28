@@ -184,6 +184,25 @@ class ParentNotices:
         self._spawn(self._send(data), "family_notify_request")
 
     @callback
+    def goal_reached(self, goal: dict[str, Any], reward: str, each: bool) -> None:
+        """A family goal was reached and its reward is waiting to be used."""
+        if not self._settings.get("notify_rewards") or not self.targets():
+            return
+        data = {
+            "title": f"Goal reached: {goal['name']}",
+            "message": f"{reward} is unlocked. "
+            + ("Each of them can use it once" if each else "One of them can use it")
+            + " on the Family dashboard.",
+            "data": {
+                "tag": tag_for(f"goal-{goal['id']}"),
+                "group": "family",
+                "url": PARENTS_PATH,
+                "clickAction": PARENTS_PATH,
+            },
+        }
+        self._spawn(self._send(data), "family_notify_goal")
+
+    @callback
     def chore_idea(self, idea: dict[str, Any], member: dict[str, Any]) -> None:
         """A child offered to do a chore that isn't on the list."""
         if not self._settings.get("notify_rewards") or not self.targets():

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Family goals can unlock a reward.** Pick a **Reward when it's reached** for a goal. Until it's reached the goal shows the reward locked; then one of the people the goal is for taps **Use it** on the Family dashboard. It costs no points and can be used once. TV and music time are given straight away, and anything else waits for a parent to hand it out, like any reward. **Undo** puts it back, and **Start again** locks it until the goal is reached again.
+- **One each.** Tick **One each** under the goal's reward and everyone the goal is for can use it once, instead of one use for the whole goal. The goal shows who has used it and how many are still to go.
+- **Parents are told when a reward unlocks.** With reward notifications on, parents' phones get a notification when a goal with a reward is reached.
 
 ## [2.18.0] - 2026-11-27
 

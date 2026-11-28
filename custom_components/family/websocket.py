@@ -1692,6 +1692,7 @@ async def ws_pet_care(hass, connection, msg, manager) -> dict[str, Any]:
         vol.Optional("members"): vol.Any(None, [str]),
         vol.Optional("kids"): bool,
         vol.Optional("reward"): vol.Any(None, str),
+        vol.Optional("reward_each"): bool,
     }
 )
 @_require_parent
@@ -1707,6 +1708,7 @@ async def ws_goal_save(hass, connection, msg, manager) -> dict[str, Any]:
             "members": msg.get("members"),
             "kids": bool(msg.get("kids")),
             "reward": msg.get("reward"),
+            "reward_each": bool(msg.get("reward_each")),
         },
         msg.get("item_id"),
         bool(msg.get("restart")),

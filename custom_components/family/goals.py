@@ -9,7 +9,9 @@ fires ``family_goal_reached`` once, with the goal's id.
 
 A goal's ``reward`` (a reward id, or None) is unlocked when it's reached:
 one person it's for uses it once, for no points
-(``FamilyManager.async_claim_goal_reward``). That use is a reward entry with
+(``FamilyManager.async_claim_goal_reward``), or with ``reward_each`` each of
+them uses it once. Parents are told when it unlocks
+(``notices.goal_reached``). A use is a reward entry with
 ``goal_id`` and ``goal_since``, so starting the goal again unlocks it again
 and an undo puts it back.
 """
@@ -88,6 +90,7 @@ class FamilyGoals:
         if reward_id and not any(r["id"] == reward_id for r in self.manager.rewards):
             raise _error("That reward isn't on the list any more")
         goal["reward"] = reward_id
+        goal["reward_each"] = bool(reward_id and raw.get("reward_each"))
         now = dt_util.now().isoformat()
         if goal_id:
             old = self._get(goal_id)
@@ -127,13 +130,14 @@ class FamilyGoals:
             return None
         return next((r for r in self.manager.rewards if r["id"] == reward_id), None)
 
-    def claim(self, goal: dict[str, Any]) -> dict[str, Any] | None:
-        """The entry that used this round's reward, if anyone has."""
+    def claims(self, goal: dict[str, Any]) -> list[dict[str, Any]]:
+        """The entries that used this round's reward, oldest first."""
         since = goal.get("since")
-        for entry in self.manager.ledger.kind(model.KIND_REWARD):
-            if entry.get("goal_id") == goal["id"] and entry.get("goal_since") == since:
-                return entry
-        return None
+        return [
+            entry
+            for entry in self.manager.ledger.kind(model.KIND_REWARD)
+            if entry.get("goal_id") == goal["id"] and entry.get("goal_since") == since
+        ]
 
     def claimable(
         self, goal_id: str, member_id: str
@@ -148,7 +152,12 @@ class FamilyGoals:
         who = self.who(goal)
         if who is not None and member_id not in who:
             raise _error(f"{reward['name']} is for the people working on this goal")
-        if self.claim(goal) is not None:
+        used = self.claims(goal)
+        if goal.get("reward_each"):
+            if any(entry["member"] == member_id for entry in used):
+                name = self.manager.member(member_id)["name"]
+                raise _error(f"{name} used {reward['name']} already")
+        elif used:
             raise _error(f"{reward['name']} has been used already")
         return goal, reward
 
@@ -199,6 +208,10 @@ class FamilyGoals:
             if progress < goal["target"]:
                 continue
             goal["reached_at"] = dt_util.now().isoformat()
+            if reward := self._reward(goal):
+                self.manager.notices.goal_reached(
+                    goal, reward["name"], bool(goal.get("reward_each"))
+                )
             self.manager.hass.bus.async_fire(
                 EVENT_GOAL_REACHED,
                 {
@@ -222,7 +235,7 @@ class FamilyGoals:
     def _view(self, goal: dict[str, Any]) -> dict[str, Any]:
         progress = self.progress(goal)
         reward = self._reward(goal)
-        claim = self.claim(goal) if reward else None
+        used = self.claims(goal) if reward else []
         return {
             "id": goal["id"],
             "name": goal["name"],
@@ -244,8 +257,11 @@ class FamilyGoals:
             }
             if reward
             else None,
-            "reward_used_by": claim["member"] if claim else None,
-            "reward_given": claim.get("given") if claim else None,
+            # One use for the goal, or one each (``reward_each``).
+            "reward_each": bool(goal.get("reward_each")) and reward is not None,
+            "reward_used_by": used[0]["member"] if used else None,
+            "reward_given": used[0].get("given") if used else None,
+            "reward_used": [entry["member"] for entry in used],
         }
 
     def snapshot(self) -> list[dict[str, Any]]:

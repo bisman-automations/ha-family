@@ -162,3 +162,66 @@ async def test_deleting_the_reward_or_saving_without_one(
     assert not res["success"] and "no reward" in res["error"]["message"]
     plain = (await client.ok("family_goal/save", name="Picnic", target=1))["goal"]
     assert plain["reward"] is None
+
+
+async def test_one_each_and_parents_are_told(hass: HomeAssistant, client) -> None:
+    from pytest_homeassistant_custom_component.common import async_mock_service
+
+    sent = async_mock_service(hass, "notify", "mobile_app_parent")
+    await client.ok(
+        "settings", notify_targets=["mobile_app_parent"], notify_rewards=True
+    )
+    alex, sam = await _members(client, "Alex", "Sam")
+    treat = await _reward(client, name="Ice cream", points=20, kind="custom")
+    goal = (
+        await client.ok(
+            "family_goal/save",
+            name="Clean week",
+            target=2,
+            members=[alex, sam],
+            reward=treat["id"],
+            reward_each=True,
+        )
+    )["goal"]
+    assert goal["reward_each"]
+    chore = (
+        await client.ok("save", collection="chores", item={"name": "Bed", "points": 2})
+    )["item"]
+    await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await hass.async_block_till_done()
+    told = [c for c in sent if c.data["title"] == "Goal reached: Clean week"]
+    assert len(told) == 1
+    assert "Each of them can use it once" in told[0].data["message"]
+
+    await client.ok("family_goal/claim", goal_id=goal["id"], member_id=alex)
+    res = await client("family_goal/claim", goal_id=goal["id"], member_id=alex)
+    assert (
+        not res["success"]
+        and "Alex used Ice cream already" in (res["error"]["message"])
+    )
+    await client.ok("family_goal/claim", goal_id=goal["id"], member_id=sam)
+    view = await _goal(client)
+    assert view["reward_each"] and view["reward_used"] == [alex, sam]
+
+    # Told once, not on every change after.
+    await client.ok("adjust", member_id=alex, points=1, reason="x")
+    await hass.async_block_till_done()
+    assert len([c for c in sent if c.data["title"].startswith("Goal reached")]) == 1
+
+
+async def test_no_reward_no_notice(hass: HomeAssistant, client) -> None:
+    from pytest_homeassistant_custom_component.common import async_mock_service
+
+    sent = async_mock_service(hass, "notify", "mobile_app_parent")
+    await client.ok(
+        "settings", notify_targets=["mobile_app_parent"], notify_rewards=True
+    )
+    (alex,) = await _members(client, "Alex")
+    await client.ok("family_goal/save", name="Picnic", target=1, reward_each=True)
+    chore = (
+        await client.ok("save", collection="chores", item={"name": "Bed", "points": 1})
+    )["item"]
+    await client.ok("complete", member_id=alex, chore_id=chore["id"])
+    await hass.async_block_till_done()
+    assert not [c for c in sent if c.data["title"].startswith("Goal reached")]
+    assert (await _goal(client))["reward_each"] is False
